@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="brochain">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <circle cx="158" cy="256" r="58" fill="#38bdf8"/>
+  <circle cx="354" cy="158" r="58" fill="#38bdf8"/>
+  <circle cx="354" cy="354" r="58" fill="#38bdf8"/>
+  <path d="M208 234l94-48M208 278l94 48" stroke="#f8fafc" stroke-width="32" stroke-linecap="round"/>
+</svg>

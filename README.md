@@ -6,11 +6,22 @@ overview
 
 peer-to-peer networking application for communication and content exchange between real people.
 
+using brochain
+--------------
+
+- on a device without accounts, create an account with a name and password. The password-strength meter helps assess the chosen password.
+- on later visits, choose an account, unlock it with its password, or create another account.
+- each account can be exported as an encrypted account file or deleted from the device.
+- after unlocking an account, choose a discoverable peer or paste a peer multiaddress to connect directly.
+- connected peers can exchange text messages and files. Received files are available for download in the chat.
+
+brochain is a progressive web application. Its application shell can be installed by browsers that support web-app installation; peer discovery and communication require an active network connection.
+
 project's documentation consists of:
 
 - *user documentation* -- this file
 
-  designated for all audiences, provides high-level overview of the project functions
+  designated for all audiences, provides a high-level overview of implemented project functions
 
 - [technical architecture](ARCHITECTURE.md)
 
@@ -35,5 +46,3 @@ project's documentation consists of:
 - [AI agent guidelines](./AGENTS.md)
 
   designated for AI agents, contains workflow definitions and special instructions for AI agents
-
-> **GREENFIELD PROJECT NOTICE:** this is green field project and it does not contain any user documentation yet as no features are implemented; remove this notice upon completion of MVP
