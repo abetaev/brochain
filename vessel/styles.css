@@ -1,0 +1,46 @@
+.password-strength {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+  margin-block: 0.35rem;
+}
+
+.password-strength span {
+  display: block;
+  min-height: 0.45rem;
+  border-radius: 0.25rem;
+  background: var(--pico-muted-border-color);
+}
+
+.password-strength[data-level="1"] span.active {
+  background: #c62828;
+}
+
+.password-strength[data-level="2"] span.active {
+  background: #ef6c00;
+}
+
+.password-strength[data-level="3"] span.active {
+  background: #c9a400;
+}
+
+.password-strength[data-level="4"] span.active {
+  background: #2e7d32;
+}
+
+.connection-state {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-inline-end: 0.45rem;
+  border-radius: 50%;
+  background: var(--pico-muted-border-color);
+}
+
+.connection-state.connected {
+  background: #2e7d32;
+}
+
+.unread-state {
+  color: var(--pico-primary);
+}

@@ -1,103 +1,138 @@
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import { createServer as createHttpServer } from "node:http";
-import { createServer as createHttpsServer, type ServerOptions } from "node:https";
-import { extname, resolve } from "node:path";
-import { handleBeaconRequest } from "./src/beacon/http.ts";
-import { createBeacon } from "./src/beacon/runtime.ts";
+import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-function environmentPort(name: string, fallback: number): number {
-  const value = Number.parseInt(process.env[name] ?? String(fallback), 10);
+const projectDirectory = dirname(fileURLToPath(import.meta.url));
+const initializationMarker = ".i";
+const dependencyFiles = ["package.json", "package-lock.json"];
+const requiredExecutables = ["tsc", "vite", "vitest"];
 
-  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
-    throw new Error(`${name} must be a valid port number.`);
-  }
-
-  return value;
+function executablePath(projectRoot: string, executable: string): string {
+  return join(projectRoot, "node_modules", ".bin", executable);
 }
 
-async function loadTlsOptions(): Promise<ServerOptions | undefined> {
-  const certificatePath = process.env.TLS_CERT_PATH;
-  const keyPath = process.env.TLS_KEY_PATH;
-
-  if (certificatePath === undefined && keyPath === undefined) {
-    return undefined;
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
   }
-
-  if (certificatePath === undefined || keyPath === undefined) {
-    throw new Error("Set both TLS_CERT_PATH and TLS_KEY_PATH to enable HTTPS and WSS.");
-  }
-
-  const { readFile } = await import("node:fs/promises");
-  return { cert: await readFile(certificatePath), key: await readFile(keyPath) };
 }
 
-const port = environmentPort("PORT", 4173);
-const relayPort = environmentPort("BEACON_RELAY_PORT", 9090);
-const announcePort = environmentPort("BEACON_PUBLIC_RELAY_PORT", relayPort);
-const beaconHost = process.env.BEACON_HOST ?? "localhost";
-const distDirectory = resolve("dist");
-const tls = await loadTlsOptions();
+export async function dependencyFingerprint(projectRoot = projectDirectory): Promise<string> {
+  const hash = createHash("sha256");
 
-const mimeTypes: Record<string, string> = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".svg": "image/svg+xml",
-};
+  for (const file of dependencyFiles) {
+    hash.update(file);
+    hash.update("\0");
+    hash.update(await readFile(join(projectRoot, file)));
+    hash.update("\0");
+  }
 
-async function serveVessel(pathname: string, response: import("node:http").ServerResponse) {
-  const requestedPath = pathname === "/" ? "/index.html" : pathname;
-  const candidate = resolve(distDirectory, `.${requestedPath}`);
-  const file = candidate.startsWith(distDirectory) ? candidate : resolve(distDirectory, "index.html");
+  return hash.digest("hex");
+}
+
+export async function needsInitialization(projectRoot = projectDirectory): Promise<boolean> {
+  const markerPath = join(projectRoot, initializationMarker);
+
+  if (!(await exists(markerPath))) {
+    return true;
+  }
+
+  const executablesAvailable = await Promise.all(
+    requiredExecutables.map((executable) => exists(executablePath(projectRoot, executable))),
+  );
+
+  if (!executablesAvailable.every(Boolean)) {
+    return true;
+  }
 
   try {
-    const fileStat = await stat(file);
-
-    if (!fileStat.isFile()) {
-      throw new Error("Not a file");
-    }
-
-    response.writeHead(200, { "content-type": mimeTypes[extname(file)] ?? "application/octet-stream" });
-    createReadStream(file).pipe(response);
+    const marker = JSON.parse(await readFile(markerPath, "utf8"));
+    return marker.fingerprint !== (await dependencyFingerprint(projectRoot));
   } catch {
-    const fallback = resolve(distDirectory, "index.html");
-    response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    createReadStream(fallback).pipe(response);
+    return true;
   }
 }
 
-const beacon = await createBeacon({
-  host: beaconHost,
-  relayPort,
-  announcePort,
-  tls,
-});
-const requestHandler = (request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse) => {
-  void (async () => {
-    if (await handleBeaconRequest(beacon, request, response)) {
-      return;
-    }
+function runCommand(
+  command: string,
+  commandArguments: string[],
+  projectRoot: string,
+): Promise<void> {
+  return new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(command, commandArguments, { cwd: projectRoot, stdio: "inherit" });
 
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-    await serveVessel(url.pathname, response);
-  })().catch((error: unknown) => {
-    response.writeHead(500, { "content-type": "application/json; charset=utf-8" });
-    response.end(JSON.stringify({ error: error instanceof Error ? error.message : "Server error." }));
+    child.once("error", reject);
+    child.once("close", (code, signal) => {
+      if (code === 0) {
+        resolvePromise();
+        return;
+      }
+
+      const status = signal ?? `code ${code ?? "unknown"}`;
+      reject(new Error(`${command} ${commandArguments.join(" ")} exited with ${status}.`));
+    });
   });
-};
-const server = tls === undefined ? createHttpServer(requestHandler) : createHttpsServer(tls, requestHandler);
-
-server.listen(port, "0.0.0.0", () => {
-  console.info(`Vessel available on ${tls === undefined ? "http" : "https"}://localhost:${port}`);
-  console.info(`Beacon relay available at ${beacon.relayMultiaddr}`);
-});
-
-async function stop() {
-  await beacon.stop();
-  server.close();
 }
 
-process.once("SIGINT", () => void stop());
-process.once("SIGTERM", () => void stop());
+function npmCommand(): string {
+  return process.platform === "win32" ? "npm.cmd" : "npm";
+}
+
+function installedCommand(command: string): string {
+  return executablePath(projectDirectory, process.platform === "win32" ? `${command}.cmd` : command);
+}
+
+async function initializeProject(projectRoot = projectDirectory): Promise<boolean> {
+  if (!(await needsInitialization(projectRoot))) {
+    return false;
+  }
+
+  await runCommand(npmCommand(), ["install"], projectRoot);
+  await writeFile(
+    join(projectRoot, initializationMarker),
+    `${JSON.stringify({ fingerprint: await dependencyFingerprint(projectRoot) })}\n`,
+  );
+  return true;
+}
+
+async function runProjectCommand(command: string): Promise<void> {
+  await initializeProject();
+
+  if (command === "dev") {
+    await runCommand(installedCommand("vite"), [], projectDirectory);
+    return;
+  }
+
+  if (command === "prod") {
+    await runCommand(installedCommand("tsc"), ["--noEmit"], projectDirectory);
+    await runCommand(installedCommand("vite"), ["build"], projectDirectory);
+    await runCommand(process.execPath, ["beacon/main.ts"], projectDirectory);
+    return;
+  }
+
+  if (command === "test") {
+    await runCommand(installedCommand("vitest"), ["run"], projectDirectory);
+    return;
+  }
+
+  throw new Error(`Unknown project command: ${command}`);
+}
+
+async function runFromCommandLine(): Promise<void> {
+  try {
+    await runProjectCommand(process.argv[2] ?? "");
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runFromCommandLine();
+}

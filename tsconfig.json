@@ -1,21 +1,24 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "useDefineForClassFields": true,
     "module": "ESNext",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "moduleResolution": "bundler",
-    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["./vessel/*"]
+    },
     "isolatedModules": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
-    "types": ["node", "vitest/globals", "@testing-library/jest-dom"]
+    "types": ["node", "vite/client"]
   },
-  "include": ["src", "main.ts", "vite.config.ts"]
+  "include": ["beacon", "common", "vessel", "main.ts", "main.test.ts", "vite.config.ts"]
 }

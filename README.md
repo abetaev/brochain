@@ -1,48 +1,14 @@
 brochain
 ========
 
-overview
---------
-
-peer-to-peer networking application for communication and content exchange between real people.
+Private peer-to-peer communication.
 
 using brochain
 --------------
 
-- on a device without accounts, create an account with a name and password. The password-strength meter helps assess the chosen password.
-- on later visits, choose an account, unlock it with its password, or create another account.
-- each account can be exported as an encrypted account file or deleted from the device.
-- after unlocking an account, choose a discoverable peer or paste a peer multiaddress to connect directly.
-- connected peers can exchange text messages and files. Received files are available for download in the chat.
-
-brochain is a progressive web application. Its application shell can be installed by browsers that support web-app installation; peer discovery and communication require an active network connection.
-
-project's documentation consists of:
-
-- *user documentation* -- this file
-
-  designated for all audiences, provides a high-level overview of implemented project functions
-
-- [technical architecture](ARCHITECTURE.md)
-
-  designated for engineers and AI agents, provides information on technical implementation and decisions
-
-  this document records only already implemented decisions 
-
-- [development plan](BACKLOG.md)
-
-  designated for engineers and AI agents, contains managed list of tasks that need to be implemented
-
-  this document holds unimplemented requirements and provisional decisions
-
-- [development instructions](DEVELOPMENT.md)
-
-  designated for engineers and AI agents, contains instructions on how to develop, test and deploy the project
-
-- [project guidelines](./GUIDELINES.md)
-
-  designated for engineers and AI agents, contains guidelines on coding and documentation style
-
-- [AI agent guidelines](./AGENTS.md)
-
-  designated for AI agents, contains workflow definitions and special instructions for AI agents
+1. Create an account, or choose a stored account and unlock it. Usernames contain 1–64 lowercase English letters; password strength is advisory.
+2. Home connects to the default Beacon and discovers peers through connected peers. Beacon appears as an ordinary connected peer. Use **Retry bootstrap** or **Refresh peers** when needed.
+3. Discovered peers remain disconnected until you select **Connect**. You may also enter a peer multiaddress under **Connect directly**.
+4. **Chat** is available only for a connected peer that provides messaging. Text and files appear immediately when sent; delivery and read confirmations are not available yet.
+5. Incoming messages remain available across views while you are signed in. Home marks peers with unread messages, and opening Chat clears that marker. Messages and received-file links disappear after sign-out or page reload and are not delivered while the application is closed or offline.
+6. The Account view can export an encrypted account record or permanently delete a local account after password confirmation.

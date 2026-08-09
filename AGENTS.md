@@ -3,52 +3,40 @@ AI coding agent documentation
 
 This file defines the mandatory workflow for AI agents.
 
-The active task's scope and pre-implementation technical decisions are defined in BACKLOG.md; ARCHITECTURE.md records only implemented reality.
+The active task's scope and pre-implementation technical decisions are defined in [BACKLOG.md](./BACKLOG.md); [ARCHITECTURE.md](./ARCHITECTURE.md) records only implemented reality.
 
 workflow
 --------
 
 1. **context initialization**:
 
-   - [user documentation](./README.md) to understand the frontend functionality and reasoning behind technical solutions
-
-   - [technical architecture](./ARCHITECTURE.md) to understand implementation 
+   - read [user documentation](./README.md) to understand implemented user-facing behavior
+   - read [technical architecture](./ARCHITECTURE.md) to understand implemented technical decisions
+   - read [project guidelines](./GUIDELINES.md) before making code, test, or documentation decisions
+   - read [development instructions](./DEVELOPMENT.md) before running or describing project commands
 
 2. **task refinement**:
 
-   1. read information task from [development plan](./BACKLOG.md)
-
-   2. perform task analysis: look for relevant files, gaps in task definition
-
-   3. if task contains gaps or inconsistencies it needs to be refined: talk to *engineer* to fill in and update corresponding section of *development plan*
-
-   4. repeat refinement procedure if necessary or continue to **task execution**
+   1. read the active task from the [development plan](./BACKLOG.md)
+   2. inspect relevant code and identify gaps or inconsistencies in the task definition
+   3. refine gaps with the *engineer* and update the corresponding backlog section
+   4. repeat refinement if necessary, then continue to **task execution**
 
 3. **task execution**:
 
-   execution of each task MUST consist of:
+   each task MUST include:
 
-   - implementation of business logic that supports task definition
+   - the implementation required by the task definition
+   - behavior validation appropriate to the task and [project guidelines](./GUIDELINES.md)
 
-   - implementation of testing logic that provides validation of task completeness and outlines business workflow of that task in source code; consult [development instructions](./DEVELOPMENT.md) for instructions
+4. **task completion**:
 
-4. upon completion of a task from backlog:
+   1. perform a cleanup audit before updating documentation or the backlog:
 
-   1. update project documentation if necessary
+      - trace changed behavior from production entry points and tests
+      - remove unreachable source, unused exports, dependencies, configuration, obsolete tests, and temporary diagnostics
+      - do not retain speculative code for future work
 
-      - if backlog task is a new feature user documentation and technical architecture SHOULD be updated
+   2. update only the document whose audience needs the change, following the documentation boundaries in [project guidelines](./GUIDELINES.md); do not repeat the same information across documents
 
-      - if backlog task is a bugfix, only architectural documentation MAY need to be updated (if needed)
-
-      - if implemented task contains changes that reflect in development process, update **development instructions**
-
-   2. remove task from *development plan* if it was described there
-
-guidelines
-----------
-
-- KISS: if it's not requested do not add it, keep it simple
-- DRY: if there is a pattern that is used in code multiple times - abstract it and make it reusable
-- be concise: use concise style to code/describe only what matters, avoid creating judgement and enforcing opinion whenever and wherever it is possible
-
-> **NOTE:** AI guidelines are work in progress; we will add more here along the road.
+   3. remove implemented requirements and refinements from the backlog after recording current behavior for the appropriate audience; remove an indivisible backlog unit itself only when the engineer declares it complete
