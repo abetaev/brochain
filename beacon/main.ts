@@ -4,7 +4,7 @@ import { createServer as createHttpsServer, type ServerOptions } from "node:http
 import { dirname, extname, resolve } from "node:path";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { createBeacon } from "./core.ts";
+import { createBeacon } from "./index.ts";
 
 function configuredPort(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback);

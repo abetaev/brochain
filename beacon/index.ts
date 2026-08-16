@@ -5,7 +5,7 @@ import { identify, identifyPush } from "@libp2p/identify";
 import { webSockets } from "@libp2p/websockets";
 import { createLibp2p } from "libp2p";
 import type { ServerOptions } from "node:https";
-import { createNetwork } from "../common/network.ts";
+import { createDiscovery, createNetwork } from "../common/network/index.ts";
 
 interface BeaconConfiguration {
   host: string;
@@ -41,8 +41,8 @@ export async function createBeacon(configuration: BeaconConfiguration) {
   });
 
   try {
-    const { network, registry } = await createNetwork(node);
-    network.host((peer) => registry.serve(peer));
+    const network = await createNetwork(node);
+    network.host(createDiscovery(() => network.connectedPeers()));
     return network;
   } catch (error) {
     await node.stop();

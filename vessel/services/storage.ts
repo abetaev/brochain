@@ -1,52 +1,63 @@
-interface EventStorage<T> {
+import type { Peer } from "../../common/network/index.ts";
+
+export interface EventStorage<T> {
   append(event: T): void;
   read(): readonly T[];
   subscribe(listener: (event: T) => void): () => void;
 }
 
-interface ValueStorage<T> {
+export interface ValueStorage<T> {
   get(): T | undefined;
   put(value: T): void;
   subscribe(listener: (value: T) => void): () => void;
 }
 
-export interface StorageFactory {
-  events<T>(
-    peerId: string,
-    serviceName: string,
-    storageName?: string,
-  ): EventStorage<T>;
-  value<T>(
-    peerId: string,
-    serviceName: string,
-    storageName?: string,
-  ): ValueStorage<T>;
+export interface PeerStorage {
+  events<T>(serviceName: string, storageName?: string): EventStorage<T>;
+  value<T>(serviceName: string, storageName?: string): ValueStorage<T>;
 }
 
-export function createStorage(): StorageFactory {
+export interface Storage {
+  peer(peer: Peer): PeerStorage;
+}
+
+export function createStorage(): Storage {
+  const peers = new Map<string, PeerStorage>();
+
+  return {
+    peer(peer) {
+      let storage = peers.get(peer.id);
+      if (storage === undefined) {
+        storage = createPeerStorage();
+        peers.set(peer.id, storage);
+      }
+      return storage;
+    },
+  };
+}
+
+function createPeerStorage(): PeerStorage {
   const eventStores = new Map<
     string,
-    Map<string, Map<string | undefined, EventStorage<unknown>>>
+    Map<string | undefined, EventStorage<unknown>>
   >();
   const valueStores = new Map<
     string,
-    Map<string, Map<string | undefined, ValueStorage<unknown>>>
+    Map<string | undefined, ValueStorage<unknown>>
   >();
 
   return {
-    events<T>(peerId: string, serviceName: string, storageName?: string) {
+    events<T>(serviceName: string, storageName?: string) {
       return findStorage(
         eventStores,
-        peerId,
         serviceName,
         storageName,
         createEventStorage,
       ) as EventStorage<T>;
     },
-    value<T>(peerId: string, serviceName: string, storageName?: string) {
+    value<T>(serviceName: string, storageName?: string) {
       return findStorage(
         valueStores,
-        peerId,
         serviceName,
         storageName,
         createValueStorage,
@@ -56,22 +67,15 @@ export function createStorage(): StorageFactory {
 }
 
 function findStorage<T>(
-  stores: Map<string, Map<string, Map<string | undefined, T>>>,
-  peerId: string,
+  stores: Map<string, Map<string | undefined, T>>,
   serviceName: string,
   storageName: string | undefined,
   create: () => T,
 ): T {
-  let peerStores = stores.get(peerId);
-  if (peerStores === undefined) {
-    peerStores = new Map();
-    stores.set(peerId, peerStores);
-  }
-
-  let serviceStores = peerStores.get(serviceName);
+  let serviceStores = stores.get(serviceName);
   if (serviceStores === undefined) {
     serviceStores = new Map();
-    peerStores.set(serviceName, serviceStores);
+    stores.set(serviceName, serviceStores);
   }
 
   let storage = serviceStores.get(storageName);

@@ -1,20 +1,36 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Peer } from "../../common/network/index.ts";
 import { createStorage } from "./storage";
 
+function peer(id: string): Peer {
+  return { id } as Peer;
+}
+
 describe("session storage", () => {
+  it("returns one stable storage scope per peer identity", () => {
+    const storage = createStorage();
+    const firstReference = peer("peer");
+    const secondReference = peer("peer");
+
+    expect(storage.peer(firstReference)).toBe(storage.peer(firstReference));
+    expect(storage.peer(secondReference)).toBe(storage.peer(firstReference));
+    expect(storage.peer(peer("other-peer"))).not.toBe(storage.peer(firstReference));
+  });
+
   it("partitions event logs without flattening their keys", () => {
     const storage = createStorage();
-    const defaultEvents = storage.events<string>("peer", "messaging");
-    const namedEvents = storage.events<string>("peer", "messaging", "");
-    const otherService = storage.events<string>("peer", "identity");
-    const otherPeer = storage.events<string>("other-peer", "messaging");
+    const peerStorage = storage.peer(peer("peer"));
+    const defaultEvents = peerStorage.events<string>("messaging");
+    const namedEvents = peerStorage.events<string>("messaging", "");
+    const otherService = peerStorage.events<string>("identity");
+    const otherPeer = storage.peer(peer("other-peer")).events<string>("messaging");
 
     defaultEvents.append("default");
     namedEvents.append("named");
     otherService.append("service");
     otherPeer.append("peer");
 
-    expect(storage.events<string>("peer", "messaging")).toBe(defaultEvents);
+    expect(peerStorage.events<string>("messaging")).toBe(defaultEvents);
     expect(defaultEvents.read()).toEqual(["default"]);
     expect(namedEvents.read()).toEqual(["named"]);
     expect(otherService.read()).toEqual(["service"]);
@@ -22,9 +38,9 @@ describe("session storage", () => {
   });
 
   it("keeps event and value namespaces independent and notifies after mutation", () => {
-    const storage = createStorage();
-    const events = storage.events<string>("peer", "service");
-    const value = storage.value<string>("peer", "service");
+    const peerStorage = createStorage().peer(peer("peer"));
+    const events = peerStorage.events<string>("service");
+    const value = peerStorage.value<string>("service");
     const eventListener = vi.fn((event: string) => {
       expect(events.read()).toEqual([event]);
     });
@@ -47,10 +63,11 @@ describe("session storage", () => {
     expect(value.get()).toBe("ignored value");
   });
 
-  it("returns immutable event snapshots and isolates factory instances", () => {
+  it("returns immutable event snapshots and isolates Storage instances", () => {
+    const remotePeer = peer("peer");
     const first = createStorage();
     const second = createStorage();
-    const firstEvents = first.events<string>("peer", "service");
+    const firstEvents = first.peer(remotePeer).events<string>("service");
 
     firstEvents.append("first");
     const snapshot = firstEvents.read();
@@ -59,6 +76,6 @@ describe("session storage", () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(snapshot).toEqual(["first"]);
     expect(firstEvents.read()).toEqual(["first", "second"]);
-    expect(second.events<string>("peer", "service").read()).toEqual([]);
+    expect(second.peer(remotePeer).events<string>("service").read()).toEqual([]);
   });
 });

@@ -7,7 +7,7 @@ using brochain
 --------------
 
 1. Create an account, or choose a stored account and unlock it. Usernames contain 1–64 lowercase English letters; password strength is advisory.
-2. Home connects to the default Beacon and discovers peers through connected peers. Beacon appears as an ordinary connected peer. Use **Retry bootstrap** or **Refresh peers** when needed.
+2. After sign-in, the Session attempts to connect to the default Beacon and Home requests a fresh peer list through connected peers. Beacon appears as an ordinary connected peer. If Beacon is unavailable, local peer networking remains usable; use **Retry bootstrap** or **Refresh peers** to retry.
 3. Discovered peers remain disconnected until you select **Connect**. You may also enter a peer multiaddress under **Connect directly**.
 4. **Chat** is available only for a connected peer that provides messaging. Text and files appear immediately when sent; delivery and read confirmations are not available yet.
 5. Incoming messages remain available across views while you are signed in. Home marks peers with unread messages, and opening Chat clears that marker. Messages and received-file links disappear after sign-out or page reload and are not delivered while the application is closed or offline.

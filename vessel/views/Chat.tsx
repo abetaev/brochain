@@ -1,29 +1,50 @@
-import { For, createSignal, onCleanup, onMount } from "solid-js";
-import type { Peer } from "../../common/network.ts";
-import type { MessagingEvent } from "@/services/messaging";
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import {
+  registryServiceName,
+  type Peer,
+  type RegistryService,
+} from "../../common/network/index.ts";
+import {
+  identityServiceName,
+  type IdentityDefinition,
+} from "@/network/services/identity";
+import {
+  messagingServiceName,
+  type Messaging,
+  type MessagingDefinition,
+  type MessagingEvent,
+} from "@/network/services/messaging";
 import type { Session } from "@/session";
 
 export function Chat(props: {
   session: Session;
-  peer: Peer;
-  onRead(received: number): void;
+  peerId: string;
   onBack(): void;
 }) {
-  const messaging = props.session.messaging.instance(props.peer);
-  const [name, setName] = createSignal(props.peer.id);
+  const [name, setName] = createSignal(props.peerId);
   const [events, setEvents] = createSignal<readonly MessagingEvent[]>([]);
   const [error, setError] = createSignal<string>();
+  const [ready, setReady] = createSignal(false);
   const downloadUrls = new Map<File, string>();
   let messageInput: HTMLInputElement | undefined;
+  let messaging: Messaging | undefined;
+  let stopEvents: (() => void) | undefined;
+  let active = true;
 
-  function update(next: readonly MessagingEvent[]): void {
-    setEvents(next);
-    props.onRead(next.filter((event) => event.type === "received").length);
+  function update(peer: Peer): void {
+    const storage = props.session.storage(peer);
+    const snapshot = storage.events<MessagingEvent>(messagingServiceName).read();
+    setEvents(snapshot);
+    storage.value<number>(messagingServiceName, "read").put(
+      snapshot.filter((event) => event.type === "received").length,
+    );
   }
 
   function sendText(event: SubmitEvent): void {
     event.preventDefault();
+    setError(undefined);
     try {
+      if (messaging === undefined) throw new Error("Messaging is not ready.");
       messaging.sendText(messageInput?.value ?? "");
       if (messageInput !== undefined) messageInput.value = "";
     } catch (reason) {
@@ -34,7 +55,9 @@ export function Chat(props: {
   function sendFile(event: Event & { currentTarget: HTMLInputElement }): void {
     const file = event.currentTarget.files?.[0];
     if (file === undefined) return;
+    setError(undefined);
     try {
+      if (messaging === undefined) throw new Error("Messaging is not ready.");
       messaging.sendFile(file);
       event.currentTarget.value = "";
     } catch (reason) {
@@ -42,22 +65,47 @@ export function Chat(props: {
     }
   }
 
-  async function loadName(): Promise<void> {
-    if (!props.peer.services.includes("identity")) return;
+  async function initialize(): Promise<void> {
     try {
-      setName((await props.session.identity.instance(props.peer).get()).name);
-    } catch {
-      // The peer id remains its display fallback.
+      const roster = await props.session.roster();
+      const peer = await roster.getPeer(props.peerId);
+      if (peer === undefined) throw new Error("This peer is no longer available.");
+      if (!peer.isConnected()) throw new Error("This peer is not connected.");
+
+      const services = await peer
+        .service<RegistryService>(registryServiceName)
+        .list();
+      if (!services.includes(messagingServiceName)) {
+        throw new Error("This peer does not provide messaging.");
+      }
+      if (!active) return;
+
+      messaging = peer.service<MessagingDefinition>(messagingServiceName);
+      const eventStorage = props.session.storage(peer)
+        .events<MessagingEvent>(messagingServiceName);
+      update(peer);
+      stopEvents = eventStorage.subscribe(() => update(peer));
+      setReady(true);
+
+      if (services.includes(identityServiceName)) {
+        try {
+          const identity = await peer
+            .service<IdentityDefinition>(identityServiceName)
+            .get();
+          if (active) setName(identity.name);
+        } catch {
+          // A peer id is always available as the display fallback.
+        }
+      }
+    } catch (reason) {
+      if (active) setError(errorMessage(reason));
     }
   }
 
-  onMount(() => {
-    const stop = messaging.subscribe(update);
-    void loadName();
-    onCleanup(stop);
-  });
-
+  onMount(() => void initialize());
   onCleanup(() => {
+    active = false;
+    stopEvents?.();
     for (const url of downloadUrls.values()) URL.revokeObjectURL(url);
   });
 
@@ -67,7 +115,7 @@ export function Chat(props: {
         <button class="secondary" type="button" onClick={props.onBack}>Back to Home</button>
         <h2 id="chat-heading">Chat with {name()}</h2>
       </header>
-      {error() === undefined ? undefined : <p role="alert">{error()}</p>}
+      <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
       <For each={events()}>
         {(event) => event.type === "failed" ? (
           <p role="alert">{event.error}</p>
@@ -92,13 +140,13 @@ export function Chat(props: {
       <form onSubmit={sendText}>
         <label for="message">
           Message
-          <input id="message" ref={messageInput} required />
+          <input id="message" ref={messageInput} required disabled={!ready()} />
         </label>
-        <button type="submit">Send message</button>
+        <button type="submit" disabled={!ready()}>Send message</button>
       </form>
       <label for="file">
         Send a file
-        <input id="file" type="file" onChange={sendFile} />
+        <input id="file" type="file" disabled={!ready()} onChange={sendFile} />
       </label>
     </section>
   );

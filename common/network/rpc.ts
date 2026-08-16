@@ -1,7 +1,7 @@
 import type { Libp2p } from "libp2p";
 import { rpcClient, type JsonRpcResponse, type RpcTransport } from "typed-rpc";
 import { handleRpc } from "typed-rpc/server";
-import { base64ToBytes, bytesToBase64 } from "./base64.ts";
+import { base64ToBytes, bytesToBase64 } from "../base64.ts";
 
 export interface PeerService<Name extends string = string> {
   readonly name: Name;
@@ -29,6 +29,8 @@ interface Envelope {
   service: string;
   request: unknown;
 }
+
+export const rpcProtocol = "/brochain/rpc/1.0.0";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();

@@ -1,6 +1,17 @@
-import type { Peer } from "../../common/network.ts";
-import type { PeerService } from "../../common/rpc.ts";
-import type { StorageFactory } from "../storage";
+import type {
+  Peer,
+  PeerService,
+  RemoteService,
+  ServiceDefinition,
+} from "../../../common/network/index.ts";
+import type {
+  EventStorage,
+  Storage,
+  ValueStorage,
+} from "../../services/storage.ts";
+
+export const messagingServiceName = "messaging";
+const deliveryStorageName = "delivery";
 
 type MessageContent = Readonly<
   { type: "text"; text: string } | { type: "file"; file: File }
@@ -12,32 +23,35 @@ export type MessagingEvent = Readonly<
   | { type: "failed"; error: string }
 >;
 
-interface PeerMessaging {
+interface TransferredFile {
+  readonly name: string;
+  readonly mediaType: string;
+  readonly data: Uint8Array;
+}
+
+export interface MessagingService extends PeerService<typeof messagingServiceName> {
+  sendText(text: string): void;
+  sendFile(file: TransferredFile): void;
+}
+
+export interface Messaging {
   sendText(text: string): void;
   sendFile(file: File): void;
-  subscribe(listener: (events: readonly MessagingEvent[]) => void): () => void;
 }
 
-const serviceName = "messaging";
-
-interface MessagingService extends PeerService<typeof serviceName> {
-  sendText(text: string): void;
-  sendFile(file: {
-    readonly name: string;
-    readonly mediaType: string;
-    readonly data: Uint8Array;
-  }): void;
+export interface MessagingDefinition
+  extends ServiceDefinition<MessagingService, Messaging> {
+  gateway(peer: Peer, remote: RemoteService<MessagingService>): Messaging;
 }
 
-export function createMessaging(storage: StorageFactory) {
-  const deliveries = new Map<string, Promise<void>>();
-
+export function createMessaging(storage: Storage): MessagingDefinition {
   return {
-    serve(peer: Peer): MessagingService {
-      const events = storage.events<MessagingEvent>(peer.id, serviceName);
+    name: messagingServiceName,
+    serve(peer) {
+      const events = storage.peer(peer).events<MessagingEvent>(messagingServiceName);
 
       return {
-        name: serviceName,
+        name: messagingServiceName,
         sendText(text) {
           requireText(text);
           events.append({
@@ -59,19 +73,23 @@ export function createMessaging(storage: StorageFactory) {
         },
       };
     },
-    instance(peer: Peer): PeerMessaging {
-      const events = storage.events<MessagingEvent>(peer.id, serviceName);
-      const remote = peer.service<MessagingService>(serviceName);
+    gateway(peer, remote) {
+      const peerStorage = storage.peer(peer);
+      const events = peerStorage.events<MessagingEvent>(messagingServiceName);
+      const delivery = peerStorage.value<Promise<void>>(
+        messagingServiceName,
+        deliveryStorageName,
+      );
 
       return {
         sendText(text) {
           requireText(text);
           events.append({ type: "sent", content: { type: "text", text } });
-          queue(peer.id, events, async () => await remote.sendText(text));
+          queue(delivery, events, async () => await remote.sendText(text));
         },
         sendFile(file) {
           events.append({ type: "sent", content: { type: "file", file } });
-          queue(peer.id, events, async () => {
+          queue(delivery, events, async () => {
             await remote.sendFile({
               name: file.name,
               mediaType: file.type || "application/octet-stream",
@@ -79,29 +97,22 @@ export function createMessaging(storage: StorageFactory) {
             });
           });
         },
-        subscribe(listener) {
-          listener(events.read());
-          return events.subscribe(() => listener(events.read()));
-        },
       };
     },
   };
+}
 
-  function queue(
-    peerId: string,
-    events: { append(event: MessagingEvent): void },
-    send: () => Promise<void>,
-  ): void {
-    deliveries.set(
-      peerId,
-      deliverAfter(deliveries.get(peerId), events, send),
-    );
-  }
+function queue(
+  delivery: ValueStorage<Promise<void>>,
+  events: EventStorage<MessagingEvent>,
+  send: () => Promise<void>,
+): void {
+  delivery.put(deliverAfter(delivery.get(), events, send));
 }
 
 async function deliverAfter(
   previous: Promise<void> | undefined,
-  events: { append(event: MessagingEvent): void },
+  events: EventStorage<MessagingEvent>,
   send: () => Promise<void>,
 ): Promise<void> {
   try {
@@ -118,11 +129,7 @@ function requireText(value: unknown): asserts value is string {
   }
 }
 
-function requireFile(value: unknown): {
-  readonly name: string;
-  readonly mediaType: string;
-  readonly data: Uint8Array;
-} {
+function requireFile(value: unknown): TransferredFile {
   if (
     typeof value !== "object" ||
     value === null ||

@@ -1,5 +1,17 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
-import type { Peer } from "../../common/network.ts";
+import {
+  registryServiceName,
+  type Peer,
+  type RegistryService,
+} from "../../common/network/index.ts";
+import {
+  identityServiceName,
+  type IdentityDefinition,
+} from "@/network/services/identity";
+import {
+  messagingServiceName,
+  type MessagingEvent,
+} from "@/network/services/messaging";
 import type { Session } from "@/session";
 
 interface ListedPeer {
@@ -12,135 +24,157 @@ interface ListedPeer {
 
 export function Home(props: {
   session: Session;
-  readMessages(peerId: string): number;
-  onOpenChat(peer: Peer): void;
+  onOpenChat(peerId: string): void;
   onSignedOut(): void;
 }) {
-  const { network, registry, identity, messaging } = props.session;
   const [directAddress, setDirectAddress] = createSignal("");
   const [peers, setPeers] = createSignal<readonly ListedPeer[]>([]);
   const [error, setError] = createSignal<string>();
+  const [bootstrapError, setBootstrapError] = createSignal<string>();
   const [busy, setBusy] = createSignal(false);
-  const names = new Map<string, string>();
-  const receivedMessages = new Map<string, number>();
-  const observers = new Map<string, Array<() => void>>();
-  const loadingNames = new Set<string>();
+  const observers = new Map<string, () => void>();
+  let stopObservingRoster: (() => void) | undefined;
+  let refreshVersion = 0;
+  let operations = 0;
   let active = true;
-  let networkReady = false;
-  const stopObservingRegistry = registry.subscribe((peer) => {
-    observePeers();
-    if (networkReady && peer.isConnected()) void discoverPeerServices();
-  });
 
-  function update(): void {
-    if (!active) return;
-    setPeers(registry.peers.map((peer) => ({
-      peer,
-      name: names.get(peer.id) ?? peer.id,
-      connected: peer.isConnected(),
-      messaging: peer.services.includes("messaging"),
-      unread: (receivedMessages.get(peer.id) ?? 0) > props.readMessages(peer.id),
-    })));
-  }
-
-  function observePeers(): void {
-    for (const peer of registry.peers) {
-      if (!observers.has(peer.id)) {
-        const stops: Array<() => void> = [];
-        observers.set(peer.id, stops);
-        stops.push(peer.subscribe((event) => {
-          update();
-          if (event === "connected" && networkReady) void discoverPeerServices();
-        }));
-        stops.push(messaging.instance(peer).subscribe((events) => {
-          receivedMessages.set(
-            peer.id,
-            events.filter((event) => event.type === "received").length,
-          );
-          update();
-        }));
-      }
-      if (peer.isConnected() && peer.services.includes("identity")) {
-        void loadName(peer);
-      }
-    }
-    update();
-  }
-
-  async function loadName(peer: Peer): Promise<void> {
-    if (names.has(peer.id) || loadingNames.has(peer.id)) return;
-    loadingNames.add(peer.id);
-    try {
-      names.set(peer.id, (await identity.instance(peer).get()).name);
-      update();
-    } catch {
-      // The peer id remains its display fallback.
-    } finally {
-      loadingNames.delete(peer.id);
-    }
-  }
-
-  async function discoverPeerServices(): Promise<void> {
-    try {
-      await registry.discover(true);
-      observePeers();
-    } catch {
-      // Session closure makes pending discovery irrelevant.
-    }
-  }
-
-  async function connectToNetwork(force = false): Promise<void> {
+  function beginOperation(): void {
+    operations += 1;
     setBusy(true);
-    setError(undefined);
-    try {
-      await network.bootstrap();
-      networkReady = true;
-      await registry.discover(force);
-      observePeers();
-    } catch (reason) {
-      if (active) {
-        observePeers();
-        setError(`Peer networking is unavailable: ${errorMessage(reason)}`);
+  }
+
+  function endOperation(): void {
+    operations -= 1;
+    if (active && operations === 0) setBusy(false);
+  }
+
+  function unread(peer: Peer): boolean {
+    const storage = props.session.storage(peer);
+    const received = storage.events<MessagingEvent>(messagingServiceName).read()
+      .filter((event) => event.type === "received").length;
+    const read = storage.value<number>(messagingServiceName, "read").get() ?? 0;
+    return received > read;
+  }
+
+  function updateUnread(peer: Peer): void {
+    if (!active) return;
+    setPeers((current) => current.map((listed) => listed.peer.id === peer.id
+      ? { ...listed, unread: unread(peer) }
+      : listed));
+  }
+
+  function observe(current: readonly ListedPeer[]): void {
+    const currentIds = new Set(current.map(({ peer }) => peer.id));
+    for (const [id, stop] of observers) {
+      if (currentIds.has(id)) continue;
+      stop();
+      observers.delete(id);
+    }
+
+    for (const { peer } of current) {
+      if (observers.has(peer.id)) continue;
+      const storage = props.session.storage(peer);
+      const stopEvents = storage.events<MessagingEvent>(messagingServiceName)
+        .subscribe(() => updateUnread(peer));
+      const stopRead = storage.value<number>(messagingServiceName, "read")
+        .subscribe(() => updateUnread(peer));
+      observers.set(peer.id, () => {
+        stopEvents();
+        stopRead();
+      });
+    }
+  }
+
+  async function describe(peer: Peer): Promise<ListedPeer> {
+    const connected = peer.isConnected();
+    let name = peer.id;
+    let messaging = false;
+
+    if (connected) {
+      try {
+        const services = await peer
+          .service<RegistryService>(registryServiceName)
+          .list();
+        messaging = services.includes(messagingServiceName);
+        if (services.includes(identityServiceName)) {
+          try {
+            name = (await peer
+              .service<IdentityDefinition>(identityServiceName)
+              .get()).name;
+          } catch {
+            // A peer id is always available as the display fallback.
+          }
+        }
+      } catch {
+        // A connected peer may stop responding while the roster refreshes.
       }
-    } finally {
-      if (active) setBusy(false);
+    }
+
+    return { peer, name, connected, messaging, unread: unread(peer) };
+  }
+
+  async function refresh(): Promise<void> {
+    const version = ++refreshVersion;
+    const roster = await props.session.roster();
+    if (stopObservingRoster === undefined && active) {
+      stopObservingRoster = roster.subscribe(() => void refreshIgnoringErrors());
+    }
+    const listed = await Promise.all((await roster.list()).map(describe));
+    if (!active || version !== refreshVersion) return;
+
+    setBootstrapError(props.session.bootstrapError());
+    setPeers(listed);
+    observe(listed);
+  }
+
+  async function refreshIgnoringErrors(): Promise<void> {
+    try {
+      await refresh();
+    } catch {
+      // A newer manual refresh can still recover from a transient topology race.
     }
   }
 
   async function perform(work: () => Promise<void>): Promise<void> {
-    setBusy(true);
+    beginOperation();
     setError(undefined);
     try {
       await work();
     } catch (reason) {
-      if (active) setError(errorMessage(reason));
+      if (active) {
+        setBootstrapError(props.session.bootstrapError());
+        setError(errorMessage(reason));
+      }
     } finally {
-      if (active) setBusy(false);
+      endOperation();
     }
   }
 
-  async function connect(peer: Peer): Promise<void> {
+  async function openChat(peer: Peer): Promise<void> {
     await peer.connect();
-    await registry.discover(true);
-    observePeers();
-    if (!peer.services.includes("messaging")) {
+    const services = await peer
+      .service<RegistryService>(registryServiceName)
+      .list();
+    if (!services.includes(messagingServiceName)) {
       throw new Error("This peer does not provide messaging.");
     }
-    props.onOpenChat(peer);
+    await refresh();
+    props.onOpenChat(peer.id);
   }
 
   async function connectDirect(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     await perform(async () => {
-      const peer = registry.add(directAddress().trim());
-      await connect(peer);
+      const network = await props.session.network();
+      const peer = await network.createPeer(directAddress().trim());
+      await openChat(peer);
       setDirectAddress("");
     });
   }
 
   async function signOut(): Promise<void> {
     active = false;
-    setBusy(true);
+    beginOperation();
     try {
       await props.session.close();
     } finally {
@@ -148,13 +182,13 @@ export function Home(props: {
     }
   }
 
-  onMount(() => void connectToNetwork());
+  onMount(() => void perform(refresh));
   onCleanup(() => {
     active = false;
-    stopObservingRegistry();
-    for (const stops of observers.values()) {
-      for (const stop of stops) stop();
-    }
+    refreshVersion += 1;
+    stopObservingRoster?.();
+    for (const stop of observers.values()) stop();
+    observers.clear();
   });
 
   return (
@@ -163,13 +197,16 @@ export function Home(props: {
         <h2 id="home-heading">Home</h2>
         <p>Signed in as {props.session.username}.</p>
       </header>
+      <Show when={bootstrapError()}>
+        {(message) => <p role="alert">Peer networking is unavailable: {message()}</p>}
+      </Show>
       <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
 
       <button
         class="secondary"
         type="button"
         disabled={busy()}
-        onClick={() => void connectToNetwork(true)}
+        onClick={() => void perform(refresh)}
       >
         Retry bootstrap
       </button>{" "}
@@ -177,10 +214,7 @@ export function Home(props: {
         class="secondary"
         type="button"
         disabled={busy()}
-        onClick={() => void perform(async () => {
-          await registry.discover(true);
-          observePeers();
-        })}
+        onClick={() => void perform(refresh)}
       >
         Refresh peers
       </button>
@@ -208,14 +242,14 @@ export function Home(props: {
                       <button
                         type="button"
                         disabled={busy()}
-                        onClick={() => void perform(async () => await connect(listed.peer))}
+                        onClick={() => void perform(async () => await openChat(listed.peer))}
                       >
                         Connect
                       </button>
                     }
                   >
                     <Show when={listed.messaging} fallback={<small>Connected</small>}>
-                      <button type="button" onClick={() => props.onOpenChat(listed.peer)}>
+                      <button type="button" onClick={() => props.onOpenChat(listed.peer.id)}>
                         Chat
                       </button>
                     </Show>

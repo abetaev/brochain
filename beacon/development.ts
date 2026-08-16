@@ -1,5 +1,5 @@
 import type { Plugin } from "vite";
-import { createBeacon } from "./core.ts";
+import { createBeacon } from "./index.ts";
 
 function configuredRelayPort(): number {
   const value = Number(process.env.BEACON_RELAY_PORT ?? 9090);
