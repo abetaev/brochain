@@ -1,35 +1,47 @@
-import type { Peer } from "../../common/network/index.ts";
-
 export interface EventStorage<T> {
   append(event: T): void;
   read(): readonly T[];
   subscribe(listener: (event: T) => void): () => void;
 }
 
-export interface ValueStorage<T> {
+export interface SingletonStorage<T> {
   get(): T | undefined;
   put(value: T): void;
-  subscribe(listener: (value: T) => void): () => void;
+  clear(): void;
+  subscribe(listener: (value: T | undefined) => void): () => void;
+}
+
+export interface KeyValueStorage<T> {
+  get(key: string): T | undefined;
+  put(key: string, value: T): void;
+  delete(key: string): void;
+  entries(): readonly (readonly [string, T])[];
+  subscribe(listener: (key: string, value: T | undefined) => void): () => void;
+}
+
+export interface ServiceStorage {
+  event<T>(name?: string): EventStorage<T>;
+  singleton<T>(name?: string): SingletonStorage<T>;
+  kv<T>(name?: string): KeyValueStorage<T>;
 }
 
 export interface PeerStorage {
-  events<T>(serviceName: string, storageName?: string): EventStorage<T>;
-  value<T>(serviceName: string, storageName?: string): ValueStorage<T>;
+  service(name: string): ServiceStorage;
 }
 
 export interface Storage {
-  peer(peer: Peer): PeerStorage;
+  peer(peerId: string): PeerStorage;
 }
 
 export function createStorage(): Storage {
   const peers = new Map<string, PeerStorage>();
 
   return {
-    peer(peer) {
-      let storage = peers.get(peer.id);
+    peer(peerId) {
+      let storage = peers.get(peerId);
       if (storage === undefined) {
         storage = createPeerStorage();
-        peers.set(peer.id, storage);
+        peers.set(peerId, storage);
       }
       return storage;
     },
@@ -37,51 +49,55 @@ export function createStorage(): Storage {
 }
 
 function createPeerStorage(): PeerStorage {
-  const eventStores = new Map<
-    string,
-    Map<string | undefined, EventStorage<unknown>>
-  >();
-  const valueStores = new Map<
-    string,
-    Map<string | undefined, ValueStorage<unknown>>
-  >();
+  const services = new Map<string, ServiceStorage>();
 
   return {
-    events<T>(serviceName: string, storageName?: string) {
-      return findStorage(
-        eventStores,
-        serviceName,
-        storageName,
-        createEventStorage,
-      ) as EventStorage<T>;
+    service(name) {
+      let storage = services.get(name);
+      if (storage === undefined) {
+        storage = createServiceStorage();
+        services.set(name, storage);
+      }
+      return storage;
     },
-    value<T>(serviceName: string, storageName?: string) {
+  };
+}
+
+function createServiceStorage(): ServiceStorage {
+  const eventStores = new Map<string | undefined, EventStorage<unknown>>();
+  const singletonStores = new Map<string | undefined, SingletonStorage<unknown>>();
+  const keyValueStores = new Map<string | undefined, KeyValueStorage<unknown>>();
+
+  return {
+    event<T>(name?: string) {
+      return findStorage(eventStores, name, createEventStorage) as EventStorage<T>;
+    },
+    singleton<T>(name?: string) {
       return findStorage(
-        valueStores,
-        serviceName,
-        storageName,
-        createValueStorage,
-      ) as ValueStorage<T>;
+        singletonStores,
+        name,
+        createSingletonStorage,
+      ) as SingletonStorage<T>;
+    },
+    kv<T>(name?: string) {
+      return findStorage(
+        keyValueStores,
+        name,
+        createKeyValueStorage,
+      ) as KeyValueStorage<T>;
     },
   };
 }
 
 function findStorage<T>(
-  stores: Map<string, Map<string | undefined, T>>,
-  serviceName: string,
-  storageName: string | undefined,
+  stores: Map<string | undefined, T>,
+  name: string | undefined,
   create: () => T,
 ): T {
-  let serviceStores = stores.get(serviceName);
-  if (serviceStores === undefined) {
-    serviceStores = new Map();
-    stores.set(serviceName, serviceStores);
-  }
-
-  let storage = serviceStores.get(storageName);
+  let storage = stores.get(name);
   if (storage === undefined) {
     storage = create();
-    serviceStores.set(storageName, storage);
+    stores.set(name, storage);
   }
   return storage;
 }
@@ -103,15 +119,53 @@ function createEventStorage<T>(): EventStorage<T> {
   };
 }
 
-function createValueStorage<T>(): ValueStorage<T> {
-  const listeners = new Set<(value: T) => void>();
+function createSingletonStorage<T>(): SingletonStorage<T> {
+  const listeners = new Set<(value: T | undefined) => void>();
   let current: T | undefined;
+
+  function publish(): void {
+    for (const listener of listeners) listener(current);
+  }
 
   return {
     get: () => current,
     put(value) {
       current = value;
-      for (const listener of listeners) listener(value);
+      publish();
+    },
+    clear() {
+      current = undefined;
+      publish();
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+function createKeyValueStorage<T>(): KeyValueStorage<T> {
+  const values = new Map<string, T>();
+  const listeners = new Set<(key: string, value: T | undefined) => void>();
+
+  function publish(key: string, value: T | undefined): void {
+    for (const listener of listeners) listener(key, value);
+  }
+
+  return {
+    get: (key) => values.get(key),
+    put(key, value) {
+      values.set(key, value);
+      publish(key, value);
+    },
+    delete(key) {
+      values.delete(key);
+      publish(key, undefined);
+    },
+    entries() {
+      return Object.freeze(
+        [...values].map(([key, value]) => Object.freeze([key, value] as const)),
+      );
     },
     subscribe(listener) {
       listeners.add(listener);

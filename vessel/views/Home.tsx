@@ -1,17 +1,20 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import {
   registryServiceName,
+  validateServiceNames,
   type Peer,
-  type RegistryService,
-} from "../../common/network/index.ts";
+  type Registry,
+} from "../../common/services/network/index.ts";
 import {
   identityServiceName,
-  type IdentityDefinition,
-} from "@/network/services/identity";
+  validateContact,
+  type Contact,
+  type IdentityService,
+} from "@/services/network/services/identity";
 import {
   messagingServiceName,
   type MessagingEvent,
-} from "@/network/services/messaging";
+} from "@/services/network/services/messaging";
 import type { Session } from "@/session";
 
 interface ListedPeer {
@@ -33,9 +36,9 @@ export function Home(props: {
   const [bootstrapError, setBootstrapError] = createSignal<string>();
   const [busy, setBusy] = createSignal(false);
   const observers = new Map<string, () => void>();
-  let stopObservingRoster: (() => void) | undefined;
   let refreshVersion = 0;
   let operations = 0;
+  let stopRoster: (() => void) | undefined;
   let active = true;
 
   function beginOperation(): void {
@@ -49,10 +52,10 @@ export function Home(props: {
   }
 
   function unread(peer: Peer): boolean {
-    const storage = props.session.storage(peer);
-    const received = storage.events<MessagingEvent>(messagingServiceName).read()
+    const storage = props.session.storage().peer(peer.id).service(messagingServiceName);
+    const received = storage.event<MessagingEvent>().read()
       .filter((event) => event.type === "received").length;
-    const read = storage.value<number>(messagingServiceName, "read").get() ?? 0;
+    const read = storage.singleton<number>("read").get() ?? 0;
     return received > read;
   }
 
@@ -72,16 +75,18 @@ export function Home(props: {
     }
 
     for (const { peer } of current) {
-      if (observers.has(peer.id)) continue;
-      const storage = props.session.storage(peer);
-      const stopEvents = storage.events<MessagingEvent>(messagingServiceName)
-        .subscribe(() => updateUnread(peer));
-      const stopRead = storage.value<number>(messagingServiceName, "read")
-        .subscribe(() => updateUnread(peer));
-      observers.set(peer.id, () => {
-        stopEvents();
-        stopRead();
-      });
+      if (!observers.has(peer.id)) {
+        const storage = props.session.storage().peer(peer.id).service(messagingServiceName);
+        const stopEvents = storage.event<MessagingEvent>()
+          .subscribe(() => updateUnread(peer));
+        const stopRead = storage.singleton<number>("read")
+          .subscribe(() => updateUnread(peer));
+        observers.set(peer.id, () => {
+          stopEvents();
+          stopRead();
+        });
+      }
+      updateUnread(peer);
     }
   }
 
@@ -92,15 +97,22 @@ export function Home(props: {
 
     if (connected) {
       try {
-        const services = await peer
-          .service<RegistryService>(registryServiceName)
-          .list();
+        const services = validateServiceNames(
+          await peer.service<Registry>(registryServiceName).list(),
+        );
         messaging = services.includes(messagingServiceName);
         if (services.includes(identityServiceName)) {
           try {
-            name = (await peer
-              .service<IdentityDefinition>(identityServiceName)
-              .get()).name;
+            const contact = props.session.storage().peer(peer.id)
+              .service(identityServiceName).singleton<Contact>();
+            let identity = contact.get();
+            if (identity === undefined) {
+              identity = validateContact(
+                await peer.service<IdentityService>(identityServiceName).get(),
+              );
+              contact.put(identity);
+            }
+            name = identity.name;
           } catch {
             // A peer id is always available as the display fallback.
           }
@@ -116,23 +128,12 @@ export function Home(props: {
   async function refresh(): Promise<void> {
     const version = ++refreshVersion;
     const roster = await props.session.roster();
-    if (stopObservingRoster === undefined && active) {
-      stopObservingRoster = roster.subscribe(() => void refreshIgnoringErrors());
-    }
     const listed = await Promise.all((await roster.list()).map(describe));
     if (!active || version !== refreshVersion) return;
 
     setBootstrapError(props.session.bootstrapError());
     setPeers(listed);
     observe(listed);
-  }
-
-  async function refreshIgnoringErrors(): Promise<void> {
-    try {
-      await refresh();
-    } catch {
-      // A newer manual refresh can still recover from a transient topology race.
-    }
   }
 
   async function perform(work: () => Promise<void>): Promise<void> {
@@ -151,15 +152,24 @@ export function Home(props: {
   }
 
   async function openChat(peer: Peer): Promise<void> {
-    await peer.connect();
-    const services = await peer
-      .service<RegistryService>(registryServiceName)
-      .list();
+    const connected = await peer.connect();
+    const services = validateServiceNames(
+      await connected.service<Registry>(registryServiceName).list(),
+    );
     if (!services.includes(messagingServiceName)) {
       throw new Error("This peer does not provide messaging.");
     }
+    props.onOpenChat(connected.id);
+  }
+
+  async function initialize(): Promise<void> {
+    const roster = await props.session.roster();
+    if (!active) return;
+
+    stopRoster = roster.subscribe(() => {
+      if (active) void perform(refresh);
+    });
     await refresh();
-    props.onOpenChat(peer.id);
   }
 
   async function connectDirect(event: SubmitEvent): Promise<void> {
@@ -182,11 +192,11 @@ export function Home(props: {
     }
   }
 
-  onMount(() => void perform(refresh));
+  onMount(() => void perform(initialize));
   onCleanup(() => {
     active = false;
     refreshVersion += 1;
-    stopObservingRoster?.();
+    stopRoster?.();
     for (const stop of observers.values()) stop();
     observers.clear();
   });

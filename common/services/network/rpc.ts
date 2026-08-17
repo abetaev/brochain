@@ -1,17 +1,14 @@
 import type { Libp2p } from "libp2p";
 import { rpcClient, type JsonRpcResponse, type RpcTransport } from "typed-rpc";
 import { handleRpc } from "typed-rpc/server";
-import { base64ToBytes, bytesToBase64 } from "../base64.ts";
+import { base64ToBytes, bytesToBase64 } from "../../base64.ts";
 
-export interface PeerService<Name extends string = string> {
-  readonly name: Name;
-}
-
-export type RemoteService<Service extends PeerService> = {
-  [Method in Exclude<keyof Service, "name">]: Service[Method] extends
-    (...arguments_: infer Arguments) => infer Result
-    ? (...arguments_: Arguments) => Promise<Awaited<Result>>
-    : never;
+export type PromisedMethods<Service extends object> = {
+  [Method in keyof Service as Service[Method] extends
+    (...arguments_: never[]) => unknown ? Method : never]:
+    Service[Method] extends (...arguments_: infer Arguments) => infer Result
+      ? (...arguments_: Arguments) => Promise<Awaited<Result>>
+      : never;
 };
 
 type Stream = Awaited<ReturnType<Libp2p["dialProtocol"]>>;
@@ -40,10 +37,10 @@ const transcoder = {
   deserialize: decode,
 };
 
-export function remoteService<Service extends PeerService>(
-  name: Service["name"],
+export function remoteService<Service extends object>(
+  name: string,
   open: (signal: AbortSignal) => Promise<Stream>,
-): RemoteService<Service> {
+): PromisedMethods<Service> {
   const transport: RpcTransport = async (request, signal) => {
     const stream = await open(signal);
     const abort = () => stream.abort(new Error("The RPC call was aborted."));
@@ -73,12 +70,12 @@ export function remoteService<Service extends PeerService>(
       }
       return Reflect.get(target, property, receiver);
     },
-  }) as RemoteService<Service>;
+  }) as PromisedMethods<Service>;
 }
 
 export async function answerRpc(
   stream: Stream,
-  service: (name: string) => PeerService | undefined,
+  service: (name: string) => object | undefined,
 ): Promise<void> {
   try {
     const envelope = await readJson(stream);
@@ -90,7 +87,7 @@ export async function answerRpc(
     );
     const response = await handleRpc<Record<string, unknown>, unknown>(
       envelope.request,
-      implementation as unknown as Record<string, unknown>,
+      implementation,
       { transcoder },
     );
     stream.send(encoder.encode(JSON.stringify(response)));

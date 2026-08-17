@@ -11,21 +11,27 @@ import {
   createNetwork,
   type Network,
   type Peer,
-} from "../common/network/index.ts";
+} from "../common/services/network/index.ts";
 import { bootstrap } from "@/bootstrap";
-import { createIdentity } from "@/network/services/identity";
-import { createMessaging } from "@/network/services/messaging";
+import {
+  createIdentity,
+  identityServiceName,
+} from "@/services/network/services/identity";
+import {
+  createMessaging,
+  messagingServiceName,
+} from "@/services/network/services/messaging";
 import { createRoster, type Roster } from "@/services/roster";
 import {
   createStorage,
-  type PeerStorage,
+  type Storage,
 } from "@/services/storage";
 
 export interface Session {
   readonly username: string;
   network(): Promise<Network>;
   roster(): Promise<Roster>;
-  storage(peer: Peer): PeerStorage;
+  storage(): Storage;
   bootstrapError(): string | undefined;
   close(): Promise<void>;
 }
@@ -82,9 +88,13 @@ export async function createSession(
     });
 
     try {
-      const network = await createNetwork(node);
-      network.host(createIdentity(identity.username, storage));
-      network.host(createMessaging(storage));
+      const network = await createNetwork(node, (peer) => {
+        peer.host(identityServiceName, createIdentity(identity.username));
+        peer.host(
+          messagingServiceName,
+          createMessaging(storage.peer(peer.id).service(messagingServiceName)),
+        );
+      });
       return { network, node };
     } catch (error) {
       await node.stop();
@@ -145,9 +155,9 @@ export async function createSession(
       const network = await accessNetwork();
       return (roster ??= createRoster(network));
     },
-    storage(peer) {
+    storage() {
       requireOpen();
-      return storage.peer(peer);
+      return storage;
     },
     bootstrapError: () => bootstrapFailure,
     async close() {

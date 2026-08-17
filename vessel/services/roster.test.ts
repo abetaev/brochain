@@ -1,19 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Network, Peer } from "../../common/network/index.ts";
+import type {
+  Network,
+  Peer,
+} from "../../common/services/network/index.ts";
 import { createRoster } from "./roster.ts";
 
 const firstId = "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8";
 const secondId = "QmYWYSUZ4PV6MRFYpdtEDJBiGs4UrmE6g8wmAWSePekXVW";
+const thirdId = "12D3KooWDnWcP4NdXrZ9iTiEhnH2AFqQiqJttS7xVZwZSCv8HXVa";
 const localId = "12D3KooWQY1mzxK1TmJX9KhZBbPYANoLYv7SbjbR9diN7ykDFhFB";
 const firstAddress = `/ip4/127.0.0.1/tcp/1001/ws/p2p/${firstId}`;
 const firstAlternate = `/dns4/peer.example/tcp/1001/ws/p2p/${firstId}`;
 const secondAddress = `/ip4/127.0.0.1/tcp/1002/ws/p2p/${secondId}`;
-const localAddress = `/ip4/127.0.0.1/tcp/1003/ws/p2p/${localId}`;
+const secondAlternate = `/dns4/peer.example/tcp/1002/ws/p2p/${secondId}`;
+const thirdAddress = `/ip4/127.0.0.1/tcp/1003/ws/p2p/${thirdId}`;
+const localAddress = `/ip4/127.0.0.1/tcp/1004/ws/p2p/${localId}`;
 
 function provider(
   id: string,
-  services: () => Promise<readonly string[]>,
-  addresses: () => Promise<readonly string[]>,
+  services: () => Promise<unknown>,
+  addresses: () => Promise<unknown>,
 ): Peer {
   return {
     id,
@@ -24,123 +30,256 @@ function provider(
   } as unknown as Peer;
 }
 
-function testNetwork(connected: readonly Peer[], known: Map<string, Peer>) {
-  let topologyListener: ((peer: Peer) => void) | undefined;
+function disconnectedPeer(id: string): Peer {
+  return {
+    id,
+    isConnected: () => false,
+    connect: vi.fn(),
+  } as unknown as Peer;
+}
+
+function testNetwork(connected: () => readonly Peer[]) {
+  const created: Peer[] = [];
+  const topologyListeners = new Set<
+    (peer: Peer, event: "connected" | "disconnected") => void
+  >();
+  const networkStops: Array<ReturnType<typeof vi.fn>> = [];
   const network = {
     id: localId,
-    connectedPeers: vi.fn(() => connected),
+    connectedPeers: vi.fn(connected),
     createPeer: vi.fn(async (address: string) => {
-      let id = localId;
-      if (address.endsWith(firstId)) id = firstId;
-      if (address.endsWith(secondId)) id = secondId;
-      const existing = known.get(id);
-      if (existing !== undefined) return existing;
-      const peer = {
-        id,
-        addresses: () => [address],
-        isConnected: () => false,
-        connect: vi.fn(),
-      } as unknown as Peer;
-      known.set(id, peer);
+      const id = [firstId, secondId, thirdId, localId]
+        .find((candidate) => address.endsWith(candidate));
+      if (id === undefined) throw new Error("Missing peer identity.");
+      const peer = disconnectedPeer(id);
+      created.push(peer);
       return peer;
     }),
-    subscribe(listener: (peer: Peer) => void) {
-      topologyListener = listener;
-      return () => {
-        topologyListener = undefined;
-      };
-    },
+    subscribe: vi.fn((
+      listener: (peer: Peer, event: "connected" | "disconnected") => void,
+    ) => {
+      topologyListeners.add(listener);
+      const stop = vi.fn(() => topologyListeners.delete(listener));
+      networkStops.push(stop);
+      return stop;
+    }),
+    close: vi.fn(),
   } as unknown as Network;
-
-  return { network, topologyChanged: (peer: Peer) => topologyListener?.(peer) };
+  return {
+    network,
+    created,
+    networkStops,
+    topologyChanged(peer: Peer, event: "connected" | "disconnected") {
+      for (const listener of [...topologyListeners]) listener(peer, event);
+    },
+  };
 }
 
 describe("Roster", () => {
-  it("aggregates connected and discovered peers without connecting discoveries", async () => {
-    const services = vi.fn(async () => ["registry", "discovery"]);
-    const addresses = vi.fn(async () => [
-      firstAddress,
-      firstAlternate,
-      secondAddress,
-      localAddress,
-      "/invalid",
+  it("groups live Discovery results and creates each absent identity once", async () => {
+    const first = provider(firstId, async () => ["registry"], async () => []);
+    const beacon = provider(
+      "beacon",
+      async () => ["registry", "discovery"],
+      async () => [
+        firstAddress,
+        secondAddress,
+        firstAlternate,
+        secondAddress,
+        localAddress,
+        "/invalid",
+        "/ip4/127.0.0.1/tcp/1005/ws",
+      ],
+    );
+    const other = provider(
+      "other",
+      async () => ["registry", "discovery"],
+      async () => [firstAlternate, secondAlternate, thirdAddress],
+    );
+    const { network, created } = testNetwork(() => [beacon, first, other]);
+
+    const peers = await createRoster(network).list();
+
+    expect(peers.map(({ id }) => id)).toEqual([
+      "beacon",
+      firstId,
+      "other",
+      secondId,
+      thirdId,
     ]);
-    const beacon = provider("beacon", services, addresses);
-    const known = new Map<string, Peer>([[firstId, {
-      id: firstId,
-      isConnected: () => false,
-    } as Peer]]);
-    const { network } = testNetwork([beacon], known);
-    const roster = createRoster(network);
-
-    const first = await roster.list();
-    const second = await roster.list();
-
-    expect(first.map(({ id }) => id)).toEqual(["beacon", firstId, secondId]);
-    expect(second.map(({ id }) => id)).toEqual(["beacon", firstId, secondId]);
-    expect(services).toHaveBeenCalledTimes(2);
-    expect(addresses).toHaveBeenCalledTimes(2);
-    expect(network.createPeer).toHaveBeenCalledTimes(8);
-    expect(network.createPeer).toHaveBeenCalledWith(firstAlternate);
-    expect((known.get(secondId)?.connect as ReturnType<typeof vi.fn> | undefined))
-      .not.toHaveBeenCalled();
+    expect(network.connectedPeers).toHaveBeenCalledOnce();
+    expect(network.createPeer).toHaveBeenCalledTimes(2);
+    expect(network.createPeer).toHaveBeenCalledWith(secondAddress, secondAlternate);
+    expect(network.createPeer).toHaveBeenCalledWith(thirdAddress);
+    expect(network.createPeer).not.toHaveBeenCalledWith(localAddress);
+    for (const peer of created) {
+      expect(peer.connect).not.toHaveBeenCalled();
+    }
   });
 
-  it("skips providers without Discovery and tolerates failed or malformed providers", async () => {
-    const plain = provider("plain", async () => ["registry"], async () => [firstAddress]);
+  it("passes every alternate for one identity in a single createPeer call", async () => {
+    const relayWithoutDestination =
+      `/ip4/127.0.0.1/tcp/1002/ws/p2p/${secondId}/p2p-circuit`;
+    const source = provider(
+      "source",
+      async () => ["registry", "discovery"],
+      async () => [
+        firstAddress,
+        firstAlternate,
+        firstAddress,
+        relayWithoutDestination,
+      ],
+    );
+    const { network } = testNetwork(() => [source]);
+
+    await createRoster(network).list();
+
+    expect(network.createPeer).toHaveBeenCalledOnce();
+    expect(network.createPeer).toHaveBeenCalledWith(firstAddress, firstAlternate);
+  });
+
+  it("validates capabilities and isolates failed or malformed providers", async () => {
+    const noDiscoveryAddresses = vi.fn(async () => [firstAddress]);
+    const noDiscovery = provider(
+      "plain",
+      async () => ["registry"],
+      noDiscoveryAddresses,
+    );
+    const invalidRegistry = provider(
+      "invalid-registry",
+      async () => ["registry", "registry"],
+      async () => [firstAddress],
+    );
+    const invalidDiscovery = provider(
+      "invalid-discovery",
+      async () => ["registry", "discovery"],
+      async () => [secondAddress, 1],
+    );
     const failed = provider(
       "failed",
       async () => ["registry", "discovery"],
       async () => {
-        throw new Error("Unavailable");
+        throw new Error("Unavailable.");
       },
     );
-    const malformed = provider(
-      "malformed",
-      async () => {
-        throw new Error("Peer returned invalid service names.");
-      },
-      async () => [secondAddress],
+    const healthy = provider(
+      "healthy",
+      async () => ["registry", "discovery"],
+      async () => [thirdAddress],
     );
-    const { network } = testNetwork([plain, failed, malformed], new Map());
-
-    await expect(createRoster(network).list()).resolves.toEqual([
-      plain,
+    const connected = [
+      noDiscovery,
+      invalidRegistry,
+      invalidDiscovery,
       failed,
-      malformed,
+      healthy,
+    ];
+    const { network } = testNetwork(() => connected);
+
+    const peers = await createRoster(network).list();
+
+    expect(peers.map(({ id }) => id)).toEqual([
+      "plain",
+      "invalid-registry",
+      "invalid-discovery",
+      "failed",
+      "healthy",
+      thirdId,
     ]);
-    expect(network.createPeer).not.toHaveBeenCalled();
+    expect(noDiscoveryAddresses).not.toHaveBeenCalled();
+    expect(network.createPeer).toHaveBeenCalledOnce();
+    expect(network.createPeer).toHaveBeenCalledWith(thirdAddress);
   });
 
-  it("gets connected peers without discovery and otherwise performs a fresh list", async () => {
-    const connected = provider("connected", async () => ["registry"], async () => []);
-    const discovered = { id: firstId, isConnected: () => false } as Peer;
-    const known = new Map<string, Peer>([[firstId, discovered]]);
+  it("keeps healthy identities when another createPeer call fails", async () => {
     const source = provider(
       "source",
       async () => ["registry", "discovery"],
-      async () => [firstAddress],
+      async () => [firstAddress, secondAddress],
     );
-    const { network } = testNetwork([connected, source], known);
+    const { network } = testNetwork(() => [source]);
+    vi.mocked(network.createPeer).mockImplementation(async (address: string) => {
+      if (address === firstAddress) throw new Error("Rejected address.");
+      return disconnectedPeer(secondId);
+    });
+
+    await expect(createRoster(network).list()).resolves.toEqual([
+      source,
+      expect.objectContaining({ id: secondId }),
+    ]);
+  });
+
+  it("is uncached and getPeer avoids discovery for a connected identity", async () => {
+    const connected = provider("connected", async () => ["registry"], async () => []);
+    const sourceServices = vi.fn(async () => ["registry", "discovery"]);
+    const sourceDiscovery = vi.fn(async () => [firstAddress]);
+    const source = provider("source", sourceServices, sourceDiscovery);
+    const { network } = testNetwork(() => [connected, source]);
     const roster = createRoster(network);
 
     await expect(roster.getPeer("connected")).resolves.toBe(connected);
-    expect(network.createPeer).not.toHaveBeenCalled();
-    await expect(roster.getPeer(firstId)).resolves.toBe(discovered);
-    expect(network.createPeer).toHaveBeenCalledOnce();
+    expect(sourceServices).not.toHaveBeenCalled();
+
+    await expect(roster.getPeer(firstId)).resolves.toMatchObject({ id: firstId });
+    await roster.list();
+
+    expect(sourceServices).toHaveBeenCalledTimes(2);
+    expect(sourceDiscovery).toHaveBeenCalledTimes(2);
+    expect(network.createPeer).toHaveBeenCalledTimes(2);
   });
 
-  it("forwards Network topology notifications without retaining a list", () => {
-    const remote = provider("remote", async () => ["registry"], async () => []);
-    const { network, topologyChanged } = testNetwork([], new Map());
+  it("forwards connection topology changes and releases each subscription", () => {
+    const { network, networkStops, topologyChanged } = testNetwork(() => []);
     const roster = createRoster(network);
-    const listener = vi.fn();
-    const unsubscribe = roster.subscribe(listener);
+    const first = vi.fn();
+    const second = vi.fn();
+    const changedPeer = disconnectedPeer(firstId);
 
-    topologyChanged(remote);
-    unsubscribe();
-    topologyChanged(remote);
+    expect(network.subscribe).not.toHaveBeenCalled();
+    const stopFirst = roster.subscribe(first);
+    const stopSecond = roster.subscribe(second);
+    expect(network.subscribe).toHaveBeenCalledTimes(2);
 
-    expect(listener).toHaveBeenCalledOnce();
+    topologyChanged(changedPeer, "connected");
+    topologyChanged(changedPeer, "disconnected");
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(second).toHaveBeenCalledTimes(2);
+
+    stopFirst();
+    topologyChanged(changedPeer, "connected");
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(second).toHaveBeenCalledTimes(3);
+    expect(networkStops[0]).toHaveBeenCalledOnce();
+
+    stopSecond();
+    expect(networkStops[1]).toHaveBeenCalledOnce();
+    topologyChanged(changedPeer, "disconnected");
+    expect(second).toHaveBeenCalledTimes(3);
+  });
+
+  it("notifies invalidation without retaining or refreshing a completed list", async () => {
+    const services = vi.fn(async () => ["registry", "discovery"]);
+    const addresses = vi.fn(async () => [firstAddress]);
+    const source = provider("source", services, addresses);
+    const { network, topologyChanged } = testNetwork(() => [source]);
+    const roster = createRoster(network);
+    const invalidated = vi.fn();
+    const stop = roster.subscribe(invalidated);
+    const changedPeer = disconnectedPeer(secondId);
+
+    topologyChanged(changedPeer, "connected");
+    expect(invalidated).toHaveBeenCalledOnce();
+    expect(services).not.toHaveBeenCalled();
+    expect(addresses).not.toHaveBeenCalled();
+
+    await roster.list();
+    topologyChanged(changedPeer, "disconnected");
+    await roster.list();
+
+    expect(invalidated).toHaveBeenCalledTimes(2);
+    expect(services).toHaveBeenCalledTimes(2);
+    expect(addresses).toHaveBeenCalledTimes(2);
+    expect(network.createPeer).toHaveBeenCalledTimes(2);
+    stop();
   });
 });

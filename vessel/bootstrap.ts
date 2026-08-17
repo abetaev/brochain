@@ -1,11 +1,11 @@
-import type { Network, Peer } from "../common/network/index.ts";
+import type { Network, Peer } from "../common/services/network/index.ts";
 
 export async function bootstrap(
   network: Network,
   ready?: () => Promise<void>,
 ): Promise<Peer> {
-  const peer = await network.createPeer(defaultBeaconAddress());
-  await peer.connect();
+  const created = await network.createPeer(defaultBeaconAddress());
+  const peer = await created.connect();
   await ready?.();
   return peer;
 }

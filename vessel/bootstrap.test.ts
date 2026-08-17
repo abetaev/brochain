@@ -1,18 +1,18 @@
 // @vitest-environment node
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Network, Peer } from "../common/network/index.ts";
+import type { Network, Peer } from "../common/services/network/index.ts";
 import { bootstrap } from "./bootstrap.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function testPeer(connect: () => Promise<void>): Peer {
-  return {
+function testPeer(connect?: () => Promise<Peer>): Peer {
+  const peer = {
     id: "beacon",
-    connect,
   } as Peer;
+  return Object.assign(peer, { connect: connect ?? (async () => peer) });
 }
 
 function testNetwork(createPeer: (address: string) => Promise<Peer>): Network {
@@ -25,8 +25,10 @@ describe("default Beacon bootstrap", () => {
       location: { hostname: "vessel.example", protocol: "https:" },
     });
     const operations: string[] = [];
-    const peer = testPeer(async () => {
+    let peer: Peer;
+    peer = testPeer(async () => {
       operations.push("connect");
+      return peer;
     });
     const network = testNetwork(async (address) => {
       operations.push(`create:${address}`);
@@ -48,11 +50,21 @@ describe("default Beacon bootstrap", () => {
     vi.stubGlobal("window", {
       location: { hostname: "localhost", protocol: "http:" },
     });
-    const createPeer = vi.fn(async () => testPeer(async () => {}));
+    const createPeer = vi.fn(async () => testPeer());
 
     await bootstrap(testNetwork(createPeer));
 
     expect(createPeer).toHaveBeenCalledWith("/dns4/localhost/tcp/9090/ws");
+  });
+
+  it("returns the active Peer selected while connecting", async () => {
+    vi.stubGlobal("window", {
+      location: { hostname: "localhost", protocol: "http:" },
+    });
+    const connected = testPeer();
+    const created = testPeer(async () => connected);
+
+    await expect(bootstrap(testNetwork(async () => created))).resolves.toBe(connected);
   });
 
   it("does not continue when Peer creation fails", async () => {
@@ -87,11 +99,13 @@ describe("default Beacon bootstrap", () => {
     vi.stubGlobal("window", {
       location: { hostname: "localhost", protocol: "http:" },
     });
-    const connect = vi.fn(async () => {});
+    let peer: Peer;
+    const connect = vi.fn(async () => peer);
+    peer = testPeer(connect);
     const failure = new Error("Relay reservation failed.");
 
     await expect(
-      bootstrap(testNetwork(async () => testPeer(connect)), async () => {
+      bootstrap(testNetwork(async () => peer), async () => {
         throw failure;
       }),
     ).rejects.toBe(failure);

@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Network, Peer } from "../common/network/index.ts";
+import type { Network, Peer } from "../common/services/network/index.ts";
 import type { Roster } from "./services/roster.ts";
 
 const dependencies = vi.hoisted(() => ({
@@ -22,7 +22,9 @@ vi.mock("@libp2p/identify", () => ({ identify: () => ({}), identifyPush: () => (
 vi.mock("@libp2p/webrtc", () => ({ webRTC: () => ({}) }));
 vi.mock("@libp2p/websockets", () => ({ webSockets: () => ({}) }));
 vi.mock("libp2p", () => ({ createLibp2p: dependencies.createLibp2p }));
-vi.mock("../common/network/index.ts", () => ({ createNetwork: dependencies.createNetwork }));
+vi.mock("../common/services/network/index.ts", () => ({
+  createNetwork: dependencies.createNetwork,
+}));
 vi.mock("@/bootstrap", () => ({ bootstrap: dependencies.bootstrap }));
 vi.mock("@/services/roster", () => ({ createRoster: dependencies.createRoster }));
 
@@ -30,10 +32,8 @@ import { createSession } from "./session.ts";
 
 interface TestRuntime {
   readonly beacon: Peer;
-  readonly network: Network & {
-    host: ReturnType<typeof vi.fn>;
-    close: ReturnType<typeof vi.fn>;
-  };
+  readonly initializedPeer: Peer & { host: ReturnType<typeof vi.fn> };
+  readonly network: Network & { close: ReturnType<typeof vi.fn> };
   readonly node: {
     stop: ReturnType<typeof vi.fn>;
   };
@@ -55,22 +55,30 @@ beforeEach(() => {
   } as unknown as Peer;
   const network = {
     id: "local",
-    host: vi.fn(),
     close: vi.fn(async () => {}),
   } as unknown as TestRuntime["network"];
+  const initializedPeer = {
+    id: "remote",
+    host: vi.fn(),
+  } as unknown as TestRuntime["initializedPeer"];
   const node = {
     stop: vi.fn(async () => {}),
   };
   const roster = {
     list: vi.fn(async () => []),
     getPeer: vi.fn(async () => undefined),
-    subscribe: vi.fn(() => () => {}),
   } as unknown as Roster;
-  runtime = { beacon, network, node, roster };
+  runtime = { beacon, initializedPeer, network, node, roster };
 
   dependencies.generateKeyPairFromSeed.mockResolvedValue({});
   dependencies.createLibp2p.mockResolvedValue(node);
-  dependencies.createNetwork.mockResolvedValue(network);
+  dependencies.createNetwork.mockImplementation(async (
+    _node: unknown,
+    initialize?: (peer: Peer, network: Network) => void,
+  ) => {
+    initialize?.(initializedPeer, network);
+    return network;
+  });
   dependencies.bootstrap.mockResolvedValue(beacon);
   dependencies.createRoster.mockReturnValue(roster);
 });
@@ -102,13 +110,13 @@ describe("Session access and lifetime", () => {
     expect(dependencies.createNetwork).toHaveBeenCalledOnce();
     expect(dependencies.bootstrap).toHaveBeenCalledOnce();
     expect(dependencies.createRoster).toHaveBeenCalledOnce();
-    expect(runtime.network.host.mock.calls.map(([service]) => service.name))
+    expect(runtime.initializedPeer.host.mock.calls.map(([name]) => name))
       .toEqual(["identity", "messaging"]);
-    expect(runtime.network.host.mock.invocationCallOrder.at(-1))
+    expect(runtime.initializedPeer.host.mock.invocationCallOrder.at(-1))
       .toBeLessThan(dependencies.bootstrap.mock.invocationCallOrder[0]!);
 
-    const peer = { id: "remote" } as Peer;
-    expect(session.storage(peer)).toBe(session.storage(peer));
+    expect(session.storage()).toBe(session.storage());
+    expect(session.storage().peer("remote")).toBe(session.storage().peer("remote"));
 
     await session.close();
   });
@@ -168,7 +176,7 @@ describe("Session access and lifetime", () => {
     expect(runtime.network.close).toHaveBeenCalledOnce();
     expect(closeAccountSession).toHaveBeenCalledOnce();
     expect(dependencies.bootstrap).not.toHaveBeenCalled();
-    expect(() => session.storage({ id: "remote" } as Peer)).toThrow("Session is closed");
+    expect(() => session.storage()).toThrow("Session is closed");
   });
 
   it("closes Account access even when Network shutdown fails", async () => {

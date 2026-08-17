@@ -1,19 +1,26 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import {
   registryServiceName,
+  validateServiceNames,
   type Peer,
-  type RegistryService,
-} from "../../common/network/index.ts";
+  type PromisedMethods,
+  type Registry,
+} from "../../common/services/network/index.ts";
 import {
   identityServiceName,
-  type IdentityDefinition,
-} from "@/network/services/identity";
+  validateContact,
+  type Contact,
+  type IdentityService,
+} from "@/services/network/services/identity";
 import {
+  messageDeliveryError,
   messagingServiceName,
-  type Messaging,
-  type MessagingDefinition,
+  transferFile,
+  validateMessageText,
   type MessagingEvent,
-} from "@/network/services/messaging";
+  type MessagingService,
+} from "@/services/network/services/messaging";
+import type { EventStorage } from "@/services/storage";
 import type { Session } from "@/session";
 
 export function Chat(props: {
@@ -27,15 +34,16 @@ export function Chat(props: {
   const [ready, setReady] = createSignal(false);
   const downloadUrls = new Map<File, string>();
   let messageInput: HTMLInputElement | undefined;
-  let messaging: Messaging | undefined;
+  let messaging: PromisedMethods<MessagingService> | undefined;
+  let messageEvents: EventStorage<MessagingEvent> | undefined;
   let stopEvents: (() => void) | undefined;
   let active = true;
 
   function update(peer: Peer): void {
-    const storage = props.session.storage(peer);
-    const snapshot = storage.events<MessagingEvent>(messagingServiceName).read();
+    const storage = props.session.storage().peer(peer.id).service(messagingServiceName);
+    const snapshot = storage.event<MessagingEvent>().read();
     setEvents(snapshot);
-    storage.value<number>(messagingServiceName, "read").put(
+    storage.singleton<number>("read").put(
       snapshot.filter((event) => event.type === "received").length,
     );
   }
@@ -44,8 +52,16 @@ export function Chat(props: {
     event.preventDefault();
     setError(undefined);
     try {
-      if (messaging === undefined) throw new Error("Messaging is not ready.");
-      messaging.sendText(messageInput?.value ?? "");
+      const remote = messaging;
+      const storage = messageEvents;
+      if (remote === undefined || storage === undefined) {
+        throw new Error("Messaging is not ready.");
+      }
+      const text = validateMessageText(messageInput?.value ?? "");
+      storage.append({ type: "sent", content: { type: "text", text } });
+      void remote.sendText(text).catch((reason) => {
+        storage.append({ type: "failed", error: messageDeliveryError(reason) });
+      });
       if (messageInput !== undefined) messageInput.value = "";
     } catch (reason) {
       setError(errorMessage(reason));
@@ -57,8 +73,19 @@ export function Chat(props: {
     if (file === undefined) return;
     setError(undefined);
     try {
-      if (messaging === undefined) throw new Error("Messaging is not ready.");
-      messaging.sendFile(file);
+      const remote = messaging;
+      const storage = messageEvents;
+      if (remote === undefined || storage === undefined) {
+        throw new Error("Messaging is not ready.");
+      }
+      storage.append({ type: "sent", content: { type: "file", file } });
+      void (async () => {
+        try {
+          await remote.sendFile(await transferFile(file));
+        } catch (reason) {
+          storage.append({ type: "failed", error: messageDeliveryError(reason) });
+        }
+      })();
       event.currentTarget.value = "";
     } catch (reason) {
       setError(errorMessage(reason));
@@ -72,26 +99,33 @@ export function Chat(props: {
       if (peer === undefined) throw new Error("This peer is no longer available.");
       if (!peer.isConnected()) throw new Error("This peer is not connected.");
 
-      const services = await peer
-        .service<RegistryService>(registryServiceName)
-        .list();
+      const services = validateServiceNames(
+        await peer.service<Registry>(registryServiceName).list(),
+      );
       if (!services.includes(messagingServiceName)) {
         throw new Error("This peer does not provide messaging.");
       }
       if (!active) return;
 
-      messaging = peer.service<MessagingDefinition>(messagingServiceName);
-      const eventStorage = props.session.storage(peer)
-        .events<MessagingEvent>(messagingServiceName);
+      messaging = peer.service<MessagingService>(messagingServiceName);
+      const eventStorage = props.session.storage().peer(peer.id)
+        .service(messagingServiceName).event<MessagingEvent>();
+      messageEvents = eventStorage;
       update(peer);
       stopEvents = eventStorage.subscribe(() => update(peer));
       setReady(true);
 
       if (services.includes(identityServiceName)) {
         try {
-          const identity = await peer
-            .service<IdentityDefinition>(identityServiceName)
-            .get();
+          const contact = props.session.storage().peer(peer.id)
+            .service(identityServiceName).singleton<Contact>();
+          let identity = contact.get();
+          if (identity === undefined) {
+            identity = validateContact(
+              await peer.service<IdentityService>(identityServiceName).get(),
+            );
+            contact.put(identity);
+          }
           if (active) setName(identity.name);
         } catch {
           // A peer id is always available as the display fallback.
