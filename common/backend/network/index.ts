@@ -12,17 +12,6 @@ import { answerRpc, rpcProtocol } from "./rpc.ts";
 
 export type { Peer } from "./peer.ts";
 export type { PromisedMethods } from "./rpc.ts";
-export {
-  createDiscovery,
-  discoveryServiceName,
-  validateDiscoveryAddresses,
-  type Discovery,
-} from "./services/discovery.ts";
-export {
-  registryServiceName,
-  validateServiceNames,
-  type Registry,
-} from "./services/registry.ts";
 
 export interface Network {
   readonly id: string;
@@ -41,7 +30,7 @@ interface PendingConnection {
   readonly completion: Promise<Peer>;
 }
 
-export async function createNetwork(
+export default async function createNetwork(
   node: Libp2p,
   initializePeer: InitializePeer = () => {},
 ): Promise<Network> {

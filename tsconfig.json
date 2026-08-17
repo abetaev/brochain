@@ -11,7 +11,8 @@
     "noUnusedParameters": true,
     "moduleResolution": "bundler",
     "paths": {
-      "@/*": ["./vessel/*"]
+      "@c/*": ["./common/*"],
+      "@v/*": ["./vessel/*"]
     },
     "isolatedModules": true,
     "noEmit": true,

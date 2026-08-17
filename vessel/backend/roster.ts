@@ -1,14 +1,18 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import {
   discoveryServiceName,
-  registryServiceName,
   validateDiscoveryAddresses,
-  validateServiceNames,
   type Discovery,
+} from "@c/backend/network/services/discovery";
+import {
+  registryServiceName,
+  validateServiceNames,
+  type Registry,
+} from "@c/backend/network/services/registry";
+import {
   type Network,
   type Peer,
-  type Registry,
-} from "../../common/services/network/index.ts";
+} from "@c/backend/network";
 
 export interface Roster {
   list(): Promise<readonly Peer[]>;

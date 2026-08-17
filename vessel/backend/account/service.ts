@@ -1,5 +1,5 @@
 import { expose, type Endpoint } from "comlink";
-import { base64ToBytes, bytesToBase64 } from "../../../common/base64.ts";
+import { base64ToBytes, bytesToBase64 } from "@c/base64";
 
 interface PeerIdentity {
   username: string;
@@ -47,7 +47,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const incorrectPassword = new Error("The password is incorrect.");
 
-function createAccountService(databaseName = DATABASE_NAME) {
+export function createAccountService(databaseName = DATABASE_NAME) {
   let active: PeerIdentity | undefined;
   let sessionOpened = false;
   let mutations = Promise.resolve();
@@ -369,15 +369,4 @@ async function openAccountStorage(databaseName: string): Promise<IDBDatabase> {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("Unable to open account storage."));
   });
-}
-
-export function startAccountService(
-  endpoint: Endpoint = globalThis as unknown as Endpoint,
-  databaseName = DATABASE_NAME,
-): void {
-  expose(createAccountService(databaseName), endpoint);
-}
-
-if (typeof document === "undefined" && typeof globalThis.postMessage === "function") {
-  startAccountService();
 }

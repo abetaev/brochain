@@ -5,11 +5,11 @@ import { identify, identifyPush } from "@libp2p/identify";
 import { webSockets } from "@libp2p/websockets";
 import { createLibp2p } from "libp2p";
 import type { ServerOptions } from "node:https";
+import createNetwork from "../common/backend/network/index.ts";
 import {
   createDiscovery,
-  createNetwork,
   discoveryServiceName,
-} from "../common/services/network/index.ts";
+} from "../common/backend/network/services/discovery.ts";
 
 interface BeaconConfiguration {
   host: string;
@@ -44,15 +44,10 @@ export async function createBeacon(configuration: BeaconConfiguration) {
     },
   });
 
-  try {
-    return await createNetwork(node, (peer, network) => {
-      peer.host(
-        discoveryServiceName,
-        createDiscovery(peer, () => network.connectedPeers()),
-      );
-    });
-  } catch (error) {
-    await node.stop();
-    throw error;
-  }
+  return await createNetwork(node, (peer, network) => {
+    peer.host(
+      discoveryServiceName,
+      createDiscovery(peer, () => network.connectedPeers()),
+    );
+  });
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createStorage } from "./storage";
+import { createStorage } from "./storage.ts";
 
 describe("Session Storage", () => {
   it("returns stable scopes for each peer identity and service", () => {

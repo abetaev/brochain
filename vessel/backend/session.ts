@@ -6,26 +6,21 @@ import { identify, identifyPush } from "@libp2p/identify";
 import { webRTC } from "@libp2p/webrtc";
 import { webSockets } from "@libp2p/websockets";
 import { createLibp2p } from "libp2p";
-import { base64ToBytes } from "../common/base64.ts";
-import {
-  createNetwork,
-  type Network,
-  type Peer,
-} from "../common/services/network/index.ts";
-import { bootstrap } from "@/bootstrap";
+import { base64ToBytes } from "@c/base64";
+import createNetwork, { type Network, type Peer } from "@c/backend/network";
 import {
   createIdentity,
   identityServiceName,
-} from "@/services/network/services/identity";
+} from "@v/backend/network/services/identity";
 import {
   createMessaging,
   messagingServiceName,
-} from "@/services/network/services/messaging";
-import { createRoster, type Roster } from "@/services/roster";
+} from "@v/backend/network/services/messaging";
+import { createRoster, type Roster } from "@v/backend/roster";
 import {
   createStorage,
   type Storage,
-} from "@/services/storage";
+} from "@v/backend/storage";
 
 export interface Session {
   readonly username: string;
@@ -87,19 +82,14 @@ export async function createSession(
       },
     });
 
-    try {
-      const network = await createNetwork(node, (peer) => {
-        peer.host(identityServiceName, createIdentity(identity.username));
-        peer.host(
-          messagingServiceName,
-          createMessaging(storage.peer(peer.id).service(messagingServiceName)),
-        );
-      });
-      return { network, node };
-    } catch (error) {
-      await node.stop();
-      throw error;
-    }
+    const network = await createNetwork(node, (peer) => {
+      peer.host(identityServiceName, createIdentity(identity.username));
+      peer.host(
+        messagingServiceName,
+        createMessaging(storage.peer(peer.id).service(messagingServiceName)),
+      );
+    });
+    return { network, node };
   }
 
   let runtime: ReturnType<typeof createRuntime> | undefined;
@@ -178,6 +168,21 @@ export async function createSession(
       await shutdown;
     },
   };
+}
+
+async function bootstrap(
+  network: Network,
+  ready: () => Promise<void>,
+): Promise<Peer> {
+  const created = await network.createPeer(defaultBeaconAddress());
+  const peer = await created.connect();
+  await ready();
+  return peer;
+}
+
+function defaultBeaconAddress(): string {
+  const tls = window.location.protocol === "https:" ? "/tls" : "";
+  return `/dns4/${window.location.hostname}/tcp/${import.meta.env.BEACON_RELAY_PORT}${tls}/ws`;
 }
 
 async function waitForWebRtcAddress(

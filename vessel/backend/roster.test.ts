@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   Network,
   Peer,
-} from "../../common/services/network/index.ts";
+} from "@c/backend/network";
 import { createRoster } from "./roster.ts";
 
 const firstId = "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8";

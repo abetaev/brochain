@@ -7,18 +7,21 @@ import { webSockets } from "@libp2p/websockets";
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  createDiscovery,
-  createNetwork,
-  discoveryServiceName,
-  registryServiceName,
-  type Discovery,
+import createNetwork, {
   type InitializePeer,
   type Network,
   type Peer,
-  type Registry,
 } from "./index.ts";
 import { addressWithPeerId, destinationPeerId } from "./peer.ts";
+import {
+  createDiscovery,
+  discoveryServiceName,
+  type Discovery,
+} from "./services/discovery.ts";
+import {
+  registryServiceName,
+  type Registry,
+} from "./services/registry.ts";
 
 interface Echo {
   inspect(value: { payload: Uint8Array }): {

@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { MessageChannel, type MessagePort } from "node:worker_threads";
 import {
+  expose,
   releaseProxy,
   transfer,
   wrap,
@@ -9,7 +10,7 @@ import {
 } from "comlink";
 import { describe, expect, it } from "vitest";
 import {
-  startAccountService,
+  createAccountService,
   type AccountService,
   type SessionAccess,
 } from "./service.ts";
@@ -23,7 +24,7 @@ async function openAccountService(
 ) {
   const operationsChannel = new MessageChannel();
   const sessionChannel = new MessageChannel();
-  startAccountService(endpoint(operationsChannel.port1), databaseName);
+  expose(createAccountService(databaseName), endpoint(operationsChannel.port1));
   const operations = wrap<AccountService>(endpoint(operationsChannel.port2));
   await operations.openSession(
     transfer(endpoint(sessionChannel.port1), [

@@ -1,20 +1,29 @@
 architecture
 ============
 
-brochain consists of the browser application **Vessel** and a headless bootstrap and relay peer, **Beacon**. Both are peers built on the common Network; Vessel additionally owns user-facing local services.
+brochain consists of the browser application **Vessel** and a headless bootstrap and relay peer, **Beacon**. Both are peers built on the Common backend Network; Vessel additionally separates its own backend services from its frontend views.
 
 ```text
 Vessel
-├── Account (Worker)
-└── Session (Window)
-    ├── Storage
-    │   └── PeerStorage × peer identity
-    ├── Network (local peer)
-    │   └── Peer × connected remote identity
-    │       ├── Registry RPC
-    │       ├── Identity RPC
-    │       └── Messaging RPC
-    └── Roster
+├── Backend
+│   ├── Account (Worker)
+│   └── Session (Window)
+│       ├── Storage
+│       │   └── PeerStorage × peer identity
+│       ├── Network (local peer)
+│       │   └── Peer × connected remote identity
+│       │       ├── Registry RPC
+│       │       ├── Identity RPC
+│       │       └── Messaging RPC
+│       └── Roster
+└── Frontend (Window)
+    ├── Account
+    ├── Home
+    └── Chat
+
+Common
+└── Backend
+    └── Network, Peer, RPC, Registry, and Discovery
 
 Beacon
 └── Network (local peer)
@@ -23,6 +32,8 @@ Beacon
     │   └── Discovery RPC
     └── Circuit relay
 ```
+
+Backend and frontend are dependency layers, not separate deployments: both Vessel layers run in the browser, with Account isolated in a Worker. Frontend depends on Vessel backend services, and Vessel and Beacon both depend on Common's backend Network implementation. The `@v` and `@c` aliases are build-time conveniences for Vessel; Common and Beacon retain explicit relative imports so Beacon remains directly executable by Node.js.
 
 Vessel
 ------
@@ -85,7 +96,7 @@ RPC services are plain method objects. They may hold their designated Service St
 
 Chat appends outgoing events before invoking remote Messaging and appends failures when calls reject. Independent calls are not sequenced. Message history and unread counts use the remote counterpart's Messaging event store and named read singleton. They survive navigation within one Session and disappear when that Session ends.
 
-### UI
+### Frontend
 
 - **dependencies**: Account and the active Session
 - **behavior**:

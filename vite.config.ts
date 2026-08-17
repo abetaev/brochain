@@ -6,6 +6,7 @@ import solid from "vite-plugin-solid";
 import { developmentBeacon } from "./beacon/development.ts";
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
+const commonDirectory = resolve(projectDirectory, "common");
 const vesselDirectory = resolve(projectDirectory, "vessel");
 
 export default defineConfig(({ command, mode }) => {
@@ -26,7 +27,8 @@ export default defineConfig(({ command, mode }) => {
     },
     resolve: {
       alias: {
-        "@": vesselDirectory,
+        "@c": commonDirectory,
+        "@v": vesselDirectory,
       },
     },
     build: {

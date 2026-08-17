@@ -1,5 +1,5 @@
 import { transfer, wrap, type RemoteObject } from "comlink";
-import { createSession, type Session } from "@/session";
+import { createSession, type Session } from "@v/backend/session";
 import type { AccountService, SessionAccess } from "./service.ts";
 
 type Account = Omit<
@@ -11,7 +11,7 @@ type Account = Omit<
 };
 
 function createAccount(): Account {
-  const worker = new Worker(new URL("./service.ts", import.meta.url), { type: "module" });
+  const worker = new Worker(new URL("./main.ts", import.meta.url), { type: "module" });
   const backend = wrap<AccountService>(worker);
   const channel = new MessageChannel();
   const access = wrap<SessionAccess>(channel.port1);

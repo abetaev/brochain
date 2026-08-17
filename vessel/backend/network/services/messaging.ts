@@ -1,4 +1,4 @@
-import type { ServiceStorage } from "../../storage.ts";
+import type { ServiceStorage } from "@v/backend/storage";
 
 export const messagingServiceName = "messaging";
 

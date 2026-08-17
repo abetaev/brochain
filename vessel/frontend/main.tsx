@@ -2,10 +2,10 @@ import "@picocss/pico/css/pico.min.css";
 import "./styles.css";
 import { Match, Switch, createSignal } from "solid-js";
 import { render } from "solid-js/web";
-import type { Session } from "@/session";
-import { Account as AccountView } from "./views/Account";
-import { Chat as ChatView } from "./views/Chat";
-import { Home as HomeView } from "./views/Home";
+import type { Session } from "@v/backend/session";
+import { Account } from "./Account";
+import { Chat } from "./Chat";
+import { Home } from "./Home";
 
 type Location =
   | { readonly view: "account" }
@@ -34,11 +34,11 @@ function Vessel() {
 
       <Switch>
         <Match when={location().view === "account"}>
-          <AccountView onSignedIn={(session) => setLocation({ view: "home", session })} />
+          <Account onSignedIn={(session) => setLocation({ view: "home", session })} />
         </Match>
         <Match when={home()}>
           {(current) => (
-            <HomeView
+            <Home
               session={current().session}
               onOpenChat={(peerId) =>
                 setLocation({ view: "chat", session: current().session, peerId })}
@@ -50,7 +50,7 @@ function Vessel() {
         </Match>
         <Match when={chat()}>
           {(current) => (
-            <ChatView
+            <Chat
               session={current().session}
               peerId={current().peerId}
               onBack={() => setLocation({ view: "home", session: current().session })}

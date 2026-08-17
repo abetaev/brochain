@@ -1,11 +1,14 @@
 import { ZxcvbnFactory } from "@zxcvbn-ts/core";
 import * as common from "@zxcvbn-ts/language-common";
 import * as english from "@zxcvbn-ts/language-en";
-import { For, Show, createMemo, createSignal, onMount } from "solid-js";
-import account from "@/services/account";
-import type { Session } from "@/session";
+import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import account from "@v/backend/account";
+import type { Session } from "@v/backend/session";
 
-type AccountMode = "list" | "create" | "unlock";
+type AccountScreen =
+  | { readonly kind: "list" | "create" }
+  | { readonly kind: "unlock"; readonly username: string };
+type FormSubmitEvent = SubmitEvent & { currentTarget: HTMLFormElement };
 
 const passwordStrengthLabels = ["Very weak", "Weak", "Fair", "Strong", "Very strong"];
 const passwords = new ZxcvbnFactory({
@@ -15,117 +18,91 @@ const passwords = new ZxcvbnFactory({
 });
 
 export function Account(props: { onSignedIn(session: Session): void }) {
-  const [accounts, setAccounts] = createSignal<string[]>();
-  const [mode, setMode] = createSignal<AccountMode>("list");
-  const [username, setUsername] = createSignal("");
-  const [password, setPassword] = createSignal("");
-  const [confirmation, setConfirmation] = createSignal("");
-  const [selectedUsername, setSelectedUsername] = createSignal<string>();
+  const [screen, setScreen] = createSignal<AccountScreen>({ kind: "list" });
+  const [creationPassword, setCreationPassword] = createSignal("");
   const [error, setError] = createSignal<string>();
   const [busy, setBusy] = createSignal(false);
-  const hasAccounts = () => (accounts()?.length ?? 0) > 0;
-
-  async function refreshAccounts() {
+  const [accounts, { refetch }] = createResource(async () => {
     try {
-      setAccounts(await account.list());
+      return await account.list();
     } catch (reason) {
-      setAccounts([]);
+      setError(errorMessage(reason));
+      return [];
+    }
+  });
+  const hasAccounts = () => (accounts()?.length ?? 0) > 0;
+  const unlockUsername = () => {
+    const current = screen();
+    return current.kind === "unlock" ? current.username : undefined;
+  };
+
+  async function performMutation(operation: () => Promise<void>): Promise<void> {
+    setError(undefined);
+    setBusy(true);
+    try {
+      await operation();
+    } catch (reason) {
       setError(errorMessage(reason));
     }
+    setBusy(false);
   }
 
-  function resetForm() {
-    setUsername("");
-    setPassword("");
-    setConfirmation("");
+  function show(next: AccountScreen): void {
+    setCreationPassword("");
     setError(undefined);
+    setScreen(next);
   }
 
-  function showAccountCreation() {
-    resetForm();
-    setMode("create");
-  }
-
-  function showAccountList() {
-    resetForm();
-    setSelectedUsername(undefined);
-    setMode("list");
-  }
-
-  function showAccountUnlock(nextUsername: string) {
-    resetForm();
-    setSelectedUsername(nextUsername);
-    setMode("unlock");
-  }
-
-  async function createAccount(event: SubmitEvent) {
+  async function createAccount(event: FormSubmitEvent): Promise<void> {
     event.preventDefault();
-    setError(undefined);
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    const confirmation = String(data.get("password-confirmation") ?? "");
+    const password = creationPassword();
 
-    if (password() !== confirmation()) {
+    if (password !== confirmation) {
       setError("The password confirmation does not match.");
       return;
     }
 
-    setBusy(true);
-
-    try {
-      props.onSignedIn(await account.create(username(), password()));
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusy(false);
-    }
+    await performMutation(async () => {
+      props.onSignedIn(await account.create(String(data.get("username") ?? ""), password));
+    });
   }
 
-  async function unlockAccount(event: SubmitEvent) {
+  async function unlockAccount(
+    event: FormSubmitEvent,
+    username: string,
+  ): Promise<void> {
     event.preventDefault();
-    setError(undefined);
-    const selected = selectedUsername();
-
-    if (selected === undefined) {
-      return;
-    }
-
-    setBusy(true);
-
-    try {
-      props.onSignedIn(await account.unlock(selected, password()));
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusy(false);
-    }
+    const password = String(
+      new FormData(event.currentTarget).get("unlock-password") ?? "",
+    );
+    await performMutation(async () => {
+      props.onSignedIn(await account.unlock(username, password));
+    });
   }
 
   async function deleteAccount(
-    event: SubmitEvent & { currentTarget: HTMLFormElement },
+    event: FormSubmitEvent,
     username: string,
-  ) {
+  ): Promise<void> {
     event.preventDefault();
-    setError(undefined);
     const form = event.currentTarget;
-    const value = new FormData(form).get("delete-password");
-    setBusy(true);
+    const password = String(new FormData(form).get("delete-password") ?? "");
 
-    try {
-      const deleted = await account.delete(username, typeof value === "string" ? value : "");
-
-      if (!deleted) {
+    await performMutation(async () => {
+      if (!await account.delete(username, password)) {
         setError("The password is incorrect.");
         return;
       }
 
       form.reset();
-      await refreshAccounts();
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusy(false);
-    }
+      await refetch();
+    });
   }
 
-  async function exportAccount(username: string) {
+  async function exportAccount(username: string): Promise<void> {
     setError(undefined);
 
     try {
@@ -142,8 +119,6 @@ export function Account(props: { onSignedIn(session: Session): void }) {
     }
   }
 
-  onMount(() => void refreshAccounts());
-
   return (
     <section aria-labelledby="account-heading">
       <h2 id="account-heading">Account</h2>
@@ -153,7 +128,9 @@ export function Account(props: { onSignedIn(session: Session): void }) {
         <p aria-live="polite">Loading accounts…</p>
       </Show>
 
-      <Show when={accounts() !== undefined && (mode() === "create" || !hasAccounts())}>
+      <Show when={
+        accounts() !== undefined && (screen().kind === "create" || !hasAccounts())
+      }>
         <section aria-labelledby="registration-heading">
           <h3 id="registration-heading">Create an account</h3>
           <form onSubmit={createAccount}>
@@ -166,8 +143,6 @@ export function Account(props: { onSignedIn(session: Session): void }) {
                 pattern="[a-z]{1,64}"
                 title="Use 1 to 64 lowercase English letters."
                 required
-                value={username()}
-                onInput={(event) => setUsername(event.currentTarget.value)}
               />
             </label>
             <label for="new-password">
@@ -178,11 +153,11 @@ export function Account(props: { onSignedIn(session: Session): void }) {
                 type="password"
                 autocomplete="new-password"
                 required
-                value={password()}
-                onInput={(event) => setPassword(event.currentTarget.value)}
+                value={creationPassword()}
+                onInput={(event) => setCreationPassword(event.currentTarget.value)}
               />
             </label>
-            <PasswordStrength password={password()} />
+            <PasswordStrength password={creationPassword()} />
             <label for="password-confirmation">
               Confirm password
               <input
@@ -191,15 +166,18 @@ export function Account(props: { onSignedIn(session: Session): void }) {
                 type="password"
                 autocomplete="new-password"
                 required
-                value={confirmation()}
-                onInput={(event) => setConfirmation(event.currentTarget.value)}
               />
             </label>
             <button type="submit" aria-busy={busy()} disabled={busy()}>
               Create account
             </button>
             <Show when={hasAccounts()}>
-              <button class="secondary" type="button" disabled={busy()} onClick={showAccountList}>
+              <button
+                class="secondary"
+                type="button"
+                disabled={busy()}
+                onClick={() => show({ kind: "list" })}
+              >
                 Cancel
               </button>
             </Show>
@@ -207,7 +185,7 @@ export function Account(props: { onSignedIn(session: Session): void }) {
         </section>
       </Show>
 
-      <Show when={accounts() !== undefined && mode() === "list" && hasAccounts()}>
+      <Show when={accounts() !== undefined && screen().kind === "list" && hasAccounts()}>
         <section aria-labelledby="accounts-heading">
           <h3 id="accounts-heading">Choose an account</h3>
           <ul>
@@ -215,7 +193,11 @@ export function Account(props: { onSignedIn(session: Session): void }) {
               {(username) => (
                 <li>
                   <strong>{username}</strong>{" "}
-                  <button type="button" disabled={busy()} onClick={() => showAccountUnlock(username)}>
+                  <button
+                    type="button"
+                    disabled={busy()}
+                    onClick={() => show({ kind: "unlock", username })}
+                  >
                     Use
                   </button>{" "}
                   <button
@@ -247,17 +229,21 @@ export function Account(props: { onSignedIn(session: Session): void }) {
               )}
             </For>
           </ul>
-          <button type="button" disabled={busy()} onClick={showAccountCreation}>
+          <button
+            type="button"
+            disabled={busy()}
+            onClick={() => show({ kind: "create" })}
+          >
             Create another account
           </button>
         </section>
       </Show>
 
-      <Show when={mode() === "unlock" && selectedUsername()}>
+      <Show when={unlockUsername()}>
         {(username) => (
           <section aria-labelledby="unlock-heading">
             <h3 id="unlock-heading">Unlock {username()}</h3>
-            <form onSubmit={unlockAccount}>
+            <form onSubmit={(event) => void unlockAccount(event, username())}>
               <label for="unlock-password">
                 Password
                 <input
@@ -266,14 +252,17 @@ export function Account(props: { onSignedIn(session: Session): void }) {
                   type="password"
                   autocomplete="current-password"
                   required
-                  value={password()}
-                  onInput={(event) => setPassword(event.currentTarget.value)}
                 />
               </label>
               <button type="submit" aria-busy={busy()} disabled={busy()}>
                 Unlock account
               </button>
-              <button class="secondary" type="button" disabled={busy()} onClick={showAccountList}>
+              <button
+                class="secondary"
+                type="button"
+                disabled={busy()}
+                onClick={() => show({ kind: "list" })}
+              >
                 Cancel
               </button>
             </form>
@@ -297,7 +286,7 @@ function PasswordStrength(props: { password: string }) {
     const score = passwords.check(props.password).score;
     return {
       level: Math.max(1, score),
-      label: passwordStrengthLabels[score] ?? passwordStrengthLabels[0],
+      label: passwordStrengthLabels[score],
     };
   });
 

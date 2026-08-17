@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createStorage, type ServiceStorage } from "../../storage.ts";
+import { createStorage, type ServiceStorage } from "@v/backend/storage";
 import {
   createMessaging,
   messageDeliveryError,
