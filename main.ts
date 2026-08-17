@@ -112,7 +112,7 @@ async function runProjectCommand(command: string): Promise<void> {
   if (command === "prod") {
     await runCommand(installedCommand("tsc"), ["--noEmit"], projectDirectory);
     await runCommand(installedCommand("vite"), ["build"], projectDirectory);
-    await runCommand(process.execPath, ["beacon/main.ts"], projectDirectory);
+    await runCommand(process.execPath, ["beacon/prod.ts"], projectDirectory);
     return;
   }
 

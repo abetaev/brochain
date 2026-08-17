@@ -53,7 +53,7 @@ Vessel
 - **bootstrap**: Network startup is independent of the inferred default-Beacon connection. Bootstrap failure leaves a usable offline Network, records an error for Home, and is retried by later Network or Roster access whenever Beacon is disconnected. Successful bootstrap waits for the relay-backed WebRTC address.
 - **shutdown**: sign-out closes peer networking and the Account session
 
-### stateful local entities
+### Session services
 
 | Entity | Responsibility | State |
 | --- | --- | --- |

@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { VitePWA } from "vite-plugin-pwa";
 import solid from "vite-plugin-solid";
-import { developmentBeacon } from "./beacon/development.ts";
+import { createBeaconPlugin } from "./beacon/dev.ts";
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const commonDirectory = resolve(projectDirectory, "common");
@@ -37,7 +37,7 @@ export default defineConfig(({ command, mode }) => {
     },
     plugins: mode === "test" ? [] : [
       solid(),
-      developmentBeacon(),
+      createBeaconPlugin(),
       VitePWA({
         registerType: "autoUpdate",
         manifest: {
