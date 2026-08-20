@@ -3,6 +3,8 @@ brochain
 
 Private peer-to-peer communication.
 
+This document provide user documentation for the project.
+
 using brochain
 --------------
 

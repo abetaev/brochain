@@ -1,6 +1,8 @@
 architecture
 ============
 
+This document describes technical architecture of the project as well as its structure and behavior.
+
 brochain consists of the browser application **Vessel** and a headless bootstrap and relay peer, **Beacon**. Both are peers built on the Common backend Network; Vessel additionally separates its own backend services from its frontend views.
 
 ```text

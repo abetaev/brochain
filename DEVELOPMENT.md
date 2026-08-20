@@ -1,6 +1,8 @@
 development instructions
 ========================
 
+This document provides instructions for developers who want to contribute to project.
+
 runtime
 -------
 
