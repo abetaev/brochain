@@ -33,8 +33,6 @@ terminology and structure adjustments
 type: design, refactoring, architecture
 scope: backend, core, services
 
-service is the smallest application on brochain platform.
-
 `backend` components are:
  * account
  * network
@@ -65,11 +63,42 @@ storage should provide 2 modes of operation:
  * in-memory
  * persistent
 
+
+configuration service
+---------------------
+
+type: feature
+scope: backend services
+
+`options` service uses persistent kv storage to store configuration settings.
+
+each property has name key is arbitrary string consisting of:
+ - term characters (`[A-Za-z0-9-_]`) - used for naming entities
+ - special characters:
+   - dots (`.`) - defines properties of objects, one object may be property of another
+   - slashes (`/`) - defines collections of objects, one collection may be embedded into another, but it cannot be embedded into object
+     - collections may have properties, i.e. terms which follow `/` may also follow `.`
+
+do not enforce naming, just document convention
+
+settings frontend
+-----------------
+
+type: feature
+scope: frontend services, components, UI
+
+UI should provide generic way for its views to configure behavior of underlying frontend services.
+
+for this moment there should be at least `roster` service which should allow the following configuration:
+ - toggle service availability for a peer
+   property location: `peers/${peerId}/services/${serviceName}.enabled: boolean`
+
+
 persistent roster
 -----------------
 
 type: feature
-scope: frontend services/roster
+scope: frontend services/roster, configuration
 
 roster should start leveraging persistent storage to remember names of peers.
 
@@ -81,27 +110,21 @@ next time when peer is discovered roster should show peer's username instead of 
 
 > **future consideration**: it should be possible to assign arbitrary names to peers in future, but information from identity service should always be kept for reference/information.
 
+at this step the following configuration should be introduced:
+ - peer's cached identity
+   property: `peers/${peerId}/identity` - whole identity object returned by peer's identity service (if exposed)
+ - peer's display name
+   property: `peers/${peerId}.display_name : string = ${peers/${peerId}/identity.username}`
 
-configuration service
----------------------
-
-type: feature
-scope: backend services
-
-`options` service uses persistent kv storage to store configuration settings.
-
-each setting has name key in format `(\w+\.)?\w+`, i.e. similar to java `.properties` files.
-
-settings frontend
------------------
+peer display_name customization
+-------------------------------
 
 type: feature
-scope: frontend services, components, UI
+scope: frontend services & views - roster, configuration
 
-UI should provide generic way for its views to configure behavior of underlying frontend services.
+`peers/${peerId}.display_name` property is source of truth for how to show peer in roster.
 
-for this moment there should be at least `roster` service which should allow the following configuration:
- - select list of services provided to specific peer
+there should be a way to rename peer in local configuration, i.e. change `display_name` associated with `peerId`.
 
 network service collection
 --------------------------
