@@ -112,7 +112,7 @@ export function Chat(props: {
         setEvents(snapshot);
         read.put(snapshot.filter((event) => event.type === "received").length);
       };
-      stopEvents = messageEvents.subscribe(update);
+      stopEvents = props.session.signals().subscribe(messageEvents.changes, update);
       update();
       setChannel({
         remote: peer.service<MessagingService>(messagingServiceName),

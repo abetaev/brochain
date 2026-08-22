@@ -1,22 +1,37 @@
+import type { Signal, Signals } from "./signals.ts";
+
+export interface EventStorageChange {
+  readonly operation: "append";
+}
+
+export interface SingletonStorageChange {
+  readonly operation: "put" | "clear";
+}
+
+export interface KeyValueStorageChange {
+  readonly operation: "put" | "delete";
+  readonly key: string;
+}
+
 export interface EventStorage<T> {
+  readonly changes: Signal<EventStorageChange>;
   append(event: T): void;
   read(): readonly T[];
-  subscribe(listener: (event: T) => void): () => void;
 }
 
 export interface SingletonStorage<T> {
+  readonly changes: Signal<SingletonStorageChange>;
   get(): T | undefined;
   put(value: T): void;
   clear(): void;
-  subscribe(listener: (value: T | undefined) => void): () => void;
 }
 
 export interface KeyValueStorage<T> {
+  readonly changes: Signal<KeyValueStorageChange>;
   get(key: string): T | undefined;
   put(key: string, value: T): void;
   delete(key: string): void;
   entries(): readonly (readonly [string, T])[];
-  subscribe(listener: (key: string, value: T | undefined) => void): () => void;
 }
 
 export interface ServiceStorage {
@@ -33,14 +48,14 @@ export interface Storage {
   peer(peerId: string): PeerStorage;
 }
 
-export function createStorage(): Storage {
+export function createStorage(signals: Signals): Storage {
   const peers = new Map<string, PeerStorage>();
 
   return {
     peer(peerId) {
       let storage = peers.get(peerId);
       if (storage === undefined) {
-        storage = createPeerStorage();
+        storage = createPeerStorage(signals);
         peers.set(peerId, storage);
       }
       return storage;
@@ -48,14 +63,14 @@ export function createStorage(): Storage {
   };
 }
 
-function createPeerStorage(): PeerStorage {
+function createPeerStorage(signals: Signals): PeerStorage {
   const services = new Map<string, ServiceStorage>();
 
   return {
     service(name) {
       let storage = services.get(name);
       if (storage === undefined) {
-        storage = createServiceStorage();
+        storage = createServiceStorage(signals);
         services.set(name, storage);
       }
       return storage;
@@ -63,27 +78,31 @@ function createPeerStorage(): PeerStorage {
   };
 }
 
-function createServiceStorage(): ServiceStorage {
+function createServiceStorage(signals: Signals): ServiceStorage {
   const eventStores = new Map<string | undefined, EventStorage<unknown>>();
   const singletonStores = new Map<string | undefined, SingletonStorage<unknown>>();
   const keyValueStores = new Map<string | undefined, KeyValueStorage<unknown>>();
 
   return {
     event<T>(name?: string) {
-      return findStorage(eventStores, name, createEventStorage) as EventStorage<T>;
+      return findStorage(
+        eventStores,
+        name,
+        () => createEventStorage(signals),
+      ) as EventStorage<T>;
     },
     singleton<T>(name?: string) {
       return findStorage(
         singletonStores,
         name,
-        createSingletonStorage,
+        () => createSingletonStorage(signals),
       ) as SingletonStorage<T>;
     },
     kv<T>(name?: string) {
       return findStorage(
         keyValueStores,
         name,
-        createKeyValueStorage,
+        () => createKeyValueStorage(signals),
       ) as KeyValueStorage<T>;
     },
   };
@@ -102,74 +121,57 @@ function findStorage<T>(
   return storage;
 }
 
-function createEventStorage<T>(): EventStorage<T> {
+function createEventStorage<T>(signals: Signals): EventStorage<T> {
   const events: T[] = [];
-  const listeners = new Set<(event: T) => void>();
+  const changes = signals.channel<EventStorageChange>();
 
   return {
+    changes,
     append(event) {
       events.push(event);
-      for (const listener of listeners) listener(event);
+      signals.publish(changes, { operation: "append" });
     },
     read: () => Object.freeze([...events]),
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
   };
 }
 
-function createSingletonStorage<T>(): SingletonStorage<T> {
-  const listeners = new Set<(value: T | undefined) => void>();
+function createSingletonStorage<T>(signals: Signals): SingletonStorage<T> {
+  const changes = signals.channel<SingletonStorageChange>();
   let current: T | undefined;
 
-  function publish(): void {
-    for (const listener of listeners) listener(current);
-  }
-
   return {
+    changes,
     get: () => current,
     put(value) {
       current = value;
-      publish();
+      signals.publish(changes, { operation: "put" });
     },
     clear() {
       current = undefined;
-      publish();
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
+      signals.publish(changes, { operation: "clear" });
     },
   };
 }
 
-function createKeyValueStorage<T>(): KeyValueStorage<T> {
+function createKeyValueStorage<T>(signals: Signals): KeyValueStorage<T> {
   const values = new Map<string, T>();
-  const listeners = new Set<(key: string, value: T | undefined) => void>();
-
-  function publish(key: string, value: T | undefined): void {
-    for (const listener of listeners) listener(key, value);
-  }
+  const changes = signals.channel<KeyValueStorageChange>();
 
   return {
+    changes,
     get: (key) => values.get(key),
     put(key, value) {
       values.set(key, value);
-      publish(key, value);
+      signals.publish(changes, { operation: "put", key });
     },
     delete(key) {
       values.delete(key);
-      publish(key, undefined);
+      signals.publish(changes, { operation: "delete", key });
     },
     entries() {
       return Object.freeze(
         [...values].map(([key, value]) => Object.freeze([key, value] as const)),
       );
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
     },
   };
 }

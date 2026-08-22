@@ -10,6 +10,7 @@ Vessel
 ├── Backend
 │   ├── Account (Worker)
 │   └── Session (Window)
+│       ├── Signals
 │       ├── Storage
 │       │   └── PeerStorage × peer identity
 │       ├── Network (local peer)
@@ -53,7 +54,7 @@ Vessel
 
 - **runtime**: Window
 - **dependency**: one unlocked Account identity
-- **behavior**: owns one Network and Storage lifetime; stable accessors initialize and maintain these account-bound core components so consumers do not coordinate their construction, bootstrap, retry, or shutdown
+- **behavior**: owns one Network, Signals, and Storage lifetime; stable accessors initialize and maintain these account-bound core components so consumers do not coordinate their construction, bootstrap, retry, or shutdown
 - **bootstrap**: Network startup is independent of the inferred default-Beacon connection. Bootstrap failure leaves a usable offline Network, records an error for Home, and is retried by later Network access, including requests made by Roster, whenever Beacon is disconnected. Successful bootstrap waits for the relay-backed WebRTC address.
 - **shutdown**: sign-out closes peer networking and the Account session
 
@@ -62,6 +63,7 @@ Vessel
 | Entity | Responsibility | State |
 | --- | --- | --- |
 | **Network** | Represents the local peer, constructs remote Peers, retains one active Peer per connected identity, and owns the libp2p lifetime. | Active connections and transient connection attempts |
+| **Signals** | Creates typed channels and synchronously publishes notifications to their Session-local subscribers in subscription order. Channels accept publication and subscription only through their owning Signals instance. | Subscriptions only; notifications are neither retained nor replayed |
 | **Storage** | Provides event, singleton, and key/value stores scoped first by peer identity and then by service. | Memory; discarded with the Session |
 
 ### Network and Peer
@@ -80,7 +82,7 @@ Vessel reaches Beacon over WebSockets and Circuit Relay v2, then uses WebRTC for
 
 ### Session Storage
 
-Storage is addressed as `peer(peerId).service(serviceName)` and then as an event, singleton, or key/value store. Local-service state uses the local `Network.id`; RPC interaction state uses the remote counterpart's ID. For example, sent and received messages with one remote peer share that peer's Messaging event store. Infrastructure state required to operate Session, Network, and Peer lifetimes remains encapsulated by those entities.
+Storage is addressed as `peer(peerId).service(serviceName)` and then as an event, singleton, or key/value store. Each store exposes a typed Signals channel for change notifications. Mutations update the retained projection before publishing, and notifications contain only the operation needed to identify the change; consumers read the current projection from Storage. Local-service state uses the local `Network.id`; RPC interaction state uses the remote counterpart's ID. For example, sent and received messages with one remote peer share that peer's Messaging event store. Infrastructure state required to operate Session, Network, and Peer lifetimes remains encapsulated by those entities.
 
 ### peer RPC services
 

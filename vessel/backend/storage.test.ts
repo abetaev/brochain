@@ -1,9 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import { createStorage } from "./storage.ts";
+import { createSignals } from "./signals.ts";
+import {
+  createStorage,
+  type EventStorageChange,
+  type KeyValueStorageChange,
+  type SingletonStorageChange,
+} from "./storage.ts";
+
+function testStorage() {
+  const signals = createSignals();
+  return { signals, storage: createStorage(signals) };
+}
 
 describe("Session Storage", () => {
   it("returns stable scopes for each peer identity and service", () => {
-    const storage = createStorage();
+    const { storage } = testStorage();
     const peer = storage.peer("peer");
     const service = peer.service("messaging");
 
@@ -14,11 +25,13 @@ describe("Session Storage", () => {
   });
 
   it("retains events, publishes them after append, and returns immutable snapshots", () => {
-    const events = createStorage().peer("peer").service("messaging").event<string>();
-    const listener = vi.fn((event: string) => {
-      expect(events.read()).toEqual([event]);
+    const { signals, storage } = testStorage();
+    const events = storage.peer("peer").service("messaging").event<string>();
+    const listener = vi.fn((change: EventStorageChange) => {
+      expect(events.read()).toEqual(["first"]);
+      expect(change).toEqual({ operation: "append" });
     });
-    const unsubscribe = events.subscribe(listener);
+    const unsubscribe = signals.subscribe(events.changes, listener);
 
     events.append("first");
     const snapshot = events.read();
@@ -26,17 +39,31 @@ describe("Session Storage", () => {
     events.append("second");
 
     expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith({ operation: "append" });
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(snapshot).toEqual(["first"]);
     expect(events.read()).toEqual(["first", "second"]);
   });
 
-  it("stores, clears, and publishes singleton values after mutation", () => {
-    const value = createStorage().peer("peer").service("identity").singleton<string>();
-    const listener = vi.fn((next: string | undefined) => {
-      expect(value.get()).toBe(next);
+  it("retains a mutation before propagating a subscriber failure", () => {
+    const { signals, storage } = testStorage();
+    const events = storage.peer("peer").service("messaging").event<string>();
+    const failure = new Error("Subscriber failed.");
+    signals.subscribe(events.changes, () => {
+      throw failure;
     });
-    const unsubscribe = value.subscribe(listener);
+
+    expect(() => events.append("retained")).toThrow(failure);
+    expect(events.read()).toEqual(["retained"]);
+  });
+
+  it("stores, clears, and publishes singleton values after mutation", () => {
+    const { signals, storage } = testStorage();
+    const value = storage.peer("peer").service("identity").singleton<string>();
+    const listener = vi.fn((change: SingletonStorageChange) => {
+      expect(value.get()).toBe(change.operation === "put" ? "current" : undefined);
+    });
+    const unsubscribe = signals.subscribe(value.changes, listener);
 
     expect(value.get()).toBeUndefined();
     value.put("current");
@@ -44,16 +71,24 @@ describe("Session Storage", () => {
     unsubscribe();
     value.put("ignored");
 
-    expect(listener.mock.calls).toEqual([["current"], [undefined]]);
+    expect(listener.mock.calls).toEqual([
+      [{ operation: "put" }],
+      [{ operation: "clear" }],
+    ]);
     expect(value.get()).toBe("ignored");
   });
 
   it("stores, deletes, and publishes key/value entries after mutation", () => {
-    const values = createStorage().peer("peer").service("contacts").kv<number>();
-    const listener = vi.fn((key: string, value: number | undefined) => {
-      expect(values.get(key)).toBe(value);
+    const { signals, storage } = testStorage();
+    const values = storage.peer("peer").service("contacts").kv<number>();
+    const observations: Array<{
+      readonly change: KeyValueStorageChange;
+      readonly value: number | undefined;
+    }> = [];
+    const listener = vi.fn((change: KeyValueStorageChange) => {
+      observations.push({ change, value: values.get(change.key) });
     });
-    const unsubscribe = values.subscribe(listener);
+    const unsubscribe = signals.subscribe(values.changes, listener);
 
     values.put("ada", 1);
     values.put("bob", 2);
@@ -63,9 +98,14 @@ describe("Session Storage", () => {
     values.put("ignored", 3);
 
     expect(listener.mock.calls).toEqual([
-      ["ada", 1],
-      ["bob", 2],
-      ["ada", undefined],
+      [{ operation: "put", key: "ada" }],
+      [{ operation: "put", key: "bob" }],
+      [{ operation: "delete", key: "ada" }],
+    ]);
+    expect(observations).toEqual([
+      { change: { operation: "put", key: "ada" }, value: 1 },
+      { change: { operation: "put", key: "bob" }, value: 2 },
+      { change: { operation: "delete", key: "ada" }, value: undefined },
     ]);
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(snapshot.every(Object.isFrozen)).toBe(true);
@@ -74,7 +114,8 @@ describe("Session Storage", () => {
   });
 
   it("keeps storage kinds, default names, and named stores independent", () => {
-    const service = createStorage().peer("peer").service("service");
+    const { storage } = testStorage();
+    const service = storage.peer("peer").service("service");
     const events = service.event<string>();
     const namedEvents = service.event<string>("");
     const singleton = service.singleton<string>();
@@ -96,8 +137,8 @@ describe("Session Storage", () => {
   });
 
   it("isolates peer, service, and Session scopes", () => {
-    const first = createStorage();
-    const second = createStorage();
+    const first = testStorage().storage;
+    const second = testStorage().storage;
     const events = first.peer("peer").service("messaging").event<string>();
 
     events.append("first Session only");

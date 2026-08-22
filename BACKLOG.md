@@ -11,20 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-signals
--------
-
-type: feature, refactoring, architecture
-scope: backend core, services, frontend integration
-
-Signals provides structured publish/subscribe integration between components.
-It transports typed notifications but MUST NOT retain or replay data.
-
-Storage subscriptions should move to Signals. A domain operation which changes
-retained state MUST update Storage before publishing its notification, so a
-consumer can respond by reading the current stored projection. Signal channels
-and their payloads will be refined before implementation.
-
 storage modes
 -------------
 

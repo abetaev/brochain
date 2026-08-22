@@ -16,6 +16,7 @@ import {
   createMessaging,
   messagingServiceName,
 } from "@v/backend/network/services/messaging";
+import { createSignals, type Signals } from "@v/backend/signals";
 import {
   createStorage,
   type Storage,
@@ -24,6 +25,7 @@ import {
 export interface Session {
   readonly username: string;
   network(): Promise<Network>;
+  signals(): Signals;
   storage(): Storage;
   bootstrapError(): string | undefined;
   close(): Promise<void>;
@@ -48,7 +50,8 @@ export async function createSession(
     "Ed25519",
     base64ToBytes(identity.identitySeed),
   );
-  const storage = createStorage();
+  const signals = createSignals();
+  const storage = createStorage(signals);
   const lifetime = new AbortController();
   let beacon: Peer | undefined;
   let bootstrapAttempt: Promise<void> | undefined;
@@ -138,6 +141,10 @@ export async function createSession(
   return {
     username: identity.username,
     network: accessNetwork,
+    signals() {
+      requireOpen();
+      return signals;
+    },
     storage() {
       requireOpen();
       return storage;

@@ -216,6 +216,7 @@ function PeerRow(props: {
     .service(messagingServiceName);
   const events = storage.event<MessagingEvent>();
   const read = storage.singleton<number>("read");
+  const signals = props.session.signals();
   const [unread, setUnread] = createSignal(false);
 
   function updateUnread(): void {
@@ -223,7 +224,10 @@ function PeerRow(props: {
     setUnread(received > (read.get() ?? 0));
   }
 
-  const stops = [events.subscribe(updateUnread), read.subscribe(updateUnread)];
+  const stops = [
+    signals.subscribe(events.changes, updateUnread),
+    signals.subscribe(read.changes, updateUnread),
+  ];
   updateUnread();
   onCleanup(() => stops.forEach((stop) => stop()));
 

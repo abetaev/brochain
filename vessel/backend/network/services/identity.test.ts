@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PromisedMethods } from "@c/backend/network";
+import { createSignals } from "@v/backend/signals";
 import { createStorage, type ServiceStorage } from "@v/backend/storage";
 import {
   createIdentity,
@@ -9,7 +10,7 @@ import {
 
 function contactStorage(
   peerId = "remote-peer",
-  storage = createStorage(),
+  storage = createStorage(createSignals()),
 ): ServiceStorage {
   return storage.peer(peerId).service("identity");
 }
@@ -57,8 +58,8 @@ describe("Identity", () => {
   });
 
   it("isolates cached Contacts by peer and Session storage", async () => {
-    const firstSession = createStorage();
-    const secondSession = createStorage();
+    const firstSession = createStorage(createSignals());
+    const secondSession = createStorage(createSignals());
     const firstPeer = contactStorage("first", firstSession);
     const secondPeer = contactStorage("second", firstSession);
     const nextSession = contactStorage("first", secondSession);

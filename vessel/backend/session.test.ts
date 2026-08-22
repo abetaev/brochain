@@ -128,8 +128,22 @@ describe("Session access and lifetime", () => {
 
     expect(session.storage()).toBe(session.storage());
     expect(session.storage().peer("remote")).toBe(session.storage().peer("remote"));
+    expect(session.signals()).toBe(session.signals());
 
     await session.close();
+  });
+
+  it("isolates Signals between Sessions", async () => {
+    const first = await openSession();
+    const second = await openSession();
+    const signal = first.signals().channel<string>();
+
+    expect(first.signals()).not.toBe(second.signals());
+    expect(() => second.signals().subscribe(signal, () => {})).toThrow(
+      "Signal does not belong to these Signals.",
+    );
+
+    await Promise.all([first.close(), second.close()]);
   });
 
   it("uses TLS when the Vessel page is served over HTTPS", async () => {
@@ -313,6 +327,7 @@ describe("Session access and lifetime", () => {
     expect(runtime.network.close).toHaveBeenCalledOnce();
     expect(closeAccountSession).toHaveBeenCalledOnce();
     expect(runtime.network.createPeer).not.toHaveBeenCalled();
+    expect(() => session.signals()).toThrow("Session is closed");
     expect(() => session.storage()).toThrow("Session is closed");
   });
 

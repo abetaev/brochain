@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createSignals, type Signals } from "@v/backend/signals";
 import { createStorage, type ServiceStorage } from "@v/backend/storage";
 import {
   createMessaging,
@@ -8,13 +9,18 @@ import {
   validateMessageText,
 } from "./messaging.ts";
 
-function messagingStorage(): ServiceStorage {
-  return createStorage().peer("remote-peer").service("messaging");
+function messagingContext(): {
+  readonly signals: Signals;
+  readonly storage: ServiceStorage;
+} {
+  const signals = createSignals();
+  const storage = createStorage(signals).peer("remote-peer").service("messaging");
+  return { signals, storage };
 }
 
 describe("Messaging", () => {
   it("retains validated inbound text and files in its designated service storage", async () => {
-    const storage = messagingStorage();
+    const { storage } = messagingContext();
     const messaging = createMessaging(storage);
 
     expect(messaging).toEqual({
@@ -45,7 +51,7 @@ describe("Messaging", () => {
   });
 
   it("rejects invalid inbound values without recording them", () => {
-    const storage = messagingStorage();
+    const { storage } = messagingContext();
     const messaging = createMessaging(storage);
 
     expect(() => messaging.sendText(" \n ")).toThrow("Enter a message.");
@@ -60,8 +66,8 @@ describe("Messaging", () => {
   });
 
   it("isolates service instances backed by independent Session storage", () => {
-    const firstStorage = messagingStorage();
-    const secondStorage = messagingStorage();
+    const firstStorage = messagingContext().storage;
+    const secondStorage = messagingContext().storage;
 
     createMessaging(firstStorage).sendText("first only");
 
@@ -94,15 +100,19 @@ describe("Messaging", () => {
   });
 
   it("notifies UI subscribers only after an incoming event is retained", () => {
-    const storage = messagingStorage();
+    const { signals, storage } = messagingContext();
     const events = storage.event<MessagingEvent>();
-    const listener = vi.fn((event: MessagingEvent) => {
-      expect(events.read().at(-1)).toBe(event);
+    const listener = vi.fn(() => {
+      expect(events.read().at(-1)).toEqual({
+        type: "received",
+        content: { type: "text", text: "hello" },
+      });
     });
-    events.subscribe(listener);
+    signals.subscribe(events.changes, listener);
 
     createMessaging(storage).sendText("hello");
 
     expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith({ operation: "append" });
   });
 });
