@@ -39,9 +39,27 @@ export default defineConfig(({ command, mode }) => {
       assetsInlineLimit: (filePath) => filePath === iconPath ? false : undefined,
       rolldownOptions: {
         output: {
+          strictExecutionOrder: true,
           assetFileNames: (asset) => asset.names.includes("icon.svg")
             ? "icon.svg"
             : "assets/[name]-[hash][extname]",
+          codeSplitting: {
+            includeDependenciesRecursively: true,
+            groups: [
+              {
+                name: "password-strength",
+                test: /node_modules[\\/]@zxcvbn-ts[\\/]/,
+                maxSize: 499_000,
+                priority: 2,
+              },
+              {
+                name: "peer-networking",
+                test: /node_modules[\\/](?:@chainsafe|@libp2p|libp2p)[\\/]/,
+                maxSize: 499_000,
+                priority: 1,
+              },
+            ],
+          },
         },
       },
     },

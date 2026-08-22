@@ -1,5 +1,5 @@
 import { transfer, wrap, type RemoteObject } from "comlink";
-import { createSession, type Session } from "@v/backend/session";
+import type { Session } from "@v/backend/session";
 import type { AccountService, SessionAccess } from "./service.ts";
 
 type Account = Omit<
@@ -25,6 +25,7 @@ function createAccount(): Account {
     await operation();
     let session: Session;
     try {
+      const { createSession } = await import("@v/backend/session");
       session = await createSession(
         async () => await access.activePeerIdentity(),
         async () => {

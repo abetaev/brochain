@@ -11,25 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-bundling warning in prod mode
------------------------------
-
-type: bug
-scope: prod
-
-when running in prod mod the following warning pops up:
-```
-dist/assets/index-CbWJjjNt.js   2,279.47 kB │ gzip: 1,024.26 kB
-
-✓ built in 689ms
-[plugin builtin:vite-reporter] 
-(!) Some chunks are larger than 500 kB after minification. Consider:
-- Using dynamic import() to code-split the application
-- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
-- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
-```
-
-
 frontend and naming structure
 -----------------------------
 

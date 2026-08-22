@@ -1,7 +1,5 @@
-import { ZxcvbnFactory } from "@zxcvbn-ts/core";
-import * as common from "@zxcvbn-ts/language-common";
-import * as english from "@zxcvbn-ts/language-en";
-import { For, Show, createMemo, createResource, createSignal } from "solid-js";
+import type { ZxcvbnFactory } from "@zxcvbn-ts/core";
+import { For, Show, createResource, createSignal } from "solid-js";
 import account from "@v/backend/account";
 import type { Session } from "@v/backend/session";
 
@@ -11,11 +9,31 @@ type AccountScreen =
 type FormSubmitEvent = SubmitEvent & { currentTarget: HTMLFormElement };
 
 const passwordStrengthLabels = ["Very weak", "Weak", "Fair", "Strong", "Very strong"];
-const passwords = new ZxcvbnFactory({
-  dictionary: { ...common.dictionary, ...english.dictionary },
-  graphs: common.adjacencyGraphs,
-  translations: english.translations,
-});
+let passwords: Promise<ZxcvbnFactory> | undefined;
+
+async function loadPasswords(): Promise<ZxcvbnFactory> {
+  const loading = passwords ??= initializePasswords();
+
+  try {
+    return await loading;
+  } catch (error) {
+    if (passwords === loading) passwords = undefined;
+    throw error;
+  }
+}
+
+async function initializePasswords(): Promise<ZxcvbnFactory> {
+  const [{ ZxcvbnFactory }, common, english] = await Promise.all([
+    import("@zxcvbn-ts/core"),
+    import("@zxcvbn-ts/language-common"),
+    import("@zxcvbn-ts/language-en"),
+  ]);
+  return new ZxcvbnFactory({
+    dictionary: { ...common.dictionary, ...english.dictionary },
+    graphs: common.adjacencyGraphs,
+    translations: english.translations,
+  });
+}
 
 export function Account(props: { onSignedIn(session: Session): void }) {
   const [screen, setScreen] = createSignal<AccountScreen>({ kind: "list" });
@@ -278,34 +296,48 @@ function errorMessage(reason: unknown): string {
 }
 
 function PasswordStrength(props: { password: string }) {
-  const strength = createMemo(() => {
-    if (props.password.length === 0) {
-      return { level: 0, label: "Enter a password" };
-    }
-
-    const score = passwords.check(props.password).score;
+  const [strength] = createResource(
+    () => props.password || undefined,
+    async (password) => {
+      const score = (await loadPasswords()).check(password).score;
+      return {
+        level: Math.max(1, score),
+        label: passwordStrengthLabels[score],
+      };
+    },
+  );
+  const current = () => {
+    if (props.password.length === 0) return { level: 0, label: "Enter a password" };
+    if (strength.loading) return { level: 0, label: "Checking…" };
+    if (strength.error !== undefined) return { level: 0, label: "Unavailable" };
     return {
-      level: Math.max(1, score),
-      label: passwordStrengthLabels[score],
+      level: strength()?.level ?? 0,
+      label: strength()?.label ?? "Unavailable",
     };
-  });
+  };
+  const description = () => {
+    if (current().label === "Checking…") return "Checking password strength…";
+    if (current().label === "Unavailable") return "Password strength unavailable.";
+    return `Password strength: ${current().label}`;
+  };
 
   return (
     <div>
       <div
         class="password-strength"
-        data-level={strength().level}
+        data-level={current().level}
         role="meter"
-        aria-label={`Password strength: ${strength().label}`}
+        aria-label={description()}
+        aria-busy={strength.loading}
         aria-valuemin="0"
         aria-valuemax="4"
-        aria-valuenow={strength().level}
+        aria-valuenow={current().level}
       >
         <For each={[1, 2, 3, 4]}>
-          {(level) => <span classList={{ active: level <= strength().level }} />}
+          {(level) => <span classList={{ active: level <= current().level }} />}
         </For>
       </div>
-      <small>Password strength: {strength().label}</small>
+      <small>{description()}</small>
     </div>
   );
 }
