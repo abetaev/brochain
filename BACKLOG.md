@@ -11,150 +11,190 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-move assets around
-------------------
-
-type: refactoring
-scope: frontend
-
-`vessel/index.html` and `public/icon.svg` should be located in `vessel/frontend`
-
-favicon is not visible
-----------------------
+bundling warning in prod mode
+-----------------------------
 
 type: bug
-scope: frontend
+scope: prod
 
-favicon is not visible neither in dev nor in prod mode.
+when running in prod mod the following warning pops up:
+```
+dist/assets/index-CbWJjjNt.js   2,279.47 kB │ gzip: 1,024.26 kB
 
-terminology and structure adjustments
--------------------------------------
+✓ built in 689ms
+[plugin builtin:vite-reporter] 
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+```
+
+
+frontend and naming structure
+-----------------------------
 
 type: design, refactoring, architecture
-scope: backend, core, services
+scope: frontend, backend, core, services, guidelines
 
-`backend` components are:
- * account
- * network
- * session
- * storage
- * options
+Organize Vessel's frontend so that:
 
-`roster` is frontend service and should be moved to frontend/services directory within vessel.
+- `vessel/frontend` contains only `index.html`, `styles.css`, `main.tsx`, and `icon.svg`
+- `vessel/frontend/views` contains the existing views
+- `vessel/frontend/services` contains frontend services
 
-frontend structure
-------------------
+Roster is a frontend service and MUST move from the backend to
+`vessel/frontend/services`.
 
-type: refactoring
-scope: frontend
+Add a conventions section to `GUIDELINES.md`. A designated backend core
+component has a seven-letter lowercase English designation; language-idiomatic
+symbol capitalization does not change that designation. The current and
+planned core components are `account`, `network`, `options`, `session`,
+`signals`, and `storage`. Non-core component names have no length constraint.
 
-frontend should be organized in the following way:
- - `vessel/frontend` should contain only index.html, relevant stylesheet if applicable, main.tsx and icon.svg
- - `vessel/frontend/views` should contain all existing views
- - `vessel/frontend/services` should contain frontend services (currently only `roster`)
+This task MUST move only implemented entities. It MUST NOT create placeholder
+modules or directories for planned core components.
 
-persistent storage
-------------------
+signals
+-------
+
+type: feature, refactoring, architecture
+scope: backend core, services, frontend integration
+
+Signals provides structured publish/subscribe integration between components.
+It transports typed notifications but MUST NOT retain or replay data.
+
+Storage subscriptions should move to Signals. A domain operation which changes
+retained state MUST update Storage before publishing its notification, so a
+consumer can respond by reading the current stored projection. Signal channels
+and their payloads will be refined before implementation.
+
+storage modes
+-------------
 
 type: feature
 scope: backend services
 
-storage should provide 2 modes of operation:
- * in-memory
- * persistent
+Storage is solely responsible for retaining and retrieving data and should
+provide in-memory and persistent implementations. Preserve the existing event,
+singleton, and key/value operations, but implement a persistent store kind only
+when a current consumer requires it. Options initially requires persistent
+key/value storage; persistent event storage is deferred until a durable consumer
+such as chat history is introduced.
 
+Persistent operations are asynchronous and MUST make failures observable.
+Persistent data is isolated by the unlocked local account identity and MUST be
+deleted when that account is deleted. In-memory data remains limited to its
+owning Session.
 
-configuration service
----------------------
+options
+-------
 
 type: feature
 scope: backend services
 
-`options` service uses persistent kv storage to store configuration settings.
+The `options` core component uses persistent key/value Storage for editable
+settings. “Settings” designates the frontend which edits Options; it is not the
+backend component name. Observed remote data, such as cached identity, MUST
+remain owned by the service that observed it rather than Options.
 
-each property has name key is arbitrary string consisting of:
- - term characters (`[A-Za-z0-9-_]`) - used for naming entities
- - special characters:
-   - dots (`.`) - defines properties of objects, one object may be property of another
-   - slashes (`/`) - defines collections of objects, one collection may be embedded into another, but it cannot be embedded into object
-     - collections may have properties, i.e. terms which follow `/` may also follow `.`
+Option keys follow this documented convention:
 
-do not enforce naming, just document convention
+- terms use `[A-Za-z0-9_-]+` and designate entities
+- dots designate object properties, including nested properties
+- slashes designate collections and their members; a collection may contain
+  another collection but MUST NOT be nested inside an object property
+- a collection member may have properties
 
-settings frontend
------------------
-
-type: feature
-scope: frontend services, components, UI
-
-UI should provide generic way for its views to configure behavior of underlying frontend services.
-
-for this moment there should be at least `roster` service which should allow the following configuration:
- - toggle service availability for a peer
-   property location: `peers/${peerId}/services/${serviceName}.enabled: boolean`
-
+The convention is descriptive and MUST NOT be enforced by Options.
 
 persistent roster
 -----------------
 
 type: feature
-scope: frontend services/roster, configuration
+scope: frontend services, roster, storage, options
 
-roster should start leveraging persistent storage to remember names of peers.
+Roster uses persistent Storage to cache the latest valid whole Identity object
+for each remote peer at `peers/${peerId}.identity`. Identity currently has the
+shape `{ name: string }`.
 
-initially when peer is discovered we know just its id.
+When a connected peer exposes Identity, Roster refreshes and validates the
+cached value. A failure MUST retain the last valid cache. Roster initializes the
+editable `peers/${peerId}.display_name` Option from `identity.name` only when the
+option is absent; later identity refreshes MUST NOT overwrite it.
 
-when connection is established and if peer exposes identity service then roster should remember this identity.
-
-next time when peer is discovered roster should show peer's username instead of peerid.
-
-> **future consideration**: it should be possible to assign arbitrary names to peers in future, but information from identity service should always be kept for reference/information.
-
-at this step the following configuration should be introduced:
- - peer's cached identity
-   property: `peers/${peerId}/identity` - whole identity object returned by peer's identity service (if exposed)
- - peer's display name
-   property: `peers/${peerId}.display_name : string = ${peers/${peerId}/identity.username}`
-
-peer display_name customization
--------------------------------
-
-type: feature
-scope: frontend services & views - roster, configuration
-
-`peers/${peerId}.display_name` property is source of truth for how to show peer in roster.
-
-there should be a way to rename peer in local configuration, i.e. change `display_name` associated with `peerId`.
+When presenting a currently connected or discovered peer, Roster resolves its
+name in this order: display-name Option, cached identity name, peer ID. It does
+not persist peer availability, addresses, or Discovery results.
 
 network service collection
 --------------------------
 
 type: feature
-scope: network
+scope: network, services, options
 
-network services should be standardized to allow compatibility validation.
+Network owns one introspectable catalog containing every service the local
+application can publish:
 
-all network services should be published using a single collection object
 ```ts
 type Services = Record<string, Service>
 ```
 
-Local Peer supposed to publish whole or partial object and validate which of supported services are available for it.
-So when peers connect they publish to each other services based on configuration.
+This catalog is the single source used for service publication and for settings
+introspection. Existing plain service names remain unchanged. Versioned service
+identifiers and plugin extensibility are future work.
 
+Registry remains mandatory. Other supported services are enabled by default for
+each remote peer and may be disabled with
+`peers/${peerId}/services/${serviceName}.enabled`. Each Peer publishes only its
+enabled subset to that identified remote peer, and Registry reports that current
+subset. Option changes MUST affect an existing connected Peer immediately.
 
+settings frontend and peer view
+-------------------------------
 
+type: feature
+scope: frontend services, views, components, options, network
 
+Add a `Peer` view which displays information about an identified peer and
+provides the generic settings controls used to configure it. Every Home roster
+row and Chat MUST provide navigation to this view, and leaving it returns to the
+originating view.
+
+Initially, Peer lists the locally supported optional services from Network's
+Services catalog and edits their per-peer enabled Options. Registry is not
+configurable. Saved changes apply immediately, including while connected.
+
+peer display-name customization
+-------------------------------
+
+type: feature
+scope: frontend services, views, roster, options
+
+Extend Peer with editing for `peers/${peerId}.display_name`. A display name is
+arbitrary Unicode text which is trimmed before storage and MUST contain 1–64
+characters. The saved display name is the source of truth for every UI reference
+to that peer in Home, Chat, and Peer, with cached identity name and peer ID as
+fallbacks.
+
+The cached remote Identity remains available in Peer for reference and MUST NOT
+be overwritten by local naming.
 
 message confirmations
 ---------------------
 
 type: feature
-scope: network/services/messaging, UI
+scope: network services, messaging, signals, storage, UI
 
-when peer A reads message from peer B it MAY send confirmation to peer B about message receipt.
+Every text or file message has an opaque unique ID. The sender UI tracks and
+shows separate delivered and read states for that message while continuing to
+render a send immediately.
 
-upon receiving confirmation UI must reflect message receipt. 
+Successful completion of the remote send operation marks the message delivered
+because the recipient has validated and retained it. When Chat renders a
+received message, the recipient sends a separate read confirmation for that
+message ID. Failed read confirmations remain queued in transient Session state
+and retry when the peer reconnects during that Session; confirmations are not
+persisted for offline delivery.
 
 thoughts
 ========

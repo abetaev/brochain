@@ -8,6 +8,8 @@ import { createBeaconPlugin } from "./beacon/dev.ts";
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const commonDirectory = resolve(projectDirectory, "common");
 const vesselDirectory = resolve(projectDirectory, "vessel");
+const frontendDirectory = resolve(vesselDirectory, "frontend");
+const iconPath = resolve(frontendDirectory, "icon.svg");
 
 export default defineConfig(({ command, mode }) => {
   const configuredRelayPort = command === "serve"
@@ -19,9 +21,9 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    root: vesselDirectory,
+    root: frontendDirectory,
     cacheDir: resolve(projectDirectory, "node_modules/.vite"),
-    publicDir: resolve(projectDirectory, "public"),
+    publicDir: false,
     define: {
       "import.meta.env.BEACON_RELAY_PORT": JSON.stringify(String(relayPort)),
     },
@@ -34,12 +36,21 @@ export default defineConfig(({ command, mode }) => {
     build: {
       outDir: resolve(projectDirectory, "dist"),
       emptyOutDir: true,
+      assetsInlineLimit: (filePath) => filePath === iconPath ? false : undefined,
+      rolldownOptions: {
+        output: {
+          assetFileNames: (asset) => asset.names.includes("icon.svg")
+            ? "icon.svg"
+            : "assets/[name]-[hash][extname]",
+        },
+      },
     },
     plugins: mode === "test" ? [] : [
       solid(),
       createBeaconPlugin(),
       VitePWA({
         registerType: "autoUpdate",
+        includeManifestIcons: false,
         manifest: {
           name: "brochain",
           short_name: "brochain",
@@ -57,6 +68,7 @@ export default defineConfig(({ command, mode }) => {
           ],
         },
         workbox: {
+          globPatterns: ["**/*.{js,wasm,css,html,svg}"],
           maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         },
       }),
