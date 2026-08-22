@@ -12,7 +12,7 @@ import {
 } from "@v/backend/network/services/identity";
 import {
   messagingServiceName,
-  type MessagingEvent,
+  type Messaging,
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
 import type { Roster } from "@v/frontend/services/roster";
@@ -26,6 +26,7 @@ interface ListedPeer {
 
 export function Home(props: {
   session: Session;
+  messaging: Messaging;
   roster: Roster;
   onOpenChat(peerId: string): void;
   onSignedOut(): void;
@@ -162,7 +163,7 @@ export function Home(props: {
                   {(peer) => (
                     <PeerRow
                       listed={peer}
-                      session={props.session}
+                      messaging={props.messaging}
                       busy={unavailable()}
                       onConnect={(selected) => void performAction(
                         () => connectAndOpen(selected),
@@ -207,26 +208,31 @@ export function Home(props: {
 
 function PeerRow(props: {
   listed: ListedPeer;
-  session: Session;
+  messaging: Messaging;
   busy: boolean;
   onConnect(peer: Peer): void;
   onOpenChat(peerId: string): void;
 }) {
-  const storage = props.session.storage().peer(props.listed.peer.id)
-    .service(messagingServiceName);
-  const events = storage.event<MessagingEvent>();
-  const read = storage.singleton<number>("read");
-  const signals = props.session.signals();
   const [unread, setUnread] = createSignal(false);
+  let received = props.messaging.history(props.listed.peer.id)
+    .filter((event) => event.type === "received").length;
+  let readCount = props.messaging.readCount(props.listed.peer.id);
 
   function updateUnread(): void {
-    const received = events.read().filter((event) => event.type === "received").length;
-    setUnread(received > (read.get() ?? 0));
+    setUnread(received > readCount);
   }
 
   const stops = [
-    signals.subscribe(events.changes, updateUnread),
-    signals.subscribe(read.changes, updateUnread),
+    props.messaging.events.subscribe((event) => {
+      if (event.peerId !== props.listed.peer.id || event.type !== "received") return;
+      received += 1;
+      updateUnread();
+    }),
+    props.messaging.reads.subscribe(({ peerId, count }) => {
+      if (peerId !== props.listed.peer.id) return;
+      readCount = count;
+      updateUnread();
+    }),
   ];
   updateUnread();
   onCleanup(() => stops.forEach((stop) => stop()));

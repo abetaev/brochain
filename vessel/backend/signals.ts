@@ -1,49 +1,51 @@
-declare const notificationType: unique symbol;
-
-export interface Signal<Notification> {
-  readonly [notificationType]: Notification;
+export interface Channel<Event> {
+  publish(event: Event): void;
+  subscribe(listener: (event: Event) => void): () => void;
 }
 
 export interface Signals {
-  channel<Notification>(): Signal<Notification>;
-  publish<Notification>(signal: Signal<Notification>, notification: Notification): void;
-  subscribe<Notification>(
-    signal: Signal<Notification>,
-    listener: (notification: Notification) => void,
-  ): () => void;
+  channel<Event>(owner: object, name: string): Channel<Event>;
 }
 
 export function createSignals(): Signals {
-  const channels = new Map<Signal<unknown>, Set<(notification: unknown) => void>>();
-
-  function listenersFor<Notification>(
-    signal: Signal<Notification>,
-  ): Set<(notification: Notification) => void> {
-    const listeners = channels.get(signal as Signal<unknown>);
-    if (listeners === undefined) {
-      throw new Error("Signal does not belong to these Signals.");
-    }
-    return listeners as unknown as Set<(notification: Notification) => void>;
-  }
+  const owners = new WeakMap<object, Map<string, Channel<unknown>>>();
 
   return {
-    channel<Notification>() {
-      const signal = Object.freeze({}) as Signal<Notification>;
-      channels.set(signal as Signal<unknown>, new Set());
-      return signal;
+    channel<Event>(owner: object, name: string): Channel<Event> {
+      let channels = owners.get(owner);
+      if (channels === undefined) {
+        channels = new Map();
+        owners.set(owner, channels);
+      }
+
+      let existing = channels.get(name);
+      if (existing === undefined) {
+        existing = createChannel<unknown>();
+        channels.set(name, existing);
+      }
+      return existing as Channel<Event>;
     },
-    publish(signal, notification) {
-      for (const listener of [...listenersFor(signal)]) listener(notification);
+  };
+}
+
+function createChannel<Event>(): Channel<Event> {
+  const subscriptions: Array<{ readonly listener: (event: Event) => void }> = [];
+
+  return Object.freeze({
+    publish(event: Event) {
+      for (const { listener } of [...subscriptions]) listener(event);
     },
-    subscribe(signal, listener) {
-      const listeners = listenersFor(signal);
-      listeners.add(listener);
+    subscribe(listener: (event: Event) => void) {
+      const subscription = { listener };
+      subscriptions.push(subscription);
       let subscribed = true;
+
       return () => {
         if (!subscribed) return;
         subscribed = false;
-        listeners.delete(listener);
+        const index = subscriptions.indexOf(subscription);
+        if (index >= 0) subscriptions.splice(index, 1);
       };
     },
-  };
+  });
 }

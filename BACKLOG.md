@@ -11,6 +11,22 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
+migrate event consumers to Signals
+----------------------------------
+
+type: refactoring, architecture
+scope: network, frontend services, signals
+
+Replace remaining component-owned observer APIs with public Signals channels
+where a current cross-component runtime event requires integration. Network,
+Peer, and Roster currently expose direct subscription APIs; refine which of
+these events and consumers should migrate before implementation.
+
+Common Network is shared with Beacon and MUST NOT depend directly on Vessel's
+account-bound Signals. Preserve that boundary through dependency inversion or a
+Vessel integration adapter, and keep Signals non-retaining so consumers read a
+retained projection when they require current state.
+
 storage modes
 -------------
 

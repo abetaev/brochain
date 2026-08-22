@@ -2,6 +2,10 @@ import "@picocss/pico/css/pico.min.css";
 import "./styles.css";
 import { Match, Switch, createSignal } from "solid-js";
 import { render } from "solid-js/web";
+import {
+  createMessaging,
+  type Messaging,
+} from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
 import type { Roster } from "./services/roster";
 import { Account } from "./views/Account";
@@ -10,6 +14,7 @@ import { Home } from "./views/Home";
 
 interface ActiveSession {
   readonly session: Session;
+  readonly messaging: Messaging;
   readonly roster: Roster;
 }
 
@@ -23,7 +28,12 @@ function Vessel() {
   async function activate(session: Session): Promise<void> {
     try {
       const { createRoster } = await import("./services/roster");
-      setLocation({ view: "home", session, roster: createRoster(session) });
+      setLocation({
+        view: "home",
+        session,
+        messaging: await createMessaging(session),
+        roster: createRoster(session),
+      });
     } catch (error) {
       await session.close().catch(() => {});
       throw error;
@@ -55,11 +65,13 @@ function Vessel() {
           {(current) => (
             <Home
               session={current().session}
+              messaging={current().messaging}
               roster={current().roster}
               onOpenChat={(peerId) =>
                 setLocation({
                   view: "chat",
                   session: current().session,
+                  messaging: current().messaging,
                   roster: current().roster,
                   peerId,
                 })}
@@ -73,11 +85,13 @@ function Vessel() {
           {(current) => (
             <Chat
               session={current().session}
+              messaging={current().messaging}
               roster={current().roster}
               peerId={current().peerId}
               onBack={() => setLocation({
                 view: "home",
                 session: current().session,
+                messaging: current().messaging,
                 roster: current().roster,
               })}
             />

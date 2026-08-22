@@ -1,33 +1,15 @@
-import type { Signal, Signals } from "./signals.ts";
-
-export interface EventStorageChange {
-  readonly operation: "append";
-}
-
-export interface SingletonStorageChange {
-  readonly operation: "put" | "clear";
-}
-
-export interface KeyValueStorageChange {
-  readonly operation: "put" | "delete";
-  readonly key: string;
-}
-
 export interface EventStorage<T> {
-  readonly changes: Signal<EventStorageChange>;
   append(event: T): void;
   read(): readonly T[];
 }
 
 export interface SingletonStorage<T> {
-  readonly changes: Signal<SingletonStorageChange>;
   get(): T | undefined;
   put(value: T): void;
   clear(): void;
 }
 
 export interface KeyValueStorage<T> {
-  readonly changes: Signal<KeyValueStorageChange>;
   get(key: string): T | undefined;
   put(key: string, value: T): void;
   delete(key: string): void;
@@ -48,14 +30,14 @@ export interface Storage {
   peer(peerId: string): PeerStorage;
 }
 
-export function createStorage(signals: Signals): Storage {
+export function createStorage(): Storage {
   const peers = new Map<string, PeerStorage>();
 
   return {
     peer(peerId) {
       let storage = peers.get(peerId);
       if (storage === undefined) {
-        storage = createPeerStorage(signals);
+        storage = createPeerStorage();
         peers.set(peerId, storage);
       }
       return storage;
@@ -63,14 +45,14 @@ export function createStorage(signals: Signals): Storage {
   };
 }
 
-function createPeerStorage(signals: Signals): PeerStorage {
+function createPeerStorage(): PeerStorage {
   const services = new Map<string, ServiceStorage>();
 
   return {
     service(name) {
       let storage = services.get(name);
       if (storage === undefined) {
-        storage = createServiceStorage(signals);
+        storage = createServiceStorage();
         services.set(name, storage);
       }
       return storage;
@@ -78,7 +60,7 @@ function createPeerStorage(signals: Signals): PeerStorage {
   };
 }
 
-function createServiceStorage(signals: Signals): ServiceStorage {
+function createServiceStorage(): ServiceStorage {
   const eventStores = new Map<string | undefined, EventStorage<unknown>>();
   const singletonStores = new Map<string | undefined, SingletonStorage<unknown>>();
   const keyValueStores = new Map<string | undefined, KeyValueStorage<unknown>>();
@@ -88,21 +70,21 @@ function createServiceStorage(signals: Signals): ServiceStorage {
       return findStorage(
         eventStores,
         name,
-        () => createEventStorage(signals),
+        createEventStorage,
       ) as EventStorage<T>;
     },
     singleton<T>(name?: string) {
       return findStorage(
         singletonStores,
         name,
-        () => createSingletonStorage(signals),
+        createSingletonStorage,
       ) as SingletonStorage<T>;
     },
     kv<T>(name?: string) {
       return findStorage(
         keyValueStores,
         name,
-        () => createKeyValueStorage(signals),
+        createKeyValueStorage,
       ) as KeyValueStorage<T>;
     },
   };
@@ -121,52 +103,41 @@ function findStorage<T>(
   return storage;
 }
 
-function createEventStorage<T>(signals: Signals): EventStorage<T> {
+function createEventStorage<T>(): EventStorage<T> {
   const events: T[] = [];
-  const changes = signals.channel<EventStorageChange>();
 
   return {
-    changes,
     append(event) {
       events.push(event);
-      signals.publish(changes, { operation: "append" });
     },
     read: () => Object.freeze([...events]),
   };
 }
 
-function createSingletonStorage<T>(signals: Signals): SingletonStorage<T> {
-  const changes = signals.channel<SingletonStorageChange>();
+function createSingletonStorage<T>(): SingletonStorage<T> {
   let current: T | undefined;
 
   return {
-    changes,
     get: () => current,
     put(value) {
       current = value;
-      signals.publish(changes, { operation: "put" });
     },
     clear() {
       current = undefined;
-      signals.publish(changes, { operation: "clear" });
     },
   };
 }
 
-function createKeyValueStorage<T>(signals: Signals): KeyValueStorage<T> {
+function createKeyValueStorage<T>(): KeyValueStorage<T> {
   const values = new Map<string, T>();
-  const changes = signals.channel<KeyValueStorageChange>();
 
   return {
-    changes,
     get: (key) => values.get(key),
     put(key, value) {
       values.set(key, value);
-      signals.publish(changes, { operation: "put", key });
     },
     delete(key) {
       values.delete(key);
-      signals.publish(changes, { operation: "delete", key });
     },
     entries() {
       return Object.freeze(

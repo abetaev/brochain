@@ -1,62 +1,80 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createSignals } from "./signals.ts";
 
 describe("Signals", () => {
-  it("delivers typed notifications synchronously in subscription order without replay", () => {
+  it("returns one typed Channel for an owner and local name", () => {
     const signals = createSignals();
-    const signal = signals.channel<{ readonly value: number }>();
+    const owner = {};
+    const first = signals.channel<{ readonly value: number }>(owner, "updates");
+    const second = signals.channel<{ readonly value: number }>(owner, "updates");
+
+    expect(first).toBe(second);
+    expectTypeOf(first.publish).parameter(0).toEqualTypeOf<{
+      readonly value: number;
+    }>();
+  });
+
+  it("isolates owner namespaces and Signals instances", () => {
+    const firstSignals = createSignals();
+    const secondSignals = createSignals();
+    const firstOwner = {};
+    const secondOwner = {};
+    const first = firstSignals.channel<number>(firstOwner, "updates");
+    const otherName = firstSignals.channel<number>(firstOwner, "other");
+    const otherOwner = firstSignals.channel<number>(secondOwner, "updates");
+    const otherSignals = secondSignals.channel<number>(firstOwner, "updates");
+    const listener = vi.fn();
+
+    otherName.subscribe(listener);
+    otherOwner.subscribe(listener);
+    otherSignals.subscribe(listener);
+    first.publish(1);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(first).not.toBe(otherName);
+    expect(first).not.toBe(otherOwner);
+    expect(first).not.toBe(otherSignals);
+  });
+
+  it("delivers synchronously in subscription order without replay", () => {
+    const channel = createSignals().channel<number>({}, "updates");
     const received: string[] = [];
 
-    signals.publish(signal, { value: 0 });
-    signals.subscribe(signal, ({ value }) => received.push(`first:${value}`));
-    signals.subscribe(signal, ({ value }) => received.push(`second:${value}`));
-    signals.publish(signal, { value: 1 });
+    channel.publish(0);
+    channel.subscribe((value) => received.push(`first:${value}`));
+    channel.subscribe((value) => received.push(`second:${value}`));
+    channel.publish(1);
 
     expect(received).toEqual(["first:1", "second:1"]);
   });
 
-  it("isolates channels and stops subscriptions idempotently", () => {
-    const signals = createSignals();
-    const first = signals.channel<number>();
-    const second = signals.channel<number>();
+  it("keeps duplicate subscriptions independent and stops each idempotently", () => {
+    const channel = createSignals().channel<number>({}, "updates");
     const listener = vi.fn();
-    const unsubscribe = signals.subscribe(first, listener);
+    const stopFirst = channel.subscribe(listener);
+    const stopSecond = channel.subscribe(listener);
 
-    signals.publish(second, 1);
-    signals.publish(first, 2);
-    unsubscribe();
-    unsubscribe();
-    signals.publish(first, 3);
+    channel.publish(1);
+    stopFirst();
+    stopFirst();
+    channel.publish(2);
+    stopSecond();
+    channel.publish(3);
 
-    expect(listener).toHaveBeenCalledOnce();
-    expect(listener).toHaveBeenCalledWith(2);
+    expect(listener.mock.calls).toEqual([[1], [1], [2]]);
   });
 
-  it("rejects channels owned by another Signals instance", () => {
-    const first = createSignals();
-    const second = createSignals();
-    const signal = first.channel<string>();
-
-    expect(() => second.publish(signal, "notification")).toThrow(
-      "Signal does not belong to these Signals.",
-    );
-    expect(() => second.subscribe(signal, () => {})).toThrow(
-      "Signal does not belong to these Signals.",
-    );
-  });
-
-  it("propagates a subscriber failure and interrupts publication", () => {
-    const signals = createSignals();
-    const signal = signals.channel<void>();
+  it("propagates the first subscriber failure and interrupts publication", () => {
+    const channel = createSignals().channel<void>({}, "updates");
     const failure = new Error("Subscriber failed.");
     const skipped = vi.fn();
 
-    signals.subscribe(signal, () => {
+    channel.subscribe(() => {
       throw failure;
     });
-    signals.subscribe(signal, skipped);
+    channel.subscribe(skipped);
 
-    expect(() => signals.publish(signal, undefined)).toThrow(failure);
+    expect(() => channel.publish(undefined)).toThrow(failure);
     expect(skipped).not.toHaveBeenCalled();
   });
 });

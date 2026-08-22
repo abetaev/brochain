@@ -118,7 +118,7 @@ describe("Session access and lifetime", () => {
     expect(runtime.createdBeacon.connect).toHaveBeenCalledOnce();
     expect(runtime.node.getMultiaddrs).toHaveBeenCalled();
     expect(runtime.initializedPeer.host.mock.calls.map(([name]) => name))
-      .toEqual(["identity", "messaging"]);
+      .toEqual(["identity"]);
     expect(runtime.initializedPeer.host.mock.invocationCallOrder.at(-1))
       .toBeLessThan(runtime.network.createPeer.mock.invocationCallOrder[0]!);
     expect(runtime.network.createPeer.mock.invocationCallOrder[0])
@@ -136,12 +136,19 @@ describe("Session access and lifetime", () => {
   it("isolates Signals between Sessions", async () => {
     const first = await openSession();
     const second = await openSession();
-    const signal = first.signals().channel<string>();
+    const owner = {};
+    const firstChannel = first.signals().channel<string>(owner, "events");
+    const secondChannel = second.signals().channel<string>(owner, "events");
+    const firstListener = vi.fn();
+    const secondListener = vi.fn();
+    firstChannel.subscribe(firstListener);
+    secondChannel.subscribe(secondListener);
 
     expect(first.signals()).not.toBe(second.signals());
-    expect(() => second.signals().subscribe(signal, () => {})).toThrow(
-      "Signal does not belong to these Signals.",
-    );
+    expect(firstChannel).not.toBe(secondChannel);
+    firstChannel.publish("first");
+    expect(firstListener).toHaveBeenCalledWith("first");
+    expect(secondListener).not.toHaveBeenCalled();
 
     await Promise.all([first.close(), second.close()]);
   });

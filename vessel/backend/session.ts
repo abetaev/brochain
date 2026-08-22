@@ -12,10 +12,6 @@ import {
   createIdentity,
   identityServiceName,
 } from "@v/backend/network/services/identity";
-import {
-  createMessaging,
-  messagingServiceName,
-} from "@v/backend/network/services/messaging";
 import { createSignals, type Signals } from "@v/backend/signals";
 import {
   createStorage,
@@ -51,7 +47,7 @@ export async function createSession(
     base64ToBytes(identity.identitySeed),
   );
   const signals = createSignals();
-  const storage = createStorage(signals);
+  const storage = createStorage();
   const lifetime = new AbortController();
   let beacon: Peer | undefined;
   let bootstrapAttempt: Promise<void> | undefined;
@@ -84,10 +80,6 @@ export async function createSession(
 
     const network = await createNetwork(node, (peer) => {
       peer.host(identityServiceName, createIdentity(identity.username));
-      peer.host(
-        messagingServiceName,
-        createMessaging(storage.peer(peer.id).service(messagingServiceName)),
-      );
     });
     return { network, node };
   }
