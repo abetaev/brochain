@@ -15,6 +15,7 @@ import {
   type MessagingEvent,
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
+import type { Roster } from "@v/frontend/services/roster";
 
 interface ListedPeer {
   readonly peer: Peer;
@@ -25,6 +26,7 @@ interface ListedPeer {
 
 export function Home(props: {
   session: Session;
+  roster: Roster;
   onOpenChat(peerId: string): void;
   onSignedOut(): void;
 }) {
@@ -59,11 +61,10 @@ export function Home(props: {
   }
 
   async function loadRoster(): Promise<readonly ListedPeer[]> {
-    const source = await props.session.roster();
     if (!active) return [];
 
-    stopRoster ??= source.subscribe(() => void refetch());
-    return Promise.all((await source.list()).map(describe));
+    stopRoster ??= props.roster.subscribe(() => void refetch());
+    return Promise.all((await props.roster.list()).map(describe));
   }
 
   const [roster, { refetch }] = createResource(loadRoster);

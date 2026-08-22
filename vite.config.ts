@@ -94,7 +94,8 @@ export default defineConfig(({ command, mode }) => {
     test: {
       include: [
         resolve(projectDirectory, "common/**/*.test.ts"),
-        resolve(vesselDirectory, "**/*.test.ts"),
+        resolve(vesselDirectory, "backend/**/*.test.ts"),
+        resolve(frontendDirectory, "**/*.test.ts"),
         resolve(projectDirectory, "beacon/**/*.test.ts"),
         resolve(projectDirectory, "main.test.ts"),
       ],

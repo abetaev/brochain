@@ -11,30 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-frontend and naming structure
------------------------------
-
-type: design, refactoring, architecture
-scope: frontend, backend, core, services, guidelines
-
-Organize Vessel's frontend so that:
-
-- `vessel/frontend` contains only `index.html`, `styles.css`, `main.tsx`, and `icon.svg`
-- `vessel/frontend/views` contains the existing views
-- `vessel/frontend/services` contains frontend services
-
-Roster is a frontend service and MUST move from the backend to
-`vessel/frontend/services`.
-
-Add a conventions section to `GUIDELINES.md`. A designated backend core
-component has a seven-letter lowercase English designation; language-idiomatic
-symbol capitalization does not change that designation. The current and
-planned core components are `account`, `network`, `options`, `session`,
-`signals`, and `storage`. Non-core component names have no length constraint.
-
-This task MUST move only implemented entities. It MUST NOT create placeholder
-modules or directories for planned core components.
-
 signals
 -------
 

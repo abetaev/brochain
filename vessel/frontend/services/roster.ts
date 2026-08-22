@@ -13,6 +13,7 @@ import {
   type Network,
   type Peer,
 } from "@c/backend/network";
+import type { Session } from "@v/backend/session";
 
 export interface Roster {
   list(): Promise<readonly Peer[]>;
@@ -20,7 +21,31 @@ export interface Roster {
   subscribe(listener: () => void): () => void;
 }
 
-export function createRoster(network: Network): Roster {
+export function createRoster(session: Session): Roster {
+  const listeners = new Set<() => void>();
+  let stopNetwork: (() => void) | undefined;
+
+  function observe(network: Network): void {
+    if (stopNetwork !== undefined || listeners.size === 0) return;
+    stopNetwork = network.subscribe(() => {
+      for (const listener of [...listeners]) listener();
+    });
+  }
+
+  async function accessNetwork(): Promise<Network> {
+    const network = await session.network();
+    observe(network);
+    return network;
+  }
+
+  async function startObserving(): Promise<void> {
+    try {
+      await accessNetwork();
+    } catch {
+      // A list or peer request reports access errors and retries observation.
+    }
+  }
+
   async function discover(provider: Peer): Promise<readonly string[]> {
     const services = validateServiceNames(
       await provider.service<Registry>(registryServiceName).list(),
@@ -32,7 +57,7 @@ export function createRoster(network: Network): Roster {
     );
   }
 
-  async function list(): Promise<readonly Peer[]> {
+  async function load(network: Network): Promise<readonly Peer[]> {
     const connected = [...network.connectedPeers()];
     const peers = new Map(connected.map((peer) => [peer.id, peer]));
     const discovered = new Map<string, Set<string>>();
@@ -77,13 +102,23 @@ export function createRoster(network: Network): Roster {
   }
 
   return {
-    list,
+    async list() {
+      return await load(await accessNetwork());
+    },
     async getPeer(peerId) {
+      const network = await accessNetwork();
       const connected = network.connectedPeers().find((peer) => peer.id === peerId);
-      return connected ?? (await list()).find((peer) => peer.id === peerId);
+      return connected ?? (await load(network)).find((peer) => peer.id === peerId);
     },
     subscribe(listener) {
-      return network.subscribe(() => listener());
+      listeners.add(listener);
+      void startObserving();
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size > 0) return;
+        stopNetwork?.();
+        stopNetwork = undefined;
+      };
     },
   };
 }

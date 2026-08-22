@@ -3,17 +3,32 @@ import "./styles.css";
 import { Match, Switch, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import type { Session } from "@v/backend/session";
-import { Account } from "./Account";
-import { Chat } from "./Chat";
-import { Home } from "./Home";
+import type { Roster } from "./services/roster";
+import { Account } from "./views/Account";
+import { Chat } from "./views/Chat";
+import { Home } from "./views/Home";
+
+interface ActiveSession {
+  readonly session: Session;
+  readonly roster: Roster;
+}
 
 type Location =
   | { readonly view: "account" }
-  | { readonly view: "home"; readonly session: Session }
-  | { readonly view: "chat"; readonly session: Session; readonly peerId: string };
+  | ({ readonly view: "home" } & ActiveSession)
+  | ({ readonly view: "chat"; readonly peerId: string } & ActiveSession);
 
 function Vessel() {
   const [location, setLocation] = createSignal<Location>({ view: "account" });
+  async function activate(session: Session): Promise<void> {
+    try {
+      const { createRoster } = await import("./services/roster");
+      setLocation({ view: "home", session, roster: createRoster(session) });
+    } catch (error) {
+      await session.close().catch(() => {});
+      throw error;
+    }
+  }
   const home = () => {
     const current = location();
     return current.view === "home" ? current : undefined;
@@ -34,14 +49,20 @@ function Vessel() {
 
       <Switch>
         <Match when={location().view === "account"}>
-          <Account onSignedIn={(session) => setLocation({ view: "home", session })} />
+          <Account onSignedIn={activate} />
         </Match>
         <Match when={home()}>
           {(current) => (
             <Home
               session={current().session}
+              roster={current().roster}
               onOpenChat={(peerId) =>
-                setLocation({ view: "chat", session: current().session, peerId })}
+                setLocation({
+                  view: "chat",
+                  session: current().session,
+                  roster: current().roster,
+                  peerId,
+                })}
               onSignedOut={() => {
                 setLocation({ view: "account" });
               }}
@@ -52,8 +73,13 @@ function Vessel() {
           {(current) => (
             <Chat
               session={current().session}
+              roster={current().roster}
               peerId={current().peerId}
-              onBack={() => setLocation({ view: "home", session: current().session })}
+              onBack={() => setLocation({
+                view: "home",
+                session: current().session,
+                roster: current().roster,
+              })}
             />
           )}
         </Match>

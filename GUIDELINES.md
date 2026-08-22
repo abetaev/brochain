@@ -27,3 +27,12 @@ These principles constrain code, tests, and documentation. They do not define wo
 - **documentation**: README describes user behavior, DEVELOPMENT explains project operation, BACKLOG holds only unfinished requirements and provisional decisions, ARCHITECTURE outlines implemented domains and non-obvious technical decisions, and AGENTS defines AI workflow. Document each fact once and link when another audience needs it.
 - **documentation detail**: organize architecture by responsibilities, dependencies, behavior, runtime, and technologies with their designations. Prefer short hierarchies, tables, and diagrams to prose. Do not narrate imports, filenames, call sequences, or facts evident from a shallow source reading; retain lower-level detail only for a non-obvious constraint, contract, security property, or operational decision.
 - use [RFC2119](https://www.rfc-editor.org/info/rfc2119/) terms in documentation when they clarify a requirement.
+
+conventions
+-----------
+
+A designated backend core component MUST have a seven-letter lowercase English
+designation. Language-idiomatic capitalization of a symbol does not change its
+designation. The current and planned core designations are `account`, `network`,
+`options`, `session`, `signals`, and `storage`. Non-core component names have no
+length constraint.

@@ -3,6 +3,7 @@ import type {
   Network,
   Peer,
 } from "@c/backend/network";
+import type { Session } from "@v/backend/session";
 import { createRoster } from "./roster.ts";
 
 const firstId = "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8";
@@ -65,8 +66,12 @@ function testNetwork(connected: () => readonly Peer[]) {
     }),
     close: vi.fn(),
   } as unknown as Network;
+  const session = {
+    network: vi.fn(async () => network),
+  } as unknown as Session;
   return {
     network,
+    session,
     created,
     networkStops,
     topologyChanged(peer: Peer, event: "connected" | "disconnected") {
@@ -96,9 +101,9 @@ describe("Roster", () => {
       async () => ["registry", "discovery"],
       async () => [firstAlternate, secondAlternate, thirdAddress],
     );
-    const { network, created } = testNetwork(() => [beacon, first, other]);
+    const { network, session, created } = testNetwork(() => [beacon, first, other]);
 
-    const peers = await createRoster(network).list();
+    const peers = await createRoster(session).list();
 
     expect(peers.map(({ id }) => id)).toEqual([
       "beacon",
@@ -130,9 +135,9 @@ describe("Roster", () => {
         relayWithoutDestination,
       ],
     );
-    const { network } = testNetwork(() => [source]);
+    const { network, session } = testNetwork(() => [source]);
 
-    await createRoster(network).list();
+    await createRoster(session).list();
 
     expect(network.createPeer).toHaveBeenCalledOnce();
     expect(network.createPeer).toHaveBeenCalledWith(firstAddress, firstAlternate);
@@ -174,9 +179,9 @@ describe("Roster", () => {
       failed,
       healthy,
     ];
-    const { network } = testNetwork(() => connected);
+    const { network, session } = testNetwork(() => connected);
 
-    const peers = await createRoster(network).list();
+    const peers = await createRoster(session).list();
 
     expect(peers.map(({ id }) => id)).toEqual([
       "plain",
@@ -197,13 +202,13 @@ describe("Roster", () => {
       async () => ["registry", "discovery"],
       async () => [firstAddress, secondAddress],
     );
-    const { network } = testNetwork(() => [source]);
+    const { network, session } = testNetwork(() => [source]);
     vi.mocked(network.createPeer).mockImplementation(async (address: string) => {
       if (address === firstAddress) throw new Error("Rejected address.");
       return disconnectedPeer(secondId);
     });
 
-    await expect(createRoster(network).list()).resolves.toEqual([
+    await expect(createRoster(session).list()).resolves.toEqual([
       source,
       expect.objectContaining({ id: secondId }),
     ]);
@@ -214,8 +219,8 @@ describe("Roster", () => {
     const sourceServices = vi.fn(async () => ["registry", "discovery"]);
     const sourceDiscovery = vi.fn(async () => [firstAddress]);
     const source = provider("source", sourceServices, sourceDiscovery);
-    const { network } = testNetwork(() => [connected, source]);
-    const roster = createRoster(network);
+    const { network, session } = testNetwork(() => [connected, source]);
+    const roster = createRoster(session);
 
     await expect(roster.getPeer("connected")).resolves.toBe(connected);
     expect(sourceServices).not.toHaveBeenCalled();
@@ -228,9 +233,9 @@ describe("Roster", () => {
     expect(network.createPeer).toHaveBeenCalledTimes(2);
   });
 
-  it("forwards connection topology changes and releases each subscription", () => {
-    const { network, networkStops, topologyChanged } = testNetwork(() => []);
-    const roster = createRoster(network);
+  it("forwards connection topology changes and releases its subscription", async () => {
+    const { network, session, networkStops, topologyChanged } = testNetwork(() => []);
+    const roster = createRoster(session);
     const first = vi.fn();
     const second = vi.fn();
     const changedPeer = disconnectedPeer(firstId);
@@ -238,7 +243,7 @@ describe("Roster", () => {
     expect(network.subscribe).not.toHaveBeenCalled();
     const stopFirst = roster.subscribe(first);
     const stopSecond = roster.subscribe(second);
-    expect(network.subscribe).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(network.subscribe).toHaveBeenCalledOnce());
 
     topologyChanged(changedPeer, "connected");
     topologyChanged(changedPeer, "disconnected");
@@ -249,10 +254,10 @@ describe("Roster", () => {
     topologyChanged(changedPeer, "connected");
     expect(first).toHaveBeenCalledTimes(2);
     expect(second).toHaveBeenCalledTimes(3);
-    expect(networkStops[0]).toHaveBeenCalledOnce();
+    expect(networkStops[0]).not.toHaveBeenCalled();
 
     stopSecond();
-    expect(networkStops[1]).toHaveBeenCalledOnce();
+    expect(networkStops[0]).toHaveBeenCalledOnce();
     topologyChanged(changedPeer, "disconnected");
     expect(second).toHaveBeenCalledTimes(3);
   });
@@ -261,12 +266,13 @@ describe("Roster", () => {
     const services = vi.fn(async () => ["registry", "discovery"]);
     const addresses = vi.fn(async () => [firstAddress]);
     const source = provider("source", services, addresses);
-    const { network, topologyChanged } = testNetwork(() => [source]);
-    const roster = createRoster(network);
+    const { network, session, topologyChanged } = testNetwork(() => [source]);
+    const roster = createRoster(session);
     const invalidated = vi.fn();
     const stop = roster.subscribe(invalidated);
     const changedPeer = disconnectedPeer(secondId);
 
+    await vi.waitFor(() => expect(network.subscribe).toHaveBeenCalledOnce());
     topologyChanged(changedPeer, "connected");
     expect(invalidated).toHaveBeenCalledOnce();
     expect(services).not.toHaveBeenCalled();

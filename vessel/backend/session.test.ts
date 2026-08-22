@@ -2,12 +2,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Network, Peer } from "@c/backend/network";
-import type { Roster } from "./roster.ts";
 
 const dependencies = vi.hoisted(() => ({
   createLibp2p: vi.fn(),
   createNetwork: vi.fn(),
-  createRoster: vi.fn(),
   generateKeyPairFromSeed: vi.fn(),
 }));
 
@@ -22,7 +20,6 @@ vi.mock("@libp2p/webrtc", () => ({ webRTC: () => ({}) }));
 vi.mock("@libp2p/websockets", () => ({ webSockets: () => ({}) }));
 vi.mock("libp2p", () => ({ createLibp2p: dependencies.createLibp2p }));
 vi.mock("@c/backend/network", () => ({ default: dependencies.createNetwork }));
-vi.mock("@v/backend/roster", () => ({ createRoster: dependencies.createRoster }));
 
 import { createSession } from "./session.ts";
 
@@ -40,7 +37,6 @@ interface TestRuntime {
     removeEventListener: ReturnType<typeof vi.fn>;
     stop: ReturnType<typeof vi.fn>;
   };
-  readonly roster: Roster;
 }
 
 let runtime: TestRuntime;
@@ -51,7 +47,6 @@ beforeEach(() => {
   });
   dependencies.createLibp2p.mockReset();
   dependencies.createNetwork.mockReset();
-  dependencies.createRoster.mockReset();
   dependencies.generateKeyPairFromSeed.mockReset();
 
   const beacon = {
@@ -77,12 +72,7 @@ beforeEach(() => {
     removeEventListener: vi.fn(),
     stop: vi.fn(async () => {}),
   };
-  const roster = {
-    list: vi.fn(async () => []),
-    getPeer: vi.fn(async () => undefined),
-    subscribe: vi.fn(() => () => {}),
-  } as unknown as Roster;
-  runtime = { beacon, createdBeacon, initializedPeer, network, node, roster };
+  runtime = { beacon, createdBeacon, initializedPeer, network, node };
 
   dependencies.generateKeyPairFromSeed.mockResolvedValue({});
   dependencies.createLibp2p.mockResolvedValue(node);
@@ -93,7 +83,6 @@ beforeEach(() => {
     initialize?.(initializedPeer, network);
     return network;
   });
-  dependencies.createRoster.mockReturnValue(roster);
 });
 
 afterEach(() => {
@@ -113,17 +102,13 @@ describe("Session access and lifetime", () => {
     const session = await openSession();
     expect(dependencies.createLibp2p).not.toHaveBeenCalled();
 
-    const [firstNetwork, secondNetwork, firstRoster, secondRoster] = await Promise.all([
+    const [firstNetwork, secondNetwork] = await Promise.all([
       session.network(),
       session.network(),
-      session.roster(),
-      session.roster(),
     ]);
 
     expect(firstNetwork).toBe(runtime.network);
     expect(secondNetwork).toBe(runtime.network);
-    expect(firstRoster).toBe(runtime.roster);
-    expect(secondRoster).toBe(runtime.roster);
     expect(dependencies.createLibp2p).toHaveBeenCalledOnce();
     expect(dependencies.createNetwork).toHaveBeenCalledOnce();
     expect(runtime.network.createPeer).toHaveBeenCalledOnce();
@@ -132,7 +117,6 @@ describe("Session access and lifetime", () => {
     );
     expect(runtime.createdBeacon.connect).toHaveBeenCalledOnce();
     expect(runtime.node.getMultiaddrs).toHaveBeenCalled();
-    expect(dependencies.createRoster).toHaveBeenCalledOnce();
     expect(runtime.initializedPeer.host.mock.calls.map(([name]) => name))
       .toEqual(["identity", "messaging"]);
     expect(runtime.initializedPeer.host.mock.invocationCallOrder.at(-1))
@@ -299,12 +283,11 @@ describe("Session access and lifetime", () => {
     expect(runtime.network.createPeer).toHaveBeenCalledOnce();
 
     runtime.beacon.isConnected.mockReturnValue(false);
-    await expect(session.roster()).resolves.toBe(runtime.roster);
+    await expect(session.network()).resolves.toBe(runtime.network);
 
     expect(runtime.network.createPeer).toHaveBeenCalledTimes(2);
     expect(runtime.createdBeacon.connect).toHaveBeenCalledTimes(2);
     expect(dependencies.createNetwork).toHaveBeenCalledOnce();
-    expect(dependencies.createRoster).toHaveBeenCalledOnce();
 
     await session.close();
   });

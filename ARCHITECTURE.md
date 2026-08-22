@@ -3,7 +3,7 @@ architecture
 
 This document describes technical architecture of the project as well as its structure and behavior.
 
-brochain consists of the browser application **Vessel** and a headless bootstrap and relay peer, **Beacon**. Both are peers built on the Common backend Network; Vessel additionally separates its own backend services from its frontend views.
+brochain consists of the browser application **Vessel** and a headless bootstrap and relay peer, **Beacon**. Both are peers built on the Common backend Network; Vessel additionally separates its account-bound backend core components from its frontend services and views.
 
 ```text
 Vessel
@@ -17,11 +17,13 @@ Vessel
 │       │       ├── Registry RPC
 │       │       ├── Identity RPC
 │       │       └── Messaging RPC
-│       └── Roster
 └── Frontend (Window)
-    ├── Account
-    ├── Home
-    └── Chat
+    ├── Services
+    │   └── Roster
+    └── Views
+        ├── Account
+        ├── Home
+        └── Chat
 
 Common
 └── Backend
@@ -35,7 +37,7 @@ Beacon
     └── Circuit relay
 ```
 
-Backend and frontend are dependency layers, not separate deployments: both Vessel layers run in the browser, with Account isolated in a Worker. Frontend depends on Vessel backend services, and Vessel and Beacon both depend on Common's backend Network implementation. The `@v` and `@c` aliases are build-time conveniences for Vessel; Common and Beacon retain explicit relative imports so Beacon remains directly executable by Node.js.
+Backend and frontend are dependency layers, not separate deployments: both Vessel layers run in the browser, with Account isolated in a Worker. Frontend services and views depend on Vessel's backend core components, and Vessel and Beacon both depend on Common's backend Network implementation. The `@v` and `@c` aliases are build-time conveniences for Vessel; Common and Beacon retain explicit relative imports so Beacon remains directly executable by Node.js.
 
 Vessel
 ------
@@ -51,21 +53,16 @@ Vessel
 
 - **runtime**: Window
 - **dependency**: one unlocked Account identity
-- **behavior**: owns one Network, Roster, and Storage lifetime; stable accessors initialize and maintain these dependencies so views do not coordinate construction, bootstrap, retry, or shutdown
-- **bootstrap**: Network startup is independent of the inferred default-Beacon connection. Bootstrap failure leaves a usable offline Network, records an error for Home, and is retried by later Network or Roster access whenever Beacon is disconnected. Successful bootstrap waits for the relay-backed WebRTC address.
+- **behavior**: owns one Network and Storage lifetime; stable accessors initialize and maintain these account-bound core components so consumers do not coordinate their construction, bootstrap, retry, or shutdown
+- **bootstrap**: Network startup is independent of the inferred default-Beacon connection. Bootstrap failure leaves a usable offline Network, records an error for Home, and is retried by later Network access, including requests made by Roster, whenever Beacon is disconnected. Successful bootstrap waits for the relay-backed WebRTC address.
 - **shutdown**: sign-out closes peer networking and the Account session
 
-### Session services
+### Session core components
 
 | Entity | Responsibility | State |
 | --- | --- | --- |
 | **Network** | Represents the local peer, constructs remote Peers, retains one active Peer per connected identity, and owns the libp2p lifetime. | Active connections and transient connection attempts |
-| **Roster** | Produces the current peer view by combining connected peers with one-hop remote Discovery results. | No retained result or discovery cache |
 | **Storage** | Provides event, singleton, and key/value stores scoped first by peer identity and then by service. | Memory; discarded with the Session |
-
-Roster performs a fresh sweep for every list request. It asks each currently connected Peer for its Registry, calls Discovery only when advertised, groups valid addresses by their terminal peer ID, and materializes each identity through Network without dialing it. Connected peers are always included. Invalid responses and failed providers are isolated so healthy partial results remain available. `getPeer` checks current connections before doing a fresh sweep.
-
-Roster uses no Storage and retains no peer result. Its subscription forwards Network connection-topology changes only as invalidations; subscribers request a new list to obtain current data. This makes inbound and outbound connection changes visible immediately while remote Discovery changes remain explicit refreshes until that RPC service gains its own update mechanism.
 
 ### Network and Peer
 
@@ -101,11 +98,16 @@ Chat appends outgoing events before invoking remote Messaging and appends failur
 ### Frontend
 
 - **dependencies**: Account and the active Session
+- **services**: the frontend creates one Roster for an authenticated Session; Roster uses Session's Network accessor to provide end-user peer aggregation without becoming a Session dependency
 - **behavior**:
   - **Account** — create, unlock, export, and delete accounts
   - **Home** — subscribes to Roster invalidations, requests a fresh list on render, local connection changes, and explicit refresh, connects peers, gates actions through Registry, shows connection and unread state, reports bootstrap status, and signs out
   - **Chat** — resolves navigation peer IDs through Roster, calls transparent Identity and Messaging services, displays Storage events, and records read counts in Storage
 - **technology**: SolidJS, Pico CSS, advisory zxcvbn password strength, and a Vite-generated PWA shell
+
+Roster performs a fresh sweep for every list request. It asks each currently connected Peer for its Registry, calls Discovery only when advertised, groups valid addresses by their terminal peer ID, and materializes each identity through Network without dialing it. Connected peers are always included. Invalid responses and failed providers are isolated so healthy partial results remain available. `getPeer` checks current connections before doing a fresh sweep.
+
+Roster uses no Storage and retains no peer result. Its subscription forwards Network connection-topology changes only as invalidations; subscribers request a new list to obtain current data. This makes inbound and outbound connection changes visible immediately while remote Discovery changes remain explicit refreshes until that RPC service gains its own update mechanism.
 
 ```text
 Account --create/unlock--> Home --open peer ID--> Chat

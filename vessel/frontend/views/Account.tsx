@@ -35,7 +35,7 @@ async function initializePasswords(): Promise<ZxcvbnFactory> {
   });
 }
 
-export function Account(props: { onSignedIn(session: Session): void }) {
+export function Account(props: { onSignedIn(session: Session): Promise<void> }) {
   const [screen, setScreen] = createSignal<AccountScreen>({ kind: "list" });
   const [creationPassword, setCreationPassword] = createSignal("");
   const [error, setError] = createSignal<string>();
@@ -84,7 +84,9 @@ export function Account(props: { onSignedIn(session: Session): void }) {
     }
 
     await performMutation(async () => {
-      props.onSignedIn(await account.create(String(data.get("username") ?? ""), password));
+      await props.onSignedIn(
+        await account.create(String(data.get("username") ?? ""), password),
+      );
     });
   }
 
@@ -97,7 +99,7 @@ export function Account(props: { onSignedIn(session: Session): void }) {
       new FormData(event.currentTarget).get("unlock-password") ?? "",
     );
     await performMutation(async () => {
-      props.onSignedIn(await account.unlock(username, password));
+      await props.onSignedIn(await account.unlock(username, password));
     });
   }
 

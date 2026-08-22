@@ -16,7 +16,6 @@ import {
   createMessaging,
   messagingServiceName,
 } from "@v/backend/network/services/messaging";
-import { createRoster, type Roster } from "@v/backend/roster";
 import {
   createStorage,
   type Storage,
@@ -25,7 +24,6 @@ import {
 export interface Session {
   readonly username: string;
   network(): Promise<Network>;
-  roster(): Promise<Roster>;
   storage(): Storage;
   bootstrapError(): string | undefined;
   close(): Promise<void>;
@@ -52,7 +50,6 @@ export async function createSession(
   );
   const storage = createStorage();
   const lifetime = new AbortController();
-  let roster: Roster | undefined;
   let beacon: Peer | undefined;
   let bootstrapAttempt: Promise<void> | undefined;
   let bootstrapFailure: string | undefined;
@@ -141,10 +138,6 @@ export async function createSession(
   return {
     username: identity.username,
     network: accessNetwork,
-    async roster() {
-      const network = await accessNetwork();
-      return (roster ??= createRoster(network));
-    },
     storage() {
       requireOpen();
       return storage;

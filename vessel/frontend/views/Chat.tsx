@@ -21,6 +21,7 @@ import {
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
 import type { EventStorage } from "@v/backend/storage";
+import type { Roster } from "@v/frontend/services/roster";
 
 interface Channel {
   readonly remote: PromisedMethods<MessagingService>;
@@ -29,6 +30,7 @@ interface Channel {
 
 export function Chat(props: {
   session: Session;
+  roster: Roster;
   peerId: string;
   onBack(): void;
 }) {
@@ -89,8 +91,7 @@ export function Chat(props: {
 
   async function initialize(): Promise<void> {
     try {
-      const roster = await props.session.roster();
-      const peer = await roster.getPeer(props.peerId);
+      const peer = await props.roster.getPeer(props.peerId);
       if (peer === undefined) throw new Error("This peer is no longer available.");
       if (!peer.isConnected()) throw new Error("This peer is not connected.");
 
