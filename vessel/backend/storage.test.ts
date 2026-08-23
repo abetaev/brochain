@@ -1,7 +1,11 @@
 // @vitest-environment node
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createStorage } from "./storage.ts";
+import { createStorage as createStorageRoot } from "./storage";
+
+function createStorage() {
+  return createStorageRoot("test-account");
+}
 
 describe("Session Storage", () => {
   it("returns stable scopes for each peer identity and service", () => {

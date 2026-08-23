@@ -23,9 +23,14 @@ Vessel
 │   └── Session
 │       ├── Signals
 │       ├── Storage
-│       │   └── PeerStorage × peer identity
-│       │       └── ServiceStorage × service
-│       │           └── Event, singleton, key/value, and file stores
+│       │   ├── Volatile
+│       │   │   └── PeerStorage × peer identity
+│       │   │       └── ServiceStorage × service
+│       │   │           └── Event, singleton, key/value, and file stores
+│       │   └── Persistent
+│       │       └── PeerStorage × peer identity
+│       │           └── ServiceStorage × service
+│       │               └── Key/value stores
 │       └── Network
 │           ├── Common Network
 │           └── Identity, Messaging, and DataTransfer services
@@ -122,22 +127,27 @@ Vessel
 - **dependencies**: browser IndexedDB, Web Crypto, and a Session factory after
   successful authentication
 - **behavior**: lists, creates, unlocks, exports, and password-confirms deletion
-  of local accounts; creation and unlocking produce an authenticated Session
+  of local accounts; creation and unlocking produce an authenticated Session;
+  deletion removes the account's persistent Storage database before its account
+  record
 - **structure**: a Window facade serializes authentication and projects the
   account service running in a Worker; decrypted identity material remains
   behind the private Session boundary
 - **technology**: Comlink Worker RPC, IndexedDB, PBKDF2, and AES-GCM
 
-IndexedDB stores versioned encrypted account records. Password handling,
-decryption, derived keys, and the peer identity seed remain in the Worker; the
-public Account API exposes no identity material.
+The `brochain` IndexedDB database stores only versioned encrypted account
+records. Password handling, decryption, derived keys, and the peer identity seed
+remain in the Worker; the public Account API exposes no identity material.
+After password validation, deletion removes `brochain/<username>` and removes
+the account record only when that succeeds.
 
 #### Session
 
 - **dependencies**: one unlocked Account identity and the browser networking
   runtime
-- **behavior**: provides stable account-bound Signals, Storage, and Network;
-  maintains default-peer bootstrap and owns their common shutdown
+- **behavior**: provides stable account-bound Signals, volatile and persistent
+  Storage roots, and Network; maintains default-peer bootstrap and owns their
+  common shutdown
 - **structure**: one Session composes one instance of each core component and
   closes Network, Storage, and Account access together
 - **runtime**: browser Window
@@ -164,14 +174,30 @@ Common Network observers, and component-local reactivity remain outside Signals.
 
 ##### Storage
 
-- **dependencies**: its owning Session; browser OPFS and Web Locks only when a
-  file store is first used
-- **behavior**: retains structured projections and streamed opaque files for the
-  Session lifetime
-- **structure**: `peer(peerId).service(serviceName)` resolves stable event,
-  singleton, key/value, and file stores, each with an optional local name
-- **technology**: in-memory collections for structured stores; OPFS, Storage
-  quota estimates, and Web Locks for files
+- **dependencies**: its owning Session and account username; browser IndexedDB
+  for persistence; OPFS and Web Locks only when a file store is first used
+- **behavior**: selects volatile or persistent retention while preserving one
+  stable peer, service, kind, and optional-name hierarchy per mode
+- **structure**: one public root composes in-memory structured stores, one shared
+  Session file root, and one independent per-account persistent backend
+- **technology**: in-memory collections for volatile structured stores;
+  IndexedDB structured cloning for persistent values; OPFS, Storage quota
+  estimates, and Web Locks for volatile files
+
+`session.storage()` and `session.storage({ persistent: false })` return the same
+volatile root. Its synchronous event, singleton, key/value, and asynchronous file
+stores retain data for the Session lifetime. `session.storage({ persistent:
+true })` returns a separate stable root whose initial store kind is asynchronous
+key/value. Persistent values are stored without encryption and survive Session
+shutdown.
+
+Persistent IndexedDB access opens `brochain/<username>` lazily and a failed
+attempt may be retried by a later operation. Storage owns this database and does
+not read Account data. Entries are immutable snapshots in ascending IndexedDB
+key order; default and explicitly empty store names remain distinct. A database
+version change closes and invalidates an open persistent root. Closing Storage
+waits for accepted operations and closes database access without deleting
+persistent values.
 
 Storage exposes no notification API. A component which signals a retained
 mutation MUST update Storage before publishing the corresponding event.

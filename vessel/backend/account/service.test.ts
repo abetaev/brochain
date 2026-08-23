@@ -8,19 +8,20 @@ import {
   type Endpoint,
   type Remote,
 } from "comlink";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createAccountService,
   type AccountService,
   type SessionAccess,
 } from "./service.ts";
+import { createStorage } from "@v/backend/storage";
 
 function endpoint(port: MessagePort): Endpoint {
   return port as unknown as Endpoint;
 }
 
 async function openAccountService(
-  databaseName = `brochain-v2-test-${crypto.randomUUID()}`,
+  databaseName = `brochain-test-${crypto.randomUUID()}`,
 ) {
   const operationsChannel = new MessageChannel();
   const sessionChannel = new MessageChannel();
@@ -68,7 +69,7 @@ async function expectIdentityIsPrivate(
 
 describe("account operations and access", () => {
   it("persists encrypted accounts while exposing identity only to a Session", async () => {
-    const databaseName = `brochain-v2-test-${crypto.randomUUID()}`;
+    const databaseName = `brochain-test-${crypto.randomUUID()}`;
     const password = "correct horse battery staple";
     const beforeReload = await openAccountService(databaseName);
     let identitySeed = "";
@@ -86,6 +87,7 @@ describe("account operations and access", () => {
       expect(exported).toContain('"username": "ada"');
       expect(exported).not.toContain(password);
       expect(exported).not.toContain("identitySeed");
+      expect(JSON.parse(exported)).toMatchObject({ version: 2, username: "ada" });
       await beforeReload.session.closeSession();
       await expect(beforeReload.session.activePeerIdentity()).resolves.toBeUndefined();
       await expect(beforeReload.operations.unlock("ada", "wrong password")).rejects.toThrow(
@@ -134,6 +136,69 @@ describe("account operations and access", () => {
       await expect(accounts.operations.list()).resolves.toEqual([]);
       await expect(accounts.session.activePeerIdentity()).resolves.toBeUndefined();
     } finally {
+      accounts.close();
+    }
+  });
+
+  it("deletes the account database before its record and recreates it empty", async () => {
+    const databaseName = `brochain-deletion-${crypto.randomUUID()}`;
+    const accounts = await openAccountService(databaseName);
+    const password = "partition password";
+    let staleStorage: ReturnType<typeof createStorage> | undefined;
+    let replacementStorage: ReturnType<typeof createStorage> | undefined;
+
+    try {
+      await accounts.operations.create("ada", password);
+      staleStorage = createStorage("ada", databaseName);
+      const staleValues = staleStorage.persistent
+        .peer("local")
+        .service("options")
+        .kv<string>();
+      await staleValues.put("theme", "dark");
+
+      await expect(accounts.operations.delete("ada", "wrong password"))
+        .resolves.toBe(false);
+      await expect(staleValues.get("theme")).resolves.toBe("dark");
+
+      await expect(accounts.operations.delete("ada", password)).resolves.toBe(true);
+      await expect(staleValues.get("theme")).rejects.toThrow(
+        "persistent Storage is no longer available",
+      );
+      await expect(accounts.operations.list()).resolves.toEqual([]);
+
+      await accounts.operations.create("ada", password);
+      replacementStorage = createStorage("ada", databaseName);
+      await expect(
+        replacementStorage.persistent.peer("local").service("options")
+          .kv<string>().get("theme"),
+      ).resolves.toBeUndefined();
+    } finally {
+      await staleStorage?.close();
+      await replacementStorage?.close();
+      accounts.close();
+    }
+  });
+
+  it("retains the account when its database cannot be deleted", async () => {
+    const databaseName = `brochain-deletion-failure-${crypto.randomUUID()}`;
+    const accounts = await openAccountService(databaseName);
+    const storage = createStorage("cy", databaseName);
+    await accounts.operations.create("cy", "a password");
+    const values = storage.persistent.peer("local").service("options").kv<string>();
+    await values.put("theme", "dark");
+    const deletion = vi.spyOn(indexedDB, "deleteDatabase")
+      .mockImplementationOnce(() => {
+        throw new DOMException("Deletion denied.", "SecurityError");
+      });
+
+    try {
+      await expect(accounts.operations.delete("cy", "a password"))
+        .rejects.toMatchObject({ name: "SecurityError" });
+      await expect(accounts.operations.list()).resolves.toEqual(["cy"]);
+      await expect(values.get("theme")).resolves.toBe("dark");
+    } finally {
+      deletion.mockRestore();
+      await storage.close();
       accounts.close();
     }
   });

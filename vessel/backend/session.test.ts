@@ -81,7 +81,10 @@ afterEach(() => {
 
 function openSession(closeAccountSession = vi.fn(async () => {})) {
   return createSession(
-    async () => ({ username: "alice", identitySeed: "AA==" }),
+    async () => ({
+      username: "alice",
+      identitySeed: "AA==",
+    }),
     closeAccountSession,
   );
 }
@@ -119,9 +122,18 @@ describe("Session access and lifetime", () => {
       .toBeLessThan(runtime.node.getMultiaddrs.mock.invocationCallOrder[0]!);
 
     const storage = session.storage();
+    const persistent = session.storage({ persistent: true });
     const closeStorage = vi.spyOn(storage, "close");
     expect(storage).toBe(session.storage());
+    expect(storage).toBe(session.storage({ persistent: false }));
+    expect(persistent).toBe(session.storage({ persistent: true }));
+    expect(persistent).not.toBe(storage);
     expect(storage.peer("remote")).toBe(storage.peer("remote"));
+    expect(persistent.peer("remote")).toBe(persistent.peer("remote"));
+    expect(persistent.peer("remote").service("options").kv())
+      .toBe(persistent.peer("remote").service("options").kv());
+    expect("event" in persistent.peer("remote").service("options")).toBe(false);
+    expect("fs" in persistent.peer("remote").service("options")).toBe(false);
     expect(session.signals()).toBe(session.signals());
 
     await session.close();

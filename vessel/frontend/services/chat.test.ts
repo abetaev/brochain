@@ -15,10 +15,14 @@ import type {
 import type { Session } from "@v/backend/session";
 import { createSignals, type Channel } from "@v/backend/signals";
 import {
-  createStorage,
+  createStorage as createStorageRoot,
   type FileWriter,
   type StoredFile,
 } from "@v/backend/storage";
+
+function createStorage() {
+  return createStorageRoot("test-account");
+}
 
 const dependencies = vi.hoisted(() => ({
   createMessaging: vi.fn(),

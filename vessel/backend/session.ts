@@ -15,14 +15,16 @@ import {
 import { createSignals, type Signals } from "@v/backend/signals";
 import {
   createStorage,
-  type Storage,
+  type PersistentStorage,
+  type VolatileStorage,
 } from "@v/backend/storage";
 
 export interface Session {
   readonly username: string;
   network(): Promise<Network>;
   signals(): Signals;
-  storage(): Storage;
+  storage(options?: { readonly persistent?: false }): VolatileStorage;
+  storage(options: { readonly persistent: true }): PersistentStorage;
   bootstrapError(): string | undefined;
   close(): Promise<void>;
 }
@@ -47,7 +49,7 @@ export async function createSession(
     base64ToBytes(identity.identitySeed),
   );
   const signals = createSignals();
-  const storage = createStorage();
+  const storage = createStorage(identity.username);
   const lifetime = new AbortController();
   let beacon: Peer | undefined;
   let bootstrapAttempt: Promise<void> | undefined;
@@ -132,6 +134,16 @@ export async function createSession(
     return current.network;
   }
 
+  function accessStorage(): VolatileStorage;
+  function accessStorage(options: { readonly persistent?: false }): VolatileStorage;
+  function accessStorage(options: { readonly persistent: true }): PersistentStorage;
+  function accessStorage(
+    options?: { readonly persistent?: boolean },
+  ): VolatileStorage | PersistentStorage {
+    requireOpen();
+    return options?.persistent === true ? storage.persistent : storage;
+  }
+
   return {
     username: identity.username,
     network: accessNetwork,
@@ -139,10 +151,7 @@ export async function createSession(
       requireOpen();
       return signals;
     },
-    storage() {
-      requireOpen();
-      return storage;
-    },
+    storage: accessStorage,
     bootstrapError: () => bootstrapFailure,
     async close() {
       if (shutdown === undefined) {

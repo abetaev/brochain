@@ -39,15 +39,15 @@ interface StoredAccount {
   encryptedData: EncryptedAccountData;
 }
 
-const DATABASE_NAME = "brochain-v2";
-const STORE_NAME = "accounts";
+const applicationDatabaseName = "brochain";
+const accountsStoreName = "accounts";
 const KDF_ITERATIONS = 310_000;
 const usernamePattern = /^[a-z]{1,64}$/;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const incorrectPassword = new Error("The password is incorrect.");
 
-export function createAccountService(databaseName = DATABASE_NAME) {
+export function createAccountService(databaseName = applicationDatabaseName) {
   let active: PeerIdentity | undefined;
   let sessionOpened = false;
   let mutations = Promise.resolve();
@@ -60,14 +60,20 @@ export function createAccountService(databaseName = DATABASE_NAME) {
   }
 
   async function read<T>(operation: (accounts: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-    const transaction = (await storage).transaction(STORE_NAME);
-    return await requestResult(operation(transaction.objectStore(STORE_NAME)));
+    const transaction = (await storage).transaction(accountsStoreName);
+    return await requestResult(operation(transaction.objectStore(accountsStoreName)));
   }
 
   async function write(operation: (accounts: IDBObjectStore) => IDBRequest): Promise<void> {
-    const transaction = (await storage).transaction(STORE_NAME, "readwrite");
-    await requestResult(operation(transaction.objectStore(STORE_NAME)));
-    await transactionResult(transaction);
+    const transaction = (await storage).transaction(accountsStoreName, "readwrite");
+    const completion = transactionResult(transaction);
+    try {
+      await requestResult(operation(transaction.objectStore(accountsStoreName)));
+      await completion;
+    } catch (reason) {
+      await completion.catch(() => undefined);
+      throw reason;
+    }
   }
 
   async function get(username: string): Promise<StoredAccount | undefined> {
@@ -137,7 +143,8 @@ export function createAccountService(databaseName = DATABASE_NAME) {
       throw reason;
     }
 
-    await write((storage) => storage.delete(username));
+    await deleteAccountStorage(databaseName, username);
+    if (!await deleteStoredAccount(account)) return false;
 
     if (active?.username === username) {
       active = undefined;
@@ -155,6 +162,27 @@ export function createAccountService(databaseName = DATABASE_NAME) {
     }
 
     return JSON.stringify(account, null, 2);
+  }
+
+  async function deleteStoredAccount(account: StoredAccount): Promise<boolean> {
+    const transaction = (await storage).transaction(accountsStoreName, "readwrite");
+    const completion = transactionResult(transaction);
+    const accounts = transaction.objectStore(accountsStoreName);
+    try {
+      const current = await requestResult<StoredAccount | undefined>(
+        accounts.get(account.username),
+      );
+      if (current === undefined || !sameAccount(current, account)) {
+        await completion;
+        return false;
+      }
+      await requestResult(accounts.delete(account.username));
+      await completion;
+      return true;
+    } catch (reason) {
+      await completion.catch(() => undefined);
+      throw reason;
+    }
   }
 
   function openSession(port: Endpoint): void {
@@ -338,18 +366,31 @@ async function decryptAccountSecrets(
   }
 }
 
+function sameAccount(left: StoredAccount, right: StoredAccount): boolean {
+  return left.version === right.version &&
+    left.username === right.username &&
+    left.createdAt === right.createdAt &&
+    left.encryptedData.cipher.ciphertext === right.encryptedData.cipher.ciphertext;
+}
+
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed."));
+    request.onerror = () => reject(
+      request.error ?? new Error("IndexedDB request failed."),
+    );
   });
 }
 
 function transactionResult(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
-    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
+    transaction.onerror = () => reject(
+      transaction.error ?? new Error("IndexedDB transaction failed."),
+    );
+    transaction.onabort = () => reject(
+      transaction.error ?? new Error("IndexedDB transaction aborted."),
+    );
   });
 }
 
@@ -362,11 +403,30 @@ async function openAccountStorage(databaseName: string): Promise<IDBDatabase> {
     const request = globalThis.indexedDB.open(databaseName, 1);
 
     request.onupgradeneeded = () => {
-      if (!request.result.objectStoreNames.contains(STORE_NAME)) {
-        request.result.createObjectStore(STORE_NAME, { keyPath: "username" });
+      if (!request.result.objectStoreNames.contains(accountsStoreName)) {
+        request.result.createObjectStore(accountsStoreName, { keyPath: "username" });
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("Unable to open account storage."));
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
+    request.onerror = () => reject(
+      request.error ?? new Error("Unable to open account storage."),
+    );
+  });
+}
+
+function deleteAccountStorage(databaseName: string, username: string): Promise<void> {
+  if (globalThis.indexedDB === undefined) {
+    return Promise.reject(new Error("This browser does not support IndexedDB."));
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = globalThis.indexedDB.deleteDatabase(`${databaseName}/${username}`);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(
+      request.error ?? new Error("Unable to delete account Storage."),
+    );
   });
 }

@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { PromisedMethods } from "@c/backend/network";
-import { createStorage, type ServiceStorage } from "@v/backend/storage";
+import {
+  createStorage as createStorageRoot,
+  type ServiceStorage,
+} from "@v/backend/storage";
 import {
   createIdentity,
   loadContact,
   type IdentityService,
 } from "./identity.ts";
+
+function createStorage() {
+  return createStorageRoot("test-account");
+}
 
 function contactStorage(
   peerId = "remote-peer",

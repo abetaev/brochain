@@ -4,6 +4,7 @@ project guidelines
 These principles constrain code, tests, and documentation. They do not define workflow, task scope, or current architecture.
 
 - **minimality**: implement only current requested behavior. Do not add speculative abstractions, stubs, retained debugging helpers, or future-oriented code.
+- **pre-production evolution**: until the engineer explicitly declares production, persisted development data and superseded interfaces or formats are disposable. Do not add migrations, compatibility shims, deprecated paths, or version bridges unless the task explicitly requires them. Preserve current intended behavior rather than obsolete implementation contracts.
 - **clarity**: a shallow traversal of the source tree and public interfaces must explain what the system does and which entity owns each responsibility. Implementation details stay local to the code that requires them.
 - **naming**: project-owned directories, files, entities, interfaces, and members describe their functional responsibility or designation. Do not name them for a framework, transport, runtime, protocol, or implementation technique unless that mechanism is their contract or an external tool mandates the name; in those cases, prefer the precise term to a vague substitute. Do not repeat context already expressed unambiguously by a path or namespace. Application and executable entry files use `main` unless they are run-mode integrations, which use the exact command designation (`dev` or `prod`); `index` is reserved for a directory module imported as that directory. Tool-mandated names are exempt.
 - **expression**: code must read as a direct expression of its intent, not as a cipher that must be decoded. Prefer straightforward control flow and descriptive intermediate values over clever, compressed, or indirect constructs.
@@ -34,5 +35,5 @@ conventions
 A designated backend core component MUST have a seven-letter lowercase English
 designation. Language-idiomatic capitalization of a symbol does not change its
 designation. The current and planned core designations are `account`, `network`,
-`options`, `session`, `signals`, and `storage`. Non-core component names have no
-length constraint.
+`options`, `secrecy`, `session`, `signals`, and `storage`. Non-core component
+names have no length constraint.

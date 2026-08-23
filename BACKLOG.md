@@ -11,23 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-storage modes
--------------
-
-type: feature
-scope: backend services
-
-Extend the unified Storage component with in-memory and persistent modes.
-Preserve its structured and streamed-data capabilities, but implement a
-persistent store kind only when a current consumer requires it. Options
-initially requires persistent key/value storage; persistent event storage is
-deferred until a durable consumer such as chat history is introduced.
-
-Persistent operations are asynchronous and MUST make failures observable.
-Persistent data is isolated by the unlocked local account identity and MUST be
-deleted when that account is deleted. In-memory data remains limited to its
-owning Session.
-
 options
 -------
 
@@ -143,6 +126,36 @@ a separate read confirmation for that message ID. Failed read confirmations
 remain queued in transient Session state and retry when the peer reconnects
 during that Session; confirmations are not persisted for offline delivery.
 
+secrecy
+-------
+
+type: feature
+scope: backend core components, account, network, storage
+
+Add the Session-owned `secrecy` core component to provide encryption and
+decryption capabilities to other components. It composes Account-held local
+secrets with authenticated peers' public keys without exposing private key
+material to consumers.
+
+Secrecy owns cryptographic transformation while Storage only retains supplied
+ciphertext. A later Storage policy may select encrypted access through
+`session.storage(options)`; the initial persistent Storage implementation
+remains unencrypted. Refine the key hierarchy, peer public-key access, ciphertext
+envelope and versioning, rotation, recovery, and failure behavior before
+implementation.
+
+single active account Session
+-----------------------------
+
+type: feature
+scope: account, session, browser lifecycle
+
+Reject authentication for an account which already has an active Session in
+another tab or window of the same browser. Ownership MUST be released after
+explicit Session shutdown and execution-context termination. Refine whether a
+SharedWorker, Web Locks, or another browser-wide coordination mechanism owns
+the lock before implementation.
+
 thoughts
 ========
 
@@ -174,3 +187,12 @@ Add two storage services:
 
 - versioned file storage backed by OPFS through an isomorphic-git-compatible filesystem adapter
 - queryable metadata storage backed by IndexedDB
+
+opaque remote storage
+---------------------
+
+Allow a peer to host another peer's client-encrypted data while the host retains
+only opaque ciphertext. Refine authentication, quotas, integrity verification,
+availability and replication, deletion, abuse controls, and recovery before
+implementation. Hosting may later integrate with the economy through fees and
+possibly blockchain-based agreements or settlement.
