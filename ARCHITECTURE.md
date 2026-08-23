@@ -13,7 +13,8 @@ Vessel
 │       ├── Signals
 │       ├── Storage
 │       │   └── PeerStorage × peer identity
-│       ├── Data storage (OPFS)
+│       │       └── ServiceStorage × service
+│       │           └── Event, singleton, key/value, and file stores
 │       └── Network (local peer)
 │           ├── Service catalog
 │           └── Peer × connected remote identity
@@ -55,7 +56,7 @@ Vessel
 
 - **runtime**: Window
 - **dependency**: one unlocked Account identity
-- **behavior**: owns one Network, Signals, structured Storage, and lazily initialized data-storage lifetime; stable accessors initialize and maintain these account-bound dependencies so consumers do not coordinate their construction, bootstrap, retry, or shutdown
+- **behavior**: owns one Network, Signals, and Storage; stable accessors initialize and maintain these account-bound dependencies so consumers do not coordinate their construction, bootstrap, retry, or shutdown
 - **bootstrap**: Network startup is independent of the inferred default-Beacon connection. Bootstrap failure leaves a usable offline Network, records an error for Home, and is retried by later Network access, including requests made by Roster, whenever Beacon is disconnected. Successful bootstrap waits for the relay-backed WebRTC address.
 - **shutdown**: sign-out closes peer networking, removes Session data, and closes the Account session
 
@@ -65,7 +66,7 @@ Vessel
 | --- | --- | --- |
 | **Network** | Represents the local peer, constructs remote Peers, retains one active Peer per connected identity, and owns the libp2p lifetime. | Active connections and transient connection attempts |
 | **Signals** | Resolves typed channels owned by independently extensible network services, frontend services, and views. Lookups are stable within one Session, while different owners and Sessions remain isolated. Channels publish synchronously in subscription order; a subscriber that throws synchronously is logged and isolated from the publisher and other subscribers. | Channel identities and subscriptions; events are neither retained nor replayed |
-| **Storage** | Provides event, singleton, and key/value stores scoped first by peer identity and then by service. | Memory; discarded with the Session |
+| **Storage** | Provides event, singleton, key/value, and streamed file stores scoped first by peer identity and then by service. | Structured projections in memory and opaque files in OPFS; discarded with the Session |
 
 Components expose their actual owned channels through their public contracts, so publishers and subscribers integrate through the contract without depending on one another's implementations.
 Signals is not a universal pubsub mechanism: Common Network and Peer retain
@@ -100,14 +101,22 @@ Vessel reaches Beacon over WebSockets and Circuit Relay v2, then uses WebRTC for
 
 ### Session Storage
 
-Storage is addressed as `peer(peerId).service(serviceName)` and then as an event, singleton, or key/value store. It only retains and retrieves projections and exposes no notification API. A domain that signals a mutation MUST update Storage successfully before publishing the corresponding data-bearing event. Local-service state uses the local `Network.id`; interaction state uses the remote counterpart's ID. For example, sent and received items with one remote peer share that peer's Chat stores. Infrastructure state required to operate Session, Network, and Peer lifetimes remains encapsulated by those entities.
+Storage is addressed as `peer(peerId).service(serviceName)` and then as an
+event, singleton, key/value, or file store. It only retains and retrieves values
+and exposes no notification API. A domain that signals a mutation MUST update
+Storage successfully before publishing the corresponding data-bearing event.
+Local-service state uses the local `Network.id`; interaction state uses the
+remote counterpart's ID. For example, sent and received items with one remote
+peer share that peer's Chat stores. Infrastructure state required to operate
+Session, Network, and Peer lifetimes remains encapsulated by those entities.
 
-Session data storage is separate from structured Storage. It accepts a declared
-size before opening an OPFS writer, streams bytes without retaining the complete
-value in application memory, and exposes a stored value as a `File` only when a
-consumer opens it. It reserves ten percent of browser quota and uses Web Locks
-to avoid deleting another tab's active Session while removing abandoned Session
-directories. Closing Session aborts active writers and removes all of its files.
+File stores initialize one shared Session OPFS root lazily. A writer declares
+its exact size before streaming begins, preserves backpressure without retaining
+the complete value in application memory, and exposes completed bytes as an
+opaque Blob. Storage reserves ten percent of browser quota and uses Web Locks to
+protect active tabs while removing abandoned Session directories. Closing
+Storage waits for initialization and file creation already in progress, aborts
+active writers, removes all Session files, and releases the lock.
 
 ### peer services
 
@@ -148,10 +157,10 @@ remain explicit refreshes until that RPC service gains its own update mechanism.
 
 Chat owns the Session's presentation-oriented history, full-item update channel,
 and read-count channel. It retains ordered item IDs and current item snapshots in
-structured Storage before publishing an update. Received files are accepted
-into Session data storage. Text capability gates Chat itself; DataTransfer
-capability independently gates file controls. History and unread counts survive
-navigation and disappear when Session ends.
+Storage before publishing an update. Received files are accepted into Chat's
+peer- and service-scoped file store. Text capability gates Chat itself;
+DataTransfer capability independently gates file controls. History and unread
+counts survive navigation and disappear when Session ends.
 
 ```text
 Account --create/unlock--> Home --open peer ID--> Chat

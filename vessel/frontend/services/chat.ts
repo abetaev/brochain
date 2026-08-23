@@ -4,7 +4,6 @@ import {
   validateServiceNames,
   type Registry,
 } from "@c/backend/network/services/registry";
-import type { StoredData, DataWriter } from "@v/backend/data-storage";
 import {
   createDataTransfer,
   dataTransferServiceName,
@@ -18,6 +17,7 @@ import {
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
 import type { Channel } from "@v/backend/signals";
+import type { FileWriter, StoredFile } from "@v/backend/storage";
 
 export interface ChatFile {
   readonly name: string;
@@ -73,7 +73,7 @@ export async function createChat(session: Session): Promise<Chat> {
   const signals = session.signals();
   const updates = signals.channel<ChatItem>({}, "updates");
   const reads = signals.channel<ChatRead>({}, "reads");
-  const incomingWriters = new Map<string, DataWriter>();
+  const incomingWriters = new Map<string, FileWriter>();
   const messaging = await createMessaging(session);
   messaging.events.subscribe(receiveMessaging);
   const dataTransfer = await createDataTransfer(session);
@@ -89,6 +89,10 @@ export async function createChat(session: Session): Promise<Chat> {
 
   function readStorage(peerId: string) {
     return session.storage().peer(peerId).service(chatServiceName).singleton<number>("read");
+  }
+
+  function fileStorage(peerId: string) {
+    return session.storage().peer(peerId).service(chatServiceName).fs();
   }
 
   function history(peerId: string): readonly ChatItem[] {
@@ -160,9 +164,7 @@ export async function createChat(session: Session): Promise<Chat> {
         transferred: 0,
         status: "transferring",
       });
-      const writer = session.dataStorage().then(async (storage) =>
-        await storage.create(event.size)
-      ).then((created) => {
+      const writer = fileStorage(event.peerId).create(event.size).then((created) => {
         incomingWriters.set(transferKey(event.peerId, event.id), created);
         return created;
       });
@@ -193,7 +195,7 @@ export async function createChat(session: Session): Promise<Chat> {
         ...item,
         transferred: item.size,
         status: "complete",
-        file: storedFile(writer.data, item.name, item.mediaType, item.size),
+        file: storedFile(writer.file, item.name, item.mediaType, item.size),
       });
       return;
     }
@@ -291,7 +293,7 @@ function browserFile(file: File): ChatFile {
 }
 
 function storedFile(
-  data: StoredData,
+  file: StoredFile,
   name: string,
   mediaType: string,
   size: number,
@@ -300,7 +302,7 @@ function storedFile(
     name,
     mediaType,
     size,
-    open: async () => await data.file(name, mediaType),
+    open: async () => new File([await file.blob()], name, { type: mediaType }),
   };
 }
 

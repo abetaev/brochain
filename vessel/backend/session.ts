@@ -14,10 +14,6 @@ import {
 } from "@v/backend/network/services/identity";
 import { createSignals, type Signals } from "@v/backend/signals";
 import {
-  createDataStorage,
-  type DataStorage,
-} from "@v/backend/data-storage";
-import {
   createStorage,
   type Storage,
 } from "@v/backend/storage";
@@ -27,7 +23,6 @@ export interface Session {
   network(): Promise<Network>;
   signals(): Signals;
   storage(): Storage;
-  dataStorage(): Promise<DataStorage>;
   bootstrapError(): string | undefined;
   close(): Promise<void>;
 }
@@ -92,7 +87,6 @@ export async function createSession(
   }
 
   let runtime: ReturnType<typeof createRuntime> | undefined;
-  let sessionData: ReturnType<typeof createDataStorage> | undefined;
 
   async function getRuntime() {
     requireOpen();
@@ -149,16 +143,6 @@ export async function createSession(
       requireOpen();
       return storage;
     },
-    async dataStorage() {
-      requireOpen();
-      sessionData ??= createDataStorage();
-      try {
-        return await sessionData;
-      } catch (reason) {
-        sessionData = undefined;
-        throw reason;
-      }
-    },
     bootstrapError: () => bootstrapFailure,
     async close() {
       if (shutdown === undefined) {
@@ -167,7 +151,7 @@ export async function createSession(
         shutdown = (async () => {
           const results = await Promise.allSettled([
             runtime?.then(async ({ network }) => await network.close()),
-            sessionData?.then(async (data) => await data.close()),
+            storage.close(),
             closeAccountSession(),
           ]);
           const failure = results.find(

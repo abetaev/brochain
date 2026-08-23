@@ -11,34 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-unified Storage
----------------
-
-type: refactoring, architecture
-scope: storage, session, chat, data transfer
-
-`data-storage` MUST NOT remain a separate component. Storage is the sole
-account-bound retention component and MUST expose every storage capability
-required by the application, including streamed opaque binary data.
-
-Move the current declared-length OPFS writer, stored-data handle, quota
-reservation, partial-write cleanup, Web Lock coordination, and Session cleanup
-behind Storage's public interface. Streamed values are addressed through the
-same peer and service ownership hierarchy as other retained values; filesystem
-names remain private implementation details. Chat and DataTransfer access them
-through `session.storage()`.
-
-Storage owns retention and lifecycle, Chat owns file presentation metadata,
-DataTransfer owns transport and byte flow, and Signals retains nothing. The
-binary interface MUST preserve streaming and backpressure without buffering a
-complete value in application memory. Existing event, singleton, and key/value
-behavior remains available. Future retained representations extend Storage
-rather than introduce sibling storage components.
-
-Remove `Session.dataStorage()`, `DataStorage`, `createDataStorage()`, and
-`vessel/backend/data-storage.ts` after all consumers migrate. Session shutdown
-closes its one Storage component and cleans up incomplete transient data.
-
 storage modes
 -------------
 
@@ -200,5 +172,5 @@ storage
 
 Add two storage services:
 
-- versioned file storage backed by ZenFS and isomorphic-git
+- versioned file storage backed by OPFS through an isomorphic-git-compatible filesystem adapter
 - queryable metadata storage backed by IndexedDB

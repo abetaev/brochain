@@ -6,7 +6,6 @@ import type { Network, Peer, Services } from "@c/backend/network";
 const dependencies = vi.hoisted(() => ({
   createLibp2p: vi.fn(),
   createNetwork: vi.fn(),
-  createDataStorage: vi.fn(),
   generateKeyPairFromSeed: vi.fn(),
 }));
 
@@ -21,16 +20,12 @@ vi.mock("@libp2p/webrtc", () => ({ webRTC: () => ({}) }));
 vi.mock("@libp2p/websockets", () => ({ webSockets: () => ({}) }));
 vi.mock("libp2p", () => ({ createLibp2p: dependencies.createLibp2p }));
 vi.mock("@c/backend/network", () => ({ default: dependencies.createNetwork }));
-vi.mock("@v/backend/data-storage", () => ({
-  createDataStorage: dependencies.createDataStorage,
-}));
 
 import { createSession } from "./session.ts";
 
 interface TestRuntime {
   readonly beacon: Peer & { isConnected: ReturnType<typeof vi.fn> };
   readonly createdBeacon: Peer & { connect: ReturnType<typeof vi.fn> };
-  readonly dataStorage: { close: ReturnType<typeof vi.fn> };
   readonly network: Network & {
     createPeer: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
@@ -51,7 +46,6 @@ beforeEach(() => {
   });
   dependencies.createLibp2p.mockReset();
   dependencies.createNetwork.mockReset();
-  dependencies.createDataStorage.mockReset();
   dependencies.generateKeyPairFromSeed.mockReset();
 
   const beacon = {
@@ -67,19 +61,17 @@ beforeEach(() => {
     createPeer: vi.fn(async () => createdBeacon),
     close: vi.fn(async () => {}),
   } as unknown as TestRuntime["network"];
-  const dataStorage = { close: vi.fn(async () => {}) };
   const node = {
     addEventListener: vi.fn(),
     getMultiaddrs: vi.fn(() => [{ toString: () => "/p2p-circuit/webrtc" }]),
     removeEventListener: vi.fn(),
     stop: vi.fn(async () => {}),
   };
-  runtime = { beacon, createdBeacon, dataStorage, network, node };
+  runtime = { beacon, createdBeacon, network, node };
 
   dependencies.generateKeyPairFromSeed.mockResolvedValue({});
   dependencies.createLibp2p.mockResolvedValue(node);
   dependencies.createNetwork.mockResolvedValue(network);
-  dependencies.createDataStorage.mockResolvedValue(dataStorage);
 });
 
 afterEach(() => {
@@ -126,14 +118,14 @@ describe("Session access and lifetime", () => {
     expect(runtime.createdBeacon.connect.mock.invocationCallOrder[0])
       .toBeLessThan(runtime.node.getMultiaddrs.mock.invocationCallOrder[0]!);
 
-    expect(session.storage()).toBe(session.storage());
-    expect(session.storage().peer("remote")).toBe(session.storage().peer("remote"));
+    const storage = session.storage();
+    const closeStorage = vi.spyOn(storage, "close");
+    expect(storage).toBe(session.storage());
+    expect(storage.peer("remote")).toBe(storage.peer("remote"));
     expect(session.signals()).toBe(session.signals());
-    expect(await session.dataStorage()).toBe(await session.dataStorage());
-    expect(dependencies.createDataStorage).toHaveBeenCalledOnce();
 
     await session.close();
-    expect(runtime.dataStorage.close).toHaveBeenCalledOnce();
+    expect(closeStorage).toHaveBeenCalledOnce();
   });
 
   it("isolates Signals between Sessions", async () => {
@@ -325,6 +317,7 @@ describe("Session access and lifetime", () => {
     );
     const closeAccountSession = vi.fn(async () => {});
     const session = await openSession(closeAccountSession);
+    const closeStorage = vi.spyOn(session.storage(), "close");
     const access = session.network();
     await vi.waitFor(() => expect(finishNetwork).toBeDefined());
 
@@ -335,11 +328,24 @@ describe("Session access and lifetime", () => {
     await expect(Promise.all([firstClose, secondClose])).resolves.toEqual([undefined, undefined]);
     await expect(access).rejects.toThrow("Session is closed");
     expect(runtime.network.close).toHaveBeenCalledOnce();
+    expect(closeStorage).toHaveBeenCalledOnce();
     expect(closeAccountSession).toHaveBeenCalledOnce();
     expect(runtime.network.createPeer).not.toHaveBeenCalled();
     expect(() => session.signals()).toThrow("Session is closed");
     expect(() => session.storage()).toThrow("Session is closed");
-    await expect(session.dataStorage()).rejects.toThrow("Session is closed");
+  });
+
+  it("closes Account access even when Storage shutdown fails", async () => {
+    const failure = new Error("Storage shutdown failed.");
+    const closeAccountSession = vi.fn(async () => {});
+    const session = await openSession(closeAccountSession);
+    const closeStorage = vi.spyOn(session.storage(), "close").mockRejectedValue(failure);
+
+    await expect(session.close()).rejects.toBe(failure);
+    expect(closeStorage).toHaveBeenCalledOnce();
+    expect(closeAccountSession).toHaveBeenCalledOnce();
+    await expect(session.close()).rejects.toBe(failure);
+    expect(closeStorage).toHaveBeenCalledOnce();
   });
 
   it("closes Account access even when Network shutdown fails", async () => {

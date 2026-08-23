@@ -2,7 +2,6 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Peer } from "@c/backend/network";
-import type { DataStorage, DataWriter } from "@v/backend/data-storage";
 import type {
   DataTransfer,
   DataTransferEvent,
@@ -15,7 +14,11 @@ import type {
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
 import { createSignals, type Channel } from "@v/backend/signals";
-import { createStorage } from "@v/backend/storage";
+import {
+  createStorage,
+  type FileWriter,
+  type StoredFile,
+} from "@v/backend/storage";
 
 const dependencies = vi.hoisted(() => ({
   createMessaging: vi.fn(),
@@ -37,7 +40,8 @@ let messagingEvents: Channel<MessagingEvent>;
 let transferEvents: Channel<DataTransferEvent>;
 let messaging: Messaging & { send: ReturnType<typeof vi.fn> };
 let dataTransfer: DataTransfer & { send: ReturnType<typeof vi.fn> };
-let writer: DataWriter;
+let writer: FileWriter;
+let createFile: ReturnType<typeof vi.fn>;
 let session: Session;
 
 beforeEach(() => {
@@ -57,30 +61,25 @@ beforeEach(() => {
   dependencies.createMessaging.mockReset().mockResolvedValue(messaging);
   dependencies.createDataTransfer.mockReset().mockResolvedValue(dataTransfer);
 
-  const stored = {
-    file: vi.fn(async (name: string, mediaType: string) =>
-      new File(["received"], name, { type: mediaType })
-    ),
+  const stored: StoredFile = {
+    blob: vi.fn(async () => new Blob(["received"])),
     remove: vi.fn(async () => {}),
   };
   writer = {
-    data: stored,
+    file: stored,
     write: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
   };
-  const dataStorage = {
-    create: vi.fn(async () => writer),
-    close: vi.fn(async () => {}),
-  } satisfies DataStorage;
   const signals = createSignals();
   const storage = createStorage();
+  createFile = vi.spyOn(storage.peer("remote").service("chat").fs(), "create")
+    .mockResolvedValue(writer);
   session = {
     username: "alice",
     network: vi.fn(),
     signals: () => signals,
     storage: () => storage,
-    dataStorage: vi.fn(async () => dataStorage),
     bootstrapError: () => undefined,
     close: vi.fn(),
   } as unknown as Session;
@@ -173,9 +172,9 @@ describe("Chat service", () => {
     expect(updates.at(-1)).toBe(chat.history("remote")[1]);
   });
 
-  it("accepts incoming files into Session data storage and updates one item", async () => {
+  it("accepts incoming files into peer-scoped Storage and owns presentation", async () => {
     const chat = await createChat(session);
-    let accepted: DataWriter | Promise<DataWriter> | undefined;
+    let accepted: FileWriter | Promise<FileWriter> | undefined;
     transferEvents.publish({
       id: "file-1",
       peerId: "remote",
@@ -188,12 +187,13 @@ describe("Chat service", () => {
       },
       type: "offered",
       accept: (sink) => {
-        accepted = sink as DataWriter | Promise<DataWriter>;
+        accepted = sink as FileWriter | Promise<FileWriter>;
       },
       reject: vi.fn(),
     });
 
     await expect(Promise.resolve(accepted)).resolves.toBe(writer);
+    expect(createFile).toHaveBeenCalledWith(8);
     transferEvents.publish({
       id: "file-1",
       peerId: "remote",
@@ -229,7 +229,10 @@ describe("Chat service", () => {
       status: "complete",
     });
     if (item?.kind !== "file" || item.file === undefined) throw new Error("Missing file.");
-    await expect((await item.file.open()).text()).resolves.toBe("received");
+    const file = await item.file.open();
+    expect(file.name).toBe("note.txt");
+    expect(file.type).toBe("text/plain");
+    await expect(file.text()).resolves.toBe("received");
   });
 
   it("sends files through DataTransfer and retains progress snapshots", async () => {
