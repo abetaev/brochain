@@ -3,14 +3,22 @@ brochain
 
 Private peer-to-peer communication.
 
-This document provide user documentation for the project.
-
 using brochain
 --------------
 
-1. Create an account, or choose a stored account and unlock it. Usernames contain 1–64 lowercase English letters; password strength is advisory.
-2. After sign-in, the Session attempts to connect to the default Beacon and Home requests a fresh peer list through connected peers. Beacon appears as an ordinary connected peer. Home refreshes when local connections change; use **Refresh peers** to request new remote Discovery results. If Beacon is unavailable, local peer networking remains usable, and **Refresh peers** retries it.
-3. Discovered peers remain disconnected until you select **Connect**. You may also enter a peer multiaddress under **Connect directly**.
-4. **Chat** is available only for a connected peer that provides messaging. Text appears immediately when sent. File controls are available when that peer also provides data transfer; files appear immediately with transfer progress and failures. Delivery and read confirmations are not available yet.
-5. Incoming messages and accepted files remain available across views while you are signed in. Home marks peers with unread items, and opening Chat clears that marker. Messages and received-file links disappear after sign-out or page reload and are not delivered while the application is closed or offline.
-6. The Account view can export an encrypted account record or permanently delete a local account after password confirmation.
+1. Open brochain and create an account, or select an existing account and unlock
+   it. Account names use 1–64 lowercase English letters. The password-strength
+   indicator is advice and does not prevent account creation.
+2. On Home, select **Refresh peers** to update the list of people you can connect
+   to.
+3. Select **Connect** beside a peer. If someone gives you a direct address, paste
+   it under **Connect directly** instead.
+4. Select **Chat** after connecting. Enter text and select **Send message**. Use
+   **Send a file** when file sharing is available for that peer; progress and
+   failures appear in the conversation.
+5. Home marks conversations with unread items. Opening the conversation clears
+   its unread marker. Messages and received files remain available while you are
+   signed in, but disappear after sign-out or page reload. Sending messages and
+   files requires both people to be connected.
+6. Select **Sign out** to return to the account screen. There you can export an
+   account backup or permanently delete an account after confirming its password.
