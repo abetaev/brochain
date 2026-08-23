@@ -73,9 +73,11 @@ export async function createChat(session: Session): Promise<Chat> {
   const signals = session.signals();
   const updates = signals.channel<ChatItem>({}, "updates");
   const reads = signals.channel<ChatRead>({}, "reads");
-  const messaging = await createMessaging(session);
-  const dataTransfer = await createDataTransfer(session);
   const incomingWriters = new Map<string, DataWriter>();
+  const messaging = await createMessaging(session);
+  messaging.events.subscribe(receiveMessaging);
+  const dataTransfer = await createDataTransfer(session);
+  dataTransfer.events.subscribe(receiveTransfer);
 
   function itemStorage(peerId: string) {
     return session.storage().peer(peerId).service(chatServiceName).kv<ChatItem>("items");
@@ -197,9 +199,6 @@ export async function createChat(session: Session): Promise<Chat> {
     }
     update({ ...item, transferred: item.size, status: "complete" });
   }
-
-  messaging.events.subscribe(receiveMessaging);
-  dataTransfer.events.subscribe(receiveTransfer);
 
   return {
     updates,

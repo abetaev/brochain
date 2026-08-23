@@ -9,10 +9,7 @@ import {
   validateServiceNames,
   type Registry,
 } from "@c/backend/network/services/registry";
-import {
-  type Network,
-  type Peer,
-} from "@c/backend/network";
+import type { Peer } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
 import type { Channel } from "@v/backend/signals";
 
@@ -22,21 +19,10 @@ export interface Roster {
   getPeer(peerId: string): Promise<Peer | undefined>;
 }
 
-export function createRoster(session: Session): Roster {
+export async function createRoster(session: Session): Promise<Roster> {
+  const network = await session.network();
   const invalidations = session.signals().channel<void>({}, "invalidations");
-  let observing = false;
-
-  function observe(network: Network): void {
-    if (observing) return;
-    network.subscribe(() => invalidations.publish(undefined));
-    observing = true;
-  }
-
-  async function accessNetwork(): Promise<Network> {
-    const network = await session.network();
-    observe(network);
-    return network;
-  }
+  network.subscribe(() => invalidations.publish(undefined));
 
   async function discover(provider: Peer): Promise<readonly string[]> {
     const services = validateServiceNames(
@@ -49,7 +35,7 @@ export function createRoster(session: Session): Roster {
     );
   }
 
-  async function load(network: Network): Promise<readonly Peer[]> {
+  async function list(): Promise<readonly Peer[]> {
     const connected = [...network.connectedPeers()];
     const peers = new Map(connected.map((peer) => [peer.id, peer]));
     const discovered = new Map<string, Set<string>>();
@@ -95,13 +81,10 @@ export function createRoster(session: Session): Roster {
 
   return {
     invalidations,
-    async list() {
-      return await load(await accessNetwork());
-    },
+    list,
     async getPeer(peerId) {
-      const network = await accessNetwork();
       const connected = network.connectedPeers().find((peer) => peer.id === peerId);
-      return connected ?? (await load(network)).find((peer) => peer.id === peerId);
+      return connected ?? (await list()).find((peer) => peer.id === peerId);
     },
   };
 }

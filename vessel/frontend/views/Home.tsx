@@ -26,7 +26,6 @@ export function Home(props: {
   const [actionError, setActionError] = createSignal<string>();
   const [actionBusy, setActionBusy] = createSignal(false);
   let active = true;
-  let stopRoster: (() => void) | undefined;
 
   async function describe(peer: Peer): Promise<ListedPeer> {
     const connected = peer.isConnected();
@@ -52,11 +51,11 @@ export function Home(props: {
   async function loadRoster(): Promise<readonly ListedPeer[]> {
     if (!active) return [];
 
-    stopRoster ??= props.roster.invalidations.subscribe(() => void refetch());
     return Promise.all((await props.roster.list()).map(describe));
   }
 
   const [roster, { refetch }] = createResource(loadRoster);
+  const stopInvalidations = props.roster.invalidations.subscribe(() => void refetch());
   const unavailable = () => actionBusy() || roster.loading;
   const peers = createMemo<readonly ListedPeer[] | undefined>((current) =>
     roster.error === undefined ? roster() : current,
@@ -97,14 +96,14 @@ export function Home(props: {
 
   async function signOut(): Promise<void> {
     active = false;
-    stopRoster?.();
+    stopInvalidations();
     await props.session.close().catch(() => {});
     props.onSignedOut();
   }
 
   onCleanup(() => {
     active = false;
-    stopRoster?.();
+    stopInvalidations();
   });
 
   return (

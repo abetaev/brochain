@@ -21,9 +21,18 @@ export function Chat(props: {
   const [error, setError] = createSignal<string>();
   const [peer, setPeer] = createSignal<Peer>();
   const [filesAvailable, setFilesAvailable] = createSignal(false);
-  let stopEvents: (() => void) | undefined;
   const receivedIds = new Set<string>();
   let active = true;
+
+  const stopEvents = props.chat.updates.subscribe((item) => {
+    const currentPeer = peer();
+    if (currentPeer === undefined || item.peerId !== currentPeer.id) return;
+    setItems((current) => replaceItem(current, item));
+    if (item.direction === "received" && !receivedIds.has(item.id)) {
+      receivedIds.add(item.id);
+      props.chat.markRead(currentPeer.id);
+    }
+  });
 
   function attemptSend(operation: () => void): void {
     setError(undefined);
@@ -75,14 +84,6 @@ export function Chat(props: {
       }
       if (!active) return;
 
-      stopEvents = props.chat.updates.subscribe((item) => {
-        if (item.peerId !== peer.id) return;
-        setItems((current) => replaceItem(current, item));
-        if (item.direction === "received" && !receivedIds.has(item.id)) {
-          receivedIds.add(item.id);
-          props.chat.markRead(peer.id);
-        }
-      });
       const history = props.chat.history(peer.id);
       history.filter((item) => item.direction === "received")
         .forEach((item) => receivedIds.add(item.id));
@@ -109,7 +110,7 @@ export function Chat(props: {
   onMount(() => void initialize());
   onCleanup(() => {
     active = false;
-    stopEvents?.();
+    stopEvents();
   });
 
   return (

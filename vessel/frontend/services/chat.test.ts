@@ -99,6 +99,29 @@ function remotePeer(services = ["registry", "messaging", "data-transfer"]): Peer
 }
 
 describe("Chat service", () => {
+  it("wires Messaging before waiting for DataTransfer construction", async () => {
+    let finishDataTransfer: ((service: DataTransfer) => void) | undefined;
+    dependencies.createDataTransfer.mockImplementationOnce(async () =>
+      await new Promise<DataTransfer>((resolve) => {
+        finishDataTransfer = resolve;
+      })
+    );
+
+    const construction = createChat(session);
+    await vi.waitFor(() => expect(dependencies.createDataTransfer).toHaveBeenCalledOnce());
+    messagingEvents.publish({
+      peerId: "remote",
+      type: "received",
+      message: { id: "during-construction", text: "hello" },
+    });
+    finishDataTransfer?.(dataTransfer);
+
+    const chat = await construction;
+    expect(chat.history("remote")).toEqual([
+      expect.objectContaining({ id: "during-construction", text: "hello" }),
+    ]);
+  });
+
   it("retains text projections before updates and owns unread state", async () => {
     const chat = await createChat(session);
     const updates: ChatItem[] = [];
