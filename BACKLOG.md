@@ -22,6 +22,11 @@ settings. “Settings” designates the frontend which edits Options; it is not 
 backend component name. Observed remote data, such as cached identity, MUST
 remain owned by the service that observed it rather than Options.
 
+Options initializes an in-memory projection asynchronously from
+`session.storage({ persistent: true }).peer(network.id).service("options")`.
+Reads are synchronous. Writes and deletions update the projection and publish a
+change Signal only after persistent Storage succeeds.
+
 Option keys follow this documented convention:
 
 - terms use `[A-Za-z0-9_-]+` and designate entities
@@ -158,6 +163,16 @@ the lock before implementation.
 
 thoughts
 ========
+
+portable accounts
+-----------------
+
+Allow an exported encrypted account to be imported or transmitted to a
+connected peer during a Session, so it becomes a local account on the receiving
+browser and can connect with the same network identity. Refine consent,
+validation, username collisions, password verification, whether persistent
+Storage is included, transport security, and simultaneous use of one identity
+before implementation.
 
 beacon connections
 ------------------

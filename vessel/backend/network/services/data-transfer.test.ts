@@ -245,7 +245,7 @@ describe("DataTransfer", () => {
       });
 
       await vi.waitFor(() => expect(localEvents.at(-1)?.type).toBe("completed"));
-      expect(logged).toHaveBeenCalledWith("Signals subscriber failed.", failure);
+      expect(logged.mock.calls).toEqual([["Signals subscriber failed."]]);
     } finally {
       logged.mockRestore();
     }

@@ -12,6 +12,7 @@ describe("Signals", () => {
     expectTypeOf(first.publish).parameter(0).toEqualTypeOf<{
       readonly value: number;
     }>();
+    expectTypeOf(first.subscribe).parameter(0).returns.toEqualTypeOf<unknown>();
   });
 
   it("isolates owner namespaces and Signals instances", () => {
@@ -66,19 +67,22 @@ describe("Signals", () => {
 
   it("logs and isolates subscriber failures", () => {
     const channel = createSignals().channel<void>({}, "updates");
-    const failure = new Error("Subscriber failed.");
+    const privatePayload = { message: "private event data" };
     const later = vi.fn();
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
       channel.subscribe(() => {
-        throw failure;
+        throw privatePayload;
       });
-      channel.subscribe(later);
+      channel.subscribe(() => {
+        later();
+        return "ignored";
+      });
 
       expect(() => channel.publish(undefined)).not.toThrow();
       expect(later).toHaveBeenCalledOnce();
-      expect(logged).toHaveBeenCalledWith("Signals subscriber failed.", failure);
+      expect(logged.mock.calls).toEqual([["Signals subscriber failed."]]);
     } finally {
       logged.mockRestore();
     }

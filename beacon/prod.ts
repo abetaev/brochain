@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createServer as createHttpsServer, type ServerOptions } from "node:https";
-import { dirname, extname, resolve } from "node:path";
+import { dirname, extname, resolve, sep } from "node:path";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { createBeacon } from "./core.ts";
@@ -56,7 +56,7 @@ async function serveVessel(pathname: string, response: ServerResponse): Promise<
   const file = resolve(builtVesselDirectory, `.${requestedPath}`);
 
   try {
-    if (!file.startsWith(`${builtVesselDirectory}/`)) throw new Error("Invalid path.");
+    if (!file.startsWith(`${builtVesselDirectory}${sep}`)) throw new Error("Invalid path.");
     const contents = await readFile(file);
     response.writeHead(200, {
       "content-type": mimeTypes[extname(file)] ?? "application/octet-stream",

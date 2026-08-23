@@ -168,9 +168,10 @@ access.
 
 Publication is synchronous, ordered, non-retained, and non-replaying. A
 subscriber which throws synchronously is logged without event payload data and
-does not affect the publisher or later subscribers. Subscribers own failures
-from asynchronous work they start. Platform events, request/response flows,
-Common Network observers, and component-local reactivity remain outside Signals.
+does not affect the publisher or later subscribers. Subscriber return values are
+ignored, and subscribers own failures from asynchronous work they start.
+Platform events, request/response flows, Common Network observers, and
+component-local reactivity remain outside Signals.
 
 ##### Storage
 

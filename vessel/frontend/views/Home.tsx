@@ -25,7 +25,31 @@ export function Home(props: {
 }) {
   const [actionError, setActionError] = createSignal<string>();
   const [actionBusy, setActionBusy] = createSignal(false);
-  let active = true;
+  const receivedByPeer = new Map<string, Set<string>>();
+  const [unread, setUnread] = createSignal<ReadonlyMap<string, boolean>>(new Map());
+
+  function receivedIds(peerId: string): Set<string> {
+    let ids = receivedByPeer.get(peerId);
+    if (ids === undefined) {
+      ids = new Set(props.chat.history(peerId)
+        .filter((item) => item.direction === "received")
+        .map((item) => item.id));
+      receivedByPeer.set(peerId, ids);
+    }
+    return ids;
+  }
+
+  function updateUnread(peerId: string, read = props.chat.readCount(peerId)): void {
+    const next = receivedIds(peerId).size > read;
+    setUnread((current) => current.get(peerId) === next
+      ? current
+      : new Map(current).set(peerId, next));
+  }
+
+  function hasUnread(peerId: string): boolean {
+    return unread().get(peerId) ??
+      (receivedIds(peerId).size > props.chat.readCount(peerId));
+  }
 
   async function describe(peer: Peer): Promise<ListedPeer> {
     const connected = peer.isConnected();
@@ -48,14 +72,21 @@ export function Home(props: {
     return { peer, name, connected, messaging };
   }
 
-  async function loadRoster(): Promise<readonly ListedPeer[]> {
-    if (!active) return [];
-
-    return Promise.all((await props.roster.list()).map(describe));
-  }
-
-  const [roster, { refetch }] = createResource(loadRoster);
-  const stopInvalidations = props.roster.invalidations.subscribe(() => void refetch());
+  const [roster, { refetch }] = createResource(async () =>
+    Promise.all((await props.roster.list()).map(describe))
+  );
+  const stops = [
+    props.roster.invalidations.subscribe(() => void refetch()),
+    props.chat.updates.subscribe((item) => {
+      if (item.direction !== "received") return;
+      receivedIds(item.peerId).add(item.id);
+      updateUnread(item.peerId);
+    }),
+    props.chat.reads.subscribe(({ peerId, count }) => {
+      updateUnread(peerId, count);
+    }),
+  ];
+  const stopObserving = () => stops.forEach((stop) => stop());
   const unavailable = () => actionBusy() || roster.loading;
   const peers = createMemo<readonly ListedPeer[] | undefined>((current) =>
     roster.error === undefined ? roster() : current,
@@ -67,9 +98,9 @@ export function Home(props: {
     try {
       await operation();
     } catch (reason) {
-      if (active) setActionError(errorMessage(reason));
+      setActionError(errorMessage(reason));
     } finally {
-      if (active) setActionBusy(false);
+      setActionBusy(false);
     }
   }
 
@@ -95,16 +126,12 @@ export function Home(props: {
   }
 
   async function signOut(): Promise<void> {
-    active = false;
-    stopInvalidations();
+    stopObserving();
     await props.session.close().catch(() => {});
     props.onSignedOut();
   }
 
-  onCleanup(() => {
-    active = false;
-    stopInvalidations();
-  });
+  onCleanup(stopObserving);
 
   return (
     <section aria-labelledby="home-heading">
@@ -147,7 +174,7 @@ export function Home(props: {
                   {(peer) => (
                     <PeerRow
                       listed={peer}
-                      chat={props.chat}
+                      unread={hasUnread(peer.peer.id)}
                       busy={unavailable()}
                       onConnect={(selected) => void performAction(
                         () => connectAndOpen(selected),
@@ -192,36 +219,11 @@ export function Home(props: {
 
 function PeerRow(props: {
   listed: ListedPeer;
-  chat: Chat;
+  unread: boolean;
   busy: boolean;
   onConnect(peer: Peer): void;
   onOpenChat(peerId: string): void;
 }) {
-  const [unread, setUnread] = createSignal(false);
-  const receivedIds = new Set(props.chat.history(props.listed.peer.id)
-    .filter((item) => item.direction === "received")
-    .map((item) => item.id));
-  let readCount = props.chat.readCount(props.listed.peer.id);
-
-  function updateUnread(): void {
-    setUnread(receivedIds.size > readCount);
-  }
-
-  const stops = [
-    props.chat.updates.subscribe((item) => {
-      if (item.peerId !== props.listed.peer.id || item.direction !== "received") return;
-      receivedIds.add(item.id);
-      updateUnread();
-    }),
-    props.chat.reads.subscribe(({ peerId, count }) => {
-      if (peerId !== props.listed.peer.id) return;
-      readCount = count;
-      updateUnread();
-    }),
-  ];
-  updateUnread();
-  onCleanup(() => stops.forEach((stop) => stop()));
-
   return (
     <li>
       <span
@@ -229,7 +231,7 @@ function PeerRow(props: {
         aria-label={props.listed.connected ? "Connected" : "Not connected"}
       />
       <strong>{props.listed.name}</strong>{" "}
-      <Show when={unread()}>
+      <Show when={props.unread}>
         <span class="unread-state" aria-label="Unread messages" title="Unread messages">
           ●
         </span>{" "}

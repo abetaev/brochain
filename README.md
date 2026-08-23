@@ -21,4 +21,4 @@ using brochain
    signed in, but disappear after sign-out or page reload. Sending messages and
    files requires both people to be connected.
 6. Select **Sign out** to return to the account screen. There you can export an
-   account backup or permanently delete an account after confirming its password.
+   account or permanently delete it after confirming its password.

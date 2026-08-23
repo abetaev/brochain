@@ -1,14 +1,14 @@
-import { transfer, wrap, type RemoteObject } from "comlink";
+import { transfer, wrap } from "comlink";
 import type { Session } from "@v/backend/session";
 import type { AccountService, SessionAccess } from "./service.ts";
 
-type Account = Omit<
-  RemoteObject<AccountService>,
-  "create" | "unlock" | "openSession"
-> & {
+interface Account {
+  list(): Promise<string[]>;
   create(username: string, password: string): Promise<Session>;
   unlock(username: string, password: string): Promise<Session>;
-};
+  delete(username: string, password: string): Promise<boolean>;
+  export(username: string): Promise<string>;
+}
 
 function createAccount(): Account {
   const worker = new Worker(new URL("./main.ts", import.meta.url), { type: "module" });
@@ -47,18 +47,15 @@ function createAccount(): Account {
     return result;
   }
 
-  const create = (username: string, password: string) =>
-    queueAuthentication(async () => await backend.create(username, password));
-  const unlock = (username: string, password: string) =>
-    queueAuthentication(async () => await backend.unlock(username, password));
-
-  return new Proxy(backend as unknown as Account, {
-    get(target, property) {
-      if (property === "create") return create;
-      if (property === "unlock") return unlock;
-      return Reflect.get(target, property);
-    },
-  });
+  return {
+    list: () => backend.list(),
+    create: (username, password) =>
+      queueAuthentication(() => backend.create(username, password)),
+    unlock: (username, password) =>
+      queueAuthentication(() => backend.unlock(username, password)),
+    delete: (username, password) => backend.delete(username, password),
+    export: (username) => backend.export(username),
+  };
 }
 
 export default createAccount();

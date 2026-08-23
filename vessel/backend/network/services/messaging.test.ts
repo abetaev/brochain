@@ -120,7 +120,7 @@ describe("Messaging", () => {
         type: "received",
         message: { id: "message", text: "hello" },
       });
-      expect(logged).toHaveBeenCalledWith("Signals subscriber failed.", failure);
+      expect(logged.mock.calls).toEqual([["Signals subscriber failed."]]);
     } finally {
       logged.mockRestore();
     }

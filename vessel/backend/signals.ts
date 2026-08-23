@@ -1,6 +1,6 @@
 export interface Channel<Event> {
   publish(event: Event): void;
-  subscribe(listener: (event: Event) => void): () => void;
+  subscribe(listener: (event: Event) => unknown): () => void;
 }
 
 export interface Signals {
@@ -29,19 +29,19 @@ export function createSignals(): Signals {
 }
 
 function createChannel<Event>(): Channel<Event> {
-  const subscriptions: Array<{ readonly listener: (event: Event) => void }> = [];
+  const subscriptions: Array<{ readonly listener: (event: Event) => unknown }> = [];
 
   return Object.freeze({
     publish(event: Event) {
       for (const { listener } of [...subscriptions]) {
         try {
           listener(event);
-        } catch (reason) {
-          reportSubscriberFailure(reason);
+        } catch {
+          reportSubscriberFailure();
         }
       }
     },
-    subscribe(listener: (event: Event) => void) {
+    subscribe(listener: (event: Event) => unknown) {
       const subscription = { listener };
       subscriptions.push(subscription);
       let subscribed = true;
@@ -56,9 +56,9 @@ function createChannel<Event>(): Channel<Event> {
   });
 }
 
-function reportSubscriberFailure(reason: unknown): void {
+function reportSubscriberFailure(): void {
   try {
-    console.error("Signals subscriber failed.", reason);
+    console.error("Signals subscriber failed.");
   } catch {
     // Diagnostics must not allow one integration to affect another.
   }
