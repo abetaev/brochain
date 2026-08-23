@@ -52,7 +52,7 @@ export function Home(props: {
   async function loadRoster(): Promise<readonly ListedPeer[]> {
     if (!active) return [];
 
-    stopRoster ??= props.roster.subscribe(() => void refetch());
+    stopRoster ??= props.roster.invalidations.subscribe(() => void refetch());
     return Promise.all((await props.roster.list()).map(describe));
   }
 

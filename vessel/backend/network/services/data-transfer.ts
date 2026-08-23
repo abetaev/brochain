@@ -93,27 +93,20 @@ export async function createDataTransfer(session: Session): Promise<DataTransfer
       let rejected: string | undefined;
       let claimed = false;
       const base = transferBase(peer.id, "received", header);
-      try {
-        events.publish({
-          ...base,
-          type: "offered",
-          accept(candidate) {
-            if (claimed) throw new Error("This incoming data transfer is already claimed.");
-            claimed = true;
-            accepted = Promise.resolve(candidate);
-          },
-          reject(reason = "The incoming data transfer was rejected.") {
-            if (claimed) throw new Error("This incoming data transfer is already claimed.");
-            claimed = true;
-            rejected = reason;
-          },
-        });
-      } catch (reason) {
-        if (!claimed) {
+      events.publish({
+        ...base,
+        type: "offered",
+        accept(candidate) {
+          if (claimed) throw new Error("This incoming data transfer is already claimed.");
           claimed = true;
-          rejected = errorMessage(reason, "The incoming data transfer was rejected.");
-        }
-      }
+          accepted = Promise.resolve(candidate);
+        },
+        reject(reason = "The incoming data transfer was rejected.") {
+          if (claimed) throw new Error("This incoming data transfer is already claimed.");
+          claimed = true;
+          rejected = reason;
+        },
+      });
 
       if (accepted === undefined) {
         const reason = rejected ?? "No consumer accepted the incoming data transfer.";

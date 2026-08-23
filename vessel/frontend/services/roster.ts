@@ -14,36 +14,28 @@ import {
   type Peer,
 } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
+import type { Channel } from "@v/backend/signals";
 
 export interface Roster {
+  readonly invalidations: Channel<void>;
   list(): Promise<readonly Peer[]>;
   getPeer(peerId: string): Promise<Peer | undefined>;
-  subscribe(listener: () => void): () => void;
 }
 
 export function createRoster(session: Session): Roster {
-  const listeners = new Set<() => void>();
-  let stopNetwork: (() => void) | undefined;
+  const invalidations = session.signals().channel<void>({}, "invalidations");
+  let observing = false;
 
   function observe(network: Network): void {
-    if (stopNetwork !== undefined || listeners.size === 0) return;
-    stopNetwork = network.subscribe(() => {
-      for (const listener of [...listeners]) listener();
-    });
+    if (observing) return;
+    network.subscribe(() => invalidations.publish(undefined));
+    observing = true;
   }
 
   async function accessNetwork(): Promise<Network> {
     const network = await session.network();
     observe(network);
     return network;
-  }
-
-  async function startObserving(): Promise<void> {
-    try {
-      await accessNetwork();
-    } catch {
-      // A list or peer request reports access errors and retries observation.
-    }
   }
 
   async function discover(provider: Peer): Promise<readonly string[]> {
@@ -102,6 +94,7 @@ export function createRoster(session: Session): Roster {
   }
 
   return {
+    invalidations,
     async list() {
       return await load(await accessNetwork());
     },
@@ -109,16 +102,6 @@ export function createRoster(session: Session): Roster {
       const network = await accessNetwork();
       const connected = network.connectedPeers().find((peer) => peer.id === peerId);
       return connected ?? (await load(network)).find((peer) => peer.id === peerId);
-    },
-    subscribe(listener) {
-      listeners.add(listener);
-      void startObserving();
-      return () => {
-        listeners.delete(listener);
-        if (listeners.size > 0) return;
-        stopNetwork?.();
-        stopNetwork = undefined;
-      };
     },
   };
 }

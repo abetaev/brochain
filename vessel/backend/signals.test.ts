@@ -64,17 +64,23 @@ describe("Signals", () => {
     expect(listener.mock.calls).toEqual([[1], [1], [2]]);
   });
 
-  it("propagates the first subscriber failure and interrupts publication", () => {
+  it("logs and isolates subscriber failures", () => {
     const channel = createSignals().channel<void>({}, "updates");
     const failure = new Error("Subscriber failed.");
-    const skipped = vi.fn();
+    const later = vi.fn();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    channel.subscribe(() => {
-      throw failure;
-    });
-    channel.subscribe(skipped);
+    try {
+      channel.subscribe(() => {
+        throw failure;
+      });
+      channel.subscribe(later);
 
-    expect(() => channel.publish(undefined)).toThrow(failure);
-    expect(skipped).not.toHaveBeenCalled();
+      expect(() => channel.publish(undefined)).not.toThrow();
+      expect(later).toHaveBeenCalledOnce();
+      expect(logged).toHaveBeenCalledWith("Signals subscriber failed.", failure);
+    } finally {
+      logged.mockRestore();
+    }
   });
 });

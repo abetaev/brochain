@@ -64,10 +64,14 @@ Vessel
 | Entity | Responsibility | State |
 | --- | --- | --- |
 | **Network** | Represents the local peer, constructs remote Peers, retains one active Peer per connected identity, and owns the libp2p lifetime. | Active connections and transient connection attempts |
-| **Signals** | Resolves component-owned typed channels by owner identity and local name. Lookups are stable within one Session, while different owners and Sessions remain isolated. Channels synchronously publish data to subscribers in subscription order and fail on the first subscriber error. | Channel identities and subscriptions; events are neither retained nor replayed |
+| **Signals** | Resolves typed channels owned by independently extensible network services, frontend services, and views. Lookups are stable within one Session, while different owners and Sessions remain isolated. Channels publish synchronously in subscription order; a subscriber that throws synchronously is logged and isolated from the publisher and other subscribers. | Channel identities and subscriptions; events are neither retained nor replayed |
 | **Storage** | Provides event, singleton, and key/value stores scoped first by peer identity and then by service. | Memory; discarded with the Session |
 
 Components expose their actual owned channels through their public contracts, so publishers and subscribers integrate through the contract without depending on one another's implementations.
+Signals is not a universal pubsub mechanism: Common Network and Peer retain
+their standalone observers, while platform events, request/response flows, and
+component-internal reactivity remain local to their owners. Subscribers MUST
+handle failures from asynchronous work started by their callbacks.
 
 ### Network and Peer
 
@@ -135,7 +139,12 @@ per 250 milliseconds plus its final state. Interrupted transfers do not resume.
 
 Roster performs a fresh sweep for every list request. It asks each currently connected Peer for its Registry, calls Discovery only when advertised, groups valid addresses by their terminal peer ID, and materializes each identity through Network without dialing it. Connected peers are always included. Invalid responses and failed providers are isolated so healthy partial results remain available. `getPeer` checks current connections before doing a fresh sweep.
 
-Roster uses no Storage and retains no peer result. Its subscription forwards Network connection-topology changes only as invalidations; subscribers request a new list to obtain current data. This makes inbound and outbound connection changes visible immediately while remote Discovery changes remain explicit refreshes until that RPC service gains its own update mechanism.
+Roster uses no Storage and retains no peer result. It consumes Common Network's
+standalone topology observer and publishes those changes through its
+Session-owned Signals invalidation channel. Consumers perform an initial list
+request and request another list after an invalidation. This makes inbound and
+outbound connection changes visible immediately while remote Discovery changes
+remain explicit refreshes until that RPC service gains its own update mechanism.
 
 Chat owns the Session's presentation-oriented history, full-item update channel,
 and read-count channel. It retains ordered item IDs and current item snapshots in

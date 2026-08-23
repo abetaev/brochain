@@ -11,22 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-migrate event consumers to Signals
-----------------------------------
-
-type: refactoring, architecture
-scope: network, frontend services, signals
-
-Replace remaining component-owned observer APIs with public Signals channels
-where a current cross-component runtime event requires integration. Network,
-Peer, and Roster currently expose direct subscription APIs; refine which of
-these events and consumers should migrate before implementation.
-
-Common Network is shared with Beacon and MUST NOT depend directly on Vessel's
-account-bound Signals. Preserve that boundary through dependency inversion or a
-Vessel integration adapter, and keep Signals non-retaining so consumers read a
-retained projection when they require current state.
-
 unified Storage
 ---------------
 
@@ -174,17 +158,18 @@ message confirmations
 ---------------------
 
 type: feature
-scope: network services, messaging, signals, storage, UI
+scope: network services, messaging, chat, signals, storage, UI
 
 The sender UI uses each Chat item's existing opaque ID to track and show separate
 delivered and read states while continuing to render a send immediately.
 
-Successful completion of the remote send operation marks the message delivered
-because the recipient has validated and retained it. When Chat renders a
-received message, the recipient sends a separate read confirmation for that
-message ID. Failed read confirmations remain queued in transient Session state
-and retry when the peer reconnects during that Session; confirmations are not
-persisted for offline delivery.
+Delivery requires an explicit remote acknowledgement produced only after the
+recipient validates and Chat retains the message. Successful transport, RPC, or
+Signals publication alone MUST NOT imply retention because Signals isolates
+subscriber failures. When Chat renders a received message, the recipient sends
+a separate read confirmation for that message ID. Failed read confirmations
+remain queued in transient Session state and retry when the peer reconnects
+during that Session; confirmations are not persisted for offline delivery.
 
 thoughts
 ========

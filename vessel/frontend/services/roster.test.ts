@@ -4,6 +4,7 @@ import type {
   Peer,
 } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
+import { createSignals } from "@v/backend/signals";
 import { createRoster } from "./roster.ts";
 
 const firstId = "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8";
@@ -41,10 +42,10 @@ function disconnectedPeer(id: string): Peer {
 
 function testNetwork(connected: () => readonly Peer[]) {
   const created: Peer[] = [];
+  const signals = createSignals();
   const topologyListeners = new Set<
     (peer: Peer, event: "connected" | "disconnected") => void
   >();
-  const networkStops: Array<ReturnType<typeof vi.fn>> = [];
   const network = {
     id: localId,
     connectedPeers: vi.fn(connected),
@@ -60,20 +61,18 @@ function testNetwork(connected: () => readonly Peer[]) {
       listener: (peer: Peer, event: "connected" | "disconnected") => void,
     ) => {
       topologyListeners.add(listener);
-      const stop = vi.fn(() => topologyListeners.delete(listener));
-      networkStops.push(stop);
-      return stop;
+      return () => topologyListeners.delete(listener);
     }),
     close: vi.fn(),
   } as unknown as Network;
   const session = {
     network: vi.fn(async () => network),
+    signals: vi.fn(() => signals),
   } as unknown as Session;
   return {
     network,
     session,
     created,
-    networkStops,
     topologyChanged(peer: Peer, event: "connected" | "disconnected") {
       for (const listener of [...topologyListeners]) listener(peer, event);
     },
@@ -233,17 +232,21 @@ describe("Roster", () => {
     expect(network.createPeer).toHaveBeenCalledTimes(2);
   });
 
-  it("forwards connection topology changes and releases its subscription", async () => {
-    const { network, session, networkStops, topologyChanged } = testNetwork(() => []);
+  it("bridges topology changes through Session Signals for the Roster lifetime", async () => {
+    const { network, session, topologyChanged } = testNetwork(() => []);
     const roster = createRoster(session);
     const first = vi.fn();
     const second = vi.fn();
     const changedPeer = disconnectedPeer(firstId);
 
     expect(network.subscribe).not.toHaveBeenCalled();
-    const stopFirst = roster.subscribe(first);
-    const stopSecond = roster.subscribe(second);
-    await vi.waitFor(() => expect(network.subscribe).toHaveBeenCalledOnce());
+    expect(session.signals).toHaveBeenCalledOnce();
+    const stopFirst = roster.invalidations.subscribe(first);
+    const stopSecond = roster.invalidations.subscribe(second);
+    expect(network.subscribe).not.toHaveBeenCalled();
+
+    await roster.list();
+    expect(network.subscribe).toHaveBeenCalledOnce();
 
     topologyChanged(changedPeer, "connected");
     topologyChanged(changedPeer, "disconnected");
@@ -254,35 +257,37 @@ describe("Roster", () => {
     topologyChanged(changedPeer, "connected");
     expect(first).toHaveBeenCalledTimes(2);
     expect(second).toHaveBeenCalledTimes(3);
-    expect(networkStops[0]).not.toHaveBeenCalled();
 
     stopSecond();
-    expect(networkStops[0]).toHaveBeenCalledOnce();
     topologyChanged(changedPeer, "disconnected");
     expect(second).toHaveBeenCalledTimes(3);
   });
 
-  it("notifies invalidation without retaining or refreshing a completed list", async () => {
+  it("does not replay, retain, or refresh a list on invalidation", async () => {
     const services = vi.fn(async () => ["registry", "discovery"]);
     const addresses = vi.fn(async () => [firstAddress]);
     const source = provider("source", services, addresses);
     const { network, session, topologyChanged } = testNetwork(() => [source]);
     const roster = createRoster(session);
     const invalidated = vi.fn();
-    const stop = roster.subscribe(invalidated);
     const changedPeer = disconnectedPeer(secondId);
 
-    await vi.waitFor(() => expect(network.subscribe).toHaveBeenCalledOnce());
+    await roster.list();
+    expect(network.subscribe).toHaveBeenCalledOnce();
     topologyChanged(changedPeer, "connected");
-    expect(invalidated).toHaveBeenCalledOnce();
-    expect(services).not.toHaveBeenCalled();
-    expect(addresses).not.toHaveBeenCalled();
+    const stop = roster.invalidations.subscribe(invalidated);
+    expect(invalidated).not.toHaveBeenCalled();
+    expect(services).toHaveBeenCalledOnce();
+    expect(addresses).toHaveBeenCalledOnce();
 
-    await roster.list();
     topologyChanged(changedPeer, "disconnected");
+    expect(invalidated).toHaveBeenCalledOnce();
+    expect(services).toHaveBeenCalledOnce();
+    expect(addresses).toHaveBeenCalledOnce();
+
     await roster.list();
 
-    expect(invalidated).toHaveBeenCalledTimes(2);
+    expect(invalidated).toHaveBeenCalledOnce();
     expect(services).toHaveBeenCalledTimes(2);
     expect(addresses).toHaveBeenCalledTimes(2);
     expect(network.createPeer).toHaveBeenCalledTimes(2);

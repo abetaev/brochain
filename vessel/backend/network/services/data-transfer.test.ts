@@ -216,6 +216,40 @@ describe("DataTransfer", () => {
     });
   });
 
+  it("isolates a failed offer consumer and allows another consumer to accept", async () => {
+    const localContext = testContext("local");
+    const remoteContext = testContext("remote");
+    const [local, remote] = await Promise.all([
+      createDataTransfer(localContext.session),
+      createDataTransfer(remoteContext.session),
+    ]);
+    const failure = new Error("Offer consumer failed.");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const localEvents: DataTransferEvent[] = [];
+
+    try {
+      local.events.subscribe((event) => localEvents.push(event));
+      remote.events.subscribe((event) => {
+        if (event.type === "offered") throw failure;
+      });
+      remote.events.subscribe((event) => {
+        if (event.type === "offered") event.accept(sink([]));
+      });
+
+      local.send(connect(localContext, remoteContext), {
+        id: "isolated-consumer",
+        size: 0,
+        metadata: {},
+        data: bytes(),
+      });
+
+      await vi.waitFor(() => expect(localEvents.at(-1)?.type).toBe("completed"));
+      expect(logged).toHaveBeenCalledWith("Signals subscriber failed.", failure);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it("aborts partial data and reports failure to both ends", async () => {
     const localContext = testContext("local");
     const remoteContext = testContext("remote");

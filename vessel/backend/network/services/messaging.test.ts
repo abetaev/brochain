@@ -95,18 +95,32 @@ describe("Messaging", () => {
     expect(events).toHaveLength(1);
   });
 
-  it("propagates subscriber failures to the inbound RPC publisher", async () => {
+  it("isolates subscriber failures from inbound RPC and other consumers", async () => {
     const context = testContext();
     const messaging = await createMessaging(context.session);
     const failure = new Error("Chat subscriber failed.");
-    messaging.events.subscribe(() => {
-      throw failure;
-    });
+    const later = vi.fn();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    expect(() => context.inbound(testPeer("remote")).send({
-      id: "message",
-      text: "hello",
-    })).toThrow(failure);
+    try {
+      messaging.events.subscribe(() => {
+        throw failure;
+      });
+      messaging.events.subscribe(later);
+
+      expect(() => context.inbound(testPeer("remote")).send({
+        id: "message",
+        text: "hello",
+      })).not.toThrow();
+      expect(later).toHaveBeenCalledWith({
+        peerId: "remote",
+        type: "received",
+        message: { id: "message", text: "hello" },
+      });
+      expect(logged).toHaveBeenCalledWith("Signals subscriber failed.", failure);
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it("publishes outgoing text immediately and reports remote failure", async () => {
