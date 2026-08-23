@@ -27,18 +27,45 @@ account-bound Signals. Preserve that boundary through dependency inversion or a
 Vessel integration adapter, and keep Signals non-retaining so consumers read a
 retained projection when they require current state.
 
+unified Storage
+---------------
+
+type: refactoring, architecture
+scope: storage, session, chat, data transfer
+
+`data-storage` MUST NOT remain a separate component. Storage is the sole
+account-bound retention component and MUST expose every storage capability
+required by the application, including streamed opaque binary data.
+
+Move the current declared-length OPFS writer, stored-data handle, quota
+reservation, partial-write cleanup, Web Lock coordination, and Session cleanup
+behind Storage's public interface. Streamed values are addressed through the
+same peer and service ownership hierarchy as other retained values; filesystem
+names remain private implementation details. Chat and DataTransfer access them
+through `session.storage()`.
+
+Storage owns retention and lifecycle, Chat owns file presentation metadata,
+DataTransfer owns transport and byte flow, and Signals retains nothing. The
+binary interface MUST preserve streaming and backpressure without buffering a
+complete value in application memory. Existing event, singleton, and key/value
+behavior remains available. Future retained representations extend Storage
+rather than introduce sibling storage components.
+
+Remove `Session.dataStorage()`, `DataStorage`, `createDataStorage()`, and
+`vessel/backend/data-storage.ts` after all consumers migrate. Session shutdown
+closes its one Storage component and cleans up incomplete transient data.
+
 storage modes
 -------------
 
 type: feature
 scope: backend services
 
-Storage is solely responsible for retaining and retrieving data and should
-provide in-memory and persistent implementations. Preserve the existing event,
-singleton, and key/value operations, but implement a persistent store kind only
-when a current consumer requires it. Options initially requires persistent
-key/value storage; persistent event storage is deferred until a durable consumer
-such as chat history is introduced.
+Extend the unified Storage component with in-memory and persistent modes.
+Preserve its structured and streamed-data capabilities, but implement a
+persistent store kind only when a current consumer requires it. Options
+initially requires persistent key/value storage; persistent event storage is
+deferred until a durable consumer such as chat history is introduced.
 
 Persistent operations are asynchronous and MUST make failures observable.
 Persistent data is isolated by the unlocked local account identity and MUST be
@@ -72,41 +99,46 @@ persistent roster
 type: feature
 scope: frontend services, roster, storage, options
 
-Roster uses persistent Storage to cache the latest valid whole Identity object
-for each remote peer at `peers/${peerId}.identity`. Identity currently has the
-shape `{ name: string }`.
+Roster exposes one unified collection containing connected, discovered, and
+cached-only peers. Each entry includes the peer ID, an optional current Peer,
+current online state, the latest cached Identity, and its resolved presentation
+name. Roster uses persistent Storage to cache the latest valid whole Identity
+object for each remote peer at `peers/${peerId}.identity`. Identity currently has
+the shape `{ name: string }`.
 
 When a connected peer exposes Identity, Roster refreshes and validates the
 cached value. A failure MUST retain the last valid cache. Roster initializes the
 editable `peers/${peerId}.display_name` Option from `identity.name` only when the
 option is absent; later identity refreshes MUST NOT overwrite it.
 
-When presenting a currently connected or discovered peer, Roster resolves its
-name in this order: display-name Option, cached identity name, peer ID. It does
-not persist peer availability, addresses, or Discovery results.
+Roster resolves every entry's name in this order: display-name Option, cached
+identity name, peer ID. It does not persist peer availability, addresses, or
+Discovery results; a cached-only peer therefore cannot reconnect until it is
+discovered again.
 
-network service collection
---------------------------
+Persisted hosted-service observations are deferred. When introduced, Roster
+retains every service name ever observed and records whether it was present in
+the latest successful online catalog refresh. An offline entry exposes that
+status explicitly as historical information. Chat and other operations MUST
+still require current online capability and Options approval.
+
+per-peer service options
+------------------------
 
 type: feature
 scope: network, services, options
 
-Network owns one introspectable catalog containing every service the local
-application can publish:
-
-```ts
-type Services = Record<string, Service>
-```
-
-This catalog is the single source used for service publication and for settings
-introspection. Existing plain service names remain unchanged. Versioned service
-identifiers and plugin extensibility are future work.
-
-Registry remains mandatory. Other supported services are enabled by default for
-each remote peer and may be disabled with
+Use Network's existing service-facet catalog as the single source for service
+publication and settings introspection; this task MUST NOT introduce another
+registry. Registry remains mandatory. Other supported services are enabled by
+default for each remote peer and may be disabled with
 `peers/${peerId}/services/${serviceName}.enabled`. Each Peer publishes only its
 enabled subset to that identified remote peer, and Registry reports that current
-subset. Option changes MUST affect an existing connected Peer immediately.
+subset. Option changes MUST affect RPC and byte-stream facets for an existing
+connected Peer immediately.
+
+Existing plain service names remain unchanged. Versioned service identifiers
+and plugin extensibility are future work.
 
 settings frontend and peer view
 -------------------------------
@@ -144,9 +176,8 @@ message confirmations
 type: feature
 scope: network services, messaging, signals, storage, UI
 
-Every text or file message has an opaque unique ID. The sender UI tracks and
-shows separate delivered and read states for that message while continuing to
-render a send immediately.
+The sender UI uses each Chat item's existing opaque ID to track and show separate
+delivered and read states while continuing to render a send immediately.
 
 Successful completion of the remote send operation marks the message delivered
 because the recipient has validated and retained it. When Chat renders a

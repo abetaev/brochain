@@ -44,10 +44,12 @@ export async function createBeacon(configuration: BeaconConfiguration) {
     },
   });
 
-  return await createNetwork(node, (peer, network) => {
-    peer.host(
-      discoveryServiceName,
-      createDiscovery(peer, () => network.connectedPeers()),
-    );
+  return await createNetwork(node, {
+    [discoveryServiceName]: {
+      rpc: (peer, network) => createDiscovery(
+        peer,
+        () => network.connectedPeers(),
+      ),
+    },
   });
 }

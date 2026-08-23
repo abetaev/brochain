@@ -1,11 +1,12 @@
 // @vitest-environment node
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Network, Peer } from "@c/backend/network";
+import type { Network, Peer, Services } from "@c/backend/network";
 
 const dependencies = vi.hoisted(() => ({
   createLibp2p: vi.fn(),
   createNetwork: vi.fn(),
+  createDataStorage: vi.fn(),
   generateKeyPairFromSeed: vi.fn(),
 }));
 
@@ -20,13 +21,16 @@ vi.mock("@libp2p/webrtc", () => ({ webRTC: () => ({}) }));
 vi.mock("@libp2p/websockets", () => ({ webSockets: () => ({}) }));
 vi.mock("libp2p", () => ({ createLibp2p: dependencies.createLibp2p }));
 vi.mock("@c/backend/network", () => ({ default: dependencies.createNetwork }));
+vi.mock("@v/backend/data-storage", () => ({
+  createDataStorage: dependencies.createDataStorage,
+}));
 
 import { createSession } from "./session.ts";
 
 interface TestRuntime {
   readonly beacon: Peer & { isConnected: ReturnType<typeof vi.fn> };
   readonly createdBeacon: Peer & { connect: ReturnType<typeof vi.fn> };
-  readonly initializedPeer: Peer & { host: ReturnType<typeof vi.fn> };
+  readonly dataStorage: { close: ReturnType<typeof vi.fn> };
   readonly network: Network & {
     createPeer: ReturnType<typeof vi.fn>;
     close: ReturnType<typeof vi.fn>;
@@ -47,6 +51,7 @@ beforeEach(() => {
   });
   dependencies.createLibp2p.mockReset();
   dependencies.createNetwork.mockReset();
+  dependencies.createDataStorage.mockReset();
   dependencies.generateKeyPairFromSeed.mockReset();
 
   const beacon = {
@@ -62,27 +67,19 @@ beforeEach(() => {
     createPeer: vi.fn(async () => createdBeacon),
     close: vi.fn(async () => {}),
   } as unknown as TestRuntime["network"];
-  const initializedPeer = {
-    id: "remote",
-    host: vi.fn(),
-  } as unknown as TestRuntime["initializedPeer"];
+  const dataStorage = { close: vi.fn(async () => {}) };
   const node = {
     addEventListener: vi.fn(),
     getMultiaddrs: vi.fn(() => [{ toString: () => "/p2p-circuit/webrtc" }]),
     removeEventListener: vi.fn(),
     stop: vi.fn(async () => {}),
   };
-  runtime = { beacon, createdBeacon, initializedPeer, network, node };
+  runtime = { beacon, createdBeacon, dataStorage, network, node };
 
   dependencies.generateKeyPairFromSeed.mockResolvedValue({});
   dependencies.createLibp2p.mockResolvedValue(node);
-  dependencies.createNetwork.mockImplementation(async (
-    _node: unknown,
-    initialize?: (peer: Peer, network: Network) => void,
-  ) => {
-    initialize?.(initializedPeer, network);
-    return network;
-  });
+  dependencies.createNetwork.mockResolvedValue(network);
+  dependencies.createDataStorage.mockResolvedValue(dataStorage);
 });
 
 afterEach(() => {
@@ -117,9 +114,12 @@ describe("Session access and lifetime", () => {
     );
     expect(runtime.createdBeacon.connect).toHaveBeenCalledOnce();
     expect(runtime.node.getMultiaddrs).toHaveBeenCalled();
-    expect(runtime.initializedPeer.host.mock.calls.map(([name]) => name))
-      .toEqual(["identity"]);
-    expect(runtime.initializedPeer.host.mock.invocationCallOrder.at(-1))
+    const services = dependencies.createNetwork.mock.calls[0]?.[1] as Services;
+    expect(services).toEqual({ identity: { rpc: expect.any(Function) } });
+    expect((services.identity?.rpc?.({ id: "remote" } as Peer, runtime.network) as {
+      get(): { name: string };
+    }).get()).toEqual({ name: "alice" });
+    expect(dependencies.createNetwork.mock.invocationCallOrder[0])
       .toBeLessThan(runtime.network.createPeer.mock.invocationCallOrder[0]!);
     expect(runtime.network.createPeer.mock.invocationCallOrder[0])
       .toBeLessThan(runtime.createdBeacon.connect.mock.invocationCallOrder[0]!);
@@ -129,8 +129,11 @@ describe("Session access and lifetime", () => {
     expect(session.storage()).toBe(session.storage());
     expect(session.storage().peer("remote")).toBe(session.storage().peer("remote"));
     expect(session.signals()).toBe(session.signals());
+    expect(await session.dataStorage()).toBe(await session.dataStorage());
+    expect(dependencies.createDataStorage).toHaveBeenCalledOnce();
 
     await session.close();
+    expect(runtime.dataStorage.close).toHaveBeenCalledOnce();
   });
 
   it("isolates Signals between Sessions", async () => {
@@ -336,6 +339,7 @@ describe("Session access and lifetime", () => {
     expect(runtime.network.createPeer).not.toHaveBeenCalled();
     expect(() => session.signals()).toThrow("Session is closed");
     expect(() => session.storage()).toThrow("Session is closed");
+    await expect(session.dataStorage()).rejects.toThrow("Session is closed");
   });
 
   it("closes Account access even when Network shutdown fails", async () => {

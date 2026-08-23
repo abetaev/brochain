@@ -1,7 +1,7 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import type { Libp2p } from "libp2p";
+import { createByteStream, type ByteStream } from "./byte-stream.ts";
 import { remoteService, rpcProtocol, type PromisedMethods } from "./rpc.ts";
-import { createRegistry, registryServiceName } from "./services/registry.ts";
 
 export interface Peer {
   readonly id: string;
@@ -9,8 +9,8 @@ export interface Peer {
   isConnected(): boolean;
   connect(): Promise<Peer>;
   subscribe(listener: (event: "connected" | "disconnected") => void): () => void;
-  host<Service extends object>(name: string, service: Service): void;
   service<Service extends object>(name: string): PromisedMethods<Service>;
+  open(protocol: string, options?: { readonly signal?: AbortSignal }): Promise<ByteStream>;
 }
 
 export interface ManagedPeer {
@@ -18,7 +18,6 @@ export interface ManagedPeer {
   addAddress(address: string): string;
   connectionOpened(): void;
   connectionClosed(): void;
-  hostedService(name: string): object | undefined;
 }
 
 export function createPeer(
@@ -29,7 +28,6 @@ export function createPeer(
 ): ManagedPeer {
   const addresses = new Set<string>();
   const listeners = new Set<(event: "connected" | "disconnected") => void>();
-  const hostedServices = new Map<string, object>();
   let connected = false;
   let managed: ManagedPeer;
 
@@ -52,14 +50,6 @@ export function createPeer(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    host(name, service) {
-      requireOpen();
-      validateHostedService(name, service);
-      if (hostedServices.has(name)) {
-        throw new Error(`A peer service named "${name}" is already hosted.`);
-      }
-      hostedServices.set(name, service);
-    },
     service<Service extends object>(name: string) {
       validateServiceName(name);
       return remoteService<Service>(name, async (signal) => {
@@ -70,9 +60,17 @@ export function createPeer(
         return await connection.newStream(rpcProtocol, { signal });
       });
     },
+    async open(protocol, options) {
+      validateProtocol(protocol);
+      requireOpen();
+      if (!connected) throw new Error("This peer is not connected.");
+      const connection = usableConnection(node, id);
+      if (connection === undefined) throw new Error("This peer is not connected.");
+      return createByteStream(await connection.newStream(protocol, {
+        signal: options?.signal,
+      }));
+    },
   };
-
-  hostedServices.set(registryServiceName, createRegistry(() => [...hostedServices.keys()]));
 
   managed = {
     peer,
@@ -86,9 +84,6 @@ export function createPeer(
     },
     connectionClosed() {
       setConnected(false);
-    },
-    hostedService(name) {
-      return hostedServices.get(name);
     },
   };
 
@@ -123,18 +118,14 @@ export function addressWithPeerId(address: string, id: string): string {
     : parsed.encapsulate(`/p2p/${id}`).toString();
 }
 
-function validateHostedService(name: string, service: object): void {
-  validateServiceName(name);
-  if (typeof service !== "object" || service === null || Array.isArray(service)) {
-    throw new Error("A hosted peer service must be a method object.");
-  }
-  if (Object.values(service).some((member) => typeof member !== "function")) {
-    throw new Error("A hosted peer service may contain only methods.");
-  }
-}
-
 function validateServiceName(name: string): void {
   if (typeof name !== "string" || name.length === 0) {
     throw new Error("Every hosted peer service must have a name.");
+  }
+}
+
+function validateProtocol(protocol: string): void {
+  if (typeof protocol !== "string" || protocol.length === 0) {
+    throw new Error("Every byte-stream protocol must have an identifier.");
   }
 }

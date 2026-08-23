@@ -1,20 +1,12 @@
 import { For, Show, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
 import {
-  registryServiceName,
-  validateServiceNames,
-  type Registry,
-} from "@c/backend/network/services/registry";
-import {
   identityServiceName,
   loadContact,
   type IdentityService,
 } from "@v/backend/network/services/identity";
-import {
-  messagingServiceName,
-  type Messaging,
-} from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
+import type { Chat } from "@v/frontend/services/chat";
 import type { Roster } from "@v/frontend/services/roster";
 
 interface ListedPeer {
@@ -26,7 +18,7 @@ interface ListedPeer {
 
 export function Home(props: {
   session: Session;
-  messaging: Messaging;
+  chat: Chat;
   roster: Roster;
   onOpenChat(peerId: string): void;
   onSignedOut(): void;
@@ -43,16 +35,12 @@ export function Home(props: {
 
     if (connected) {
       try {
-        const services = validateServiceNames(
-          await peer.service<Registry>(registryServiceName).list(),
-        );
-        messaging = services.includes(messagingServiceName);
-        if (services.includes(identityServiceName)) {
-          name = (await loadContact(
-            peer.service<IdentityService>(identityServiceName),
-            props.session.storage().peer(peer.id).service(identityServiceName),
-          )).name;
-        }
+        const capabilities = await props.chat.capabilities(peer);
+        messaging = capabilities.text;
+        name = (await loadContact(
+          peer.service<IdentityService>(identityServiceName),
+          props.session.storage().peer(peer.id).service(identityServiceName),
+        )).name;
       } catch {
         // A peer id is always available when remote services fail.
       }
@@ -88,10 +76,7 @@ export function Home(props: {
 
   async function connectAndOpen(peer: Peer): Promise<void> {
     const connected = await peer.connect();
-    const services = validateServiceNames(
-      await connected.service<Registry>(registryServiceName).list(),
-    );
-    if (!services.includes(messagingServiceName)) {
+    if (!(await props.chat.capabilities(connected)).text) {
       throw new Error("This peer does not provide messaging.");
     }
     props.onOpenChat(connected.id);
@@ -163,7 +148,7 @@ export function Home(props: {
                   {(peer) => (
                     <PeerRow
                       listed={peer}
-                      messaging={props.messaging}
+                      chat={props.chat}
                       busy={unavailable()}
                       onConnect={(selected) => void performAction(
                         () => connectAndOpen(selected),
@@ -208,27 +193,28 @@ export function Home(props: {
 
 function PeerRow(props: {
   listed: ListedPeer;
-  messaging: Messaging;
+  chat: Chat;
   busy: boolean;
   onConnect(peer: Peer): void;
   onOpenChat(peerId: string): void;
 }) {
   const [unread, setUnread] = createSignal(false);
-  let received = props.messaging.history(props.listed.peer.id)
-    .filter((event) => event.type === "received").length;
-  let readCount = props.messaging.readCount(props.listed.peer.id);
+  const receivedIds = new Set(props.chat.history(props.listed.peer.id)
+    .filter((item) => item.direction === "received")
+    .map((item) => item.id));
+  let readCount = props.chat.readCount(props.listed.peer.id);
 
   function updateUnread(): void {
-    setUnread(received > readCount);
+    setUnread(receivedIds.size > readCount);
   }
 
   const stops = [
-    props.messaging.events.subscribe((event) => {
-      if (event.peerId !== props.listed.peer.id || event.type !== "received") return;
-      received += 1;
+    props.chat.updates.subscribe((item) => {
+      if (item.peerId !== props.listed.peer.id || item.direction !== "received") return;
+      receivedIds.add(item.id);
       updateUnread();
     }),
-    props.messaging.reads.subscribe(({ peerId, count }) => {
+    props.chat.reads.subscribe(({ peerId, count }) => {
       if (peerId !== props.listed.peer.id) return;
       readCount = count;
       updateUnread();

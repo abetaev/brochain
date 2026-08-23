@@ -8,9 +8,9 @@ import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import createNetwork, {
-  type InitializePeer,
   type Network,
   type Peer,
+  type Services,
 } from "./index.ts";
 import { addressWithPeerId, destinationPeerId } from "./peer.ts";
 import {
@@ -33,7 +33,7 @@ interface Echo {
 const networks: Network[] = [];
 
 async function localNetwork(
-  initializePeer?: InitializePeer,
+  services: Services = {},
   identifyPeers = true,
 ) {
   const node = await createLibp2p({
@@ -46,7 +46,7 @@ async function localNetwork(
       ? { identify: identify(), identifyPush: identifyPush() }
       : undefined,
   });
-  const network = await createNetwork(node, initializePeer);
+  const network = await createNetwork(node, services);
   networks.push(network);
   const address = node.getMultiaddrs()[0]?.toString();
   if (address === undefined) throw new Error("Test peer did not expose an address.");
@@ -213,8 +213,12 @@ describe("Network and Peer identity", () => {
 
   it("learns inbound addresses from Identify without retaining the transport source address", async () => {
     const inboundEvents: string[] = [];
-    const remote = await localNetwork((peer) => {
-      peer.subscribe((event) => inboundEvents.push(event));
+    const remote = await localNetwork();
+    remote.network.subscribe((peer, event) => {
+      if (event === "connected") {
+        inboundEvents.push(event);
+        peer.subscribe((next) => inboundEvents.push(next));
+      }
     });
     const local = await localNetwork();
     let inboundSource: string | undefined;
@@ -242,11 +246,13 @@ describe("Network and Peer identity", () => {
   });
 
   it("keeps inbound peers valid but undiscoverable until they advertise an address", async () => {
-    const beacon = await localNetwork((requester, network) => {
-      requester.host(
-        discoveryServiceName,
-        createDiscovery(requester, network.connectedPeers),
-      );
+    const beacon = await localNetwork({
+      [discoveryServiceName]: {
+        rpc: (requester, network) => createDiscovery(
+          requester,
+          network.connectedPeers,
+        ),
+      },
     }, false);
     const first = await localNetwork(undefined, false);
     const second = await localNetwork(undefined, false);
@@ -265,14 +271,18 @@ describe("Network and Peer identity", () => {
 describe("per-Peer RPC services", () => {
   it("hosts mandatory Registry and routes authenticated plain method objects with bytes", async () => {
     const remotePeers = new Map<string, Peer>();
-    const remote = await localNetwork((peer) => {
-      remotePeers.set(peer.id, peer);
-      peer.host<Echo>("echo", {
-        inspect: ({ payload }) => ({
-          caller: peer.id,
-          nested: { payload },
-        }),
-      });
+    const remote = await localNetwork({
+      echo: {
+        rpc: (peer): Echo => {
+          remotePeers.set(peer.id, peer);
+          return {
+            inspect: ({ payload }) => ({
+              caller: peer.id,
+              nested: { payload },
+            }),
+          };
+        },
+      },
     });
     const local = await localNetwork();
     const peer = await local.network.createPeer(remote.address);
@@ -292,13 +302,12 @@ describe("per-Peer RPC services", () => {
 
   it("initializes and authorizes services independently for each Peer", async () => {
     const authorized = await localNetwork();
-    const remotePeers = new Map<string, Peer>();
-    const remote = await localNetwork((peer) => {
-      remotePeers.set(peer.id, peer);
-      peer.host("audience", { identify: () => peer.id });
-      if (peer.id === authorized.network.id) {
-        peer.host("private", { read: () => "allowed" });
-      }
+    const remote = await localNetwork({
+      audience: { rpc: (peer) => ({ identify: () => peer.id }) },
+      private: {
+        enabled: (peer) => peer.id === authorized.network.id,
+        rpc: () => ({ read: () => "allowed" }),
+      },
     });
     const other = await localNetwork();
     const authorizedRemote = await authorized.network.createPeer(remote.address);
@@ -314,36 +323,96 @@ describe("per-Peer RPC services", () => {
     expect(await otherRemote.service<Registry>(registryServiceName).list())
       .toEqual([registryServiceName, "audience"]);
 
-    remotePeers.get(other.network.id)?.host("later", { read: () => "live" });
+    await remote.network.provide({
+      later: { rpc: () => ({ read: () => "live" }) },
+    });
     expect(await otherRemote.service<Registry>(registryServiceName).list())
       .toEqual([registryServiceName, "audience", "later"]);
   });
 
-  it("validates hosted method objects and rejects duplicate service names", async () => {
+  it("validates service definitions and rejects duplicate service names", async () => {
     const remote = await localNetwork();
-    const local = await localNetwork();
-    const peer = await local.network.createPeer(remote.address);
-
-    peer.host("echo", { read: () => "local" });
-    expect(() => peer.host("echo", { read: () => "duplicate" })).toThrow("already hosted");
-    expect(() => peer.host(registryServiceName, { list: () => [] })).toThrow("already hosted");
-    expect(() => peer.host("", { read: () => "unnamed" })).toThrow("must have a name");
-    expect(() => peer.host("stateful", { value: 1 })).toThrow("only methods");
+    await remote.network.provide({ echo: { rpc: () => ({ read: () => "local" }) } });
+    await expect(remote.network.provide({
+      echo: { rpc: () => ({ read: () => "duplicate" }) },
+    })).rejects.toThrow("already provided");
+    await expect(remote.network.provide({
+      [registryServiceName]: { rpc: () => ({ list: () => [] }) },
+    })).rejects.toThrow("already provided");
+    await expect(remote.network.provide({
+      "": { rpc: () => ({ read: () => "unnamed" }) },
+    })).rejects.toThrow("must have a name");
+    await expect(remote.network.provide({ empty: {} }))
+      .rejects.toThrow("must provide RPC or a protocol");
   });
 
-  it("preserves services hosted on the outbound candidate adopted by connection open", async () => {
+  it("provides a service to Peers created before registration", async () => {
     let inbound: Peer | undefined;
-    const remote = await localNetwork((peer) => {
-      inbound = peer;
+    const remote = await localNetwork();
+    remote.network.subscribe((peer, event) => {
+      if (event === "connected") inbound = peer;
     });
     const local = await localNetwork();
     const peer = await local.network.createPeer(remote.address);
-    peer.host("callback", { read: () => "candidate" });
+    await local.network.provide({
+      callback: { rpc: () => ({ read: () => "candidate" }) },
+    });
 
     const active = await peer.connect();
     expect(active).toBe(peer);
     await vi.waitFor(() => expect(inbound).toBeDefined());
     await expect(inbound!.service<{ read(): string }>("callback").read())
       .resolves.toBe("candidate");
+    expect(local.network.services()).toEqual({
+      registry: expect.any(Object),
+      callback: expect.any(Object),
+    });
+  });
+});
+
+describe("byte-stream protocols", () => {
+  it("opens an authenticated stream and applies write backpressure through ByteStream", async () => {
+    const protocol = "/brochain/test-bytes/1.0.0";
+    const remote = await localNetwork();
+    await remote.network.provide({
+      bytes: {
+        protocols: [{
+          id: protocol,
+          maxInboundStreams: 2,
+          maxOutboundStreams: 2,
+          async accept(_peer, stream) {
+            for await (const bytes of stream) await stream.write(bytes);
+            await stream.close();
+          },
+        }],
+      },
+    });
+    const local = await localNetwork();
+    const peer = await local.network.createPeer(remote.address);
+    await peer.connect();
+
+    expect(await peer.service<Registry>(registryServiceName).list())
+      .toEqual([registryServiceName, "bytes"]);
+    const stream = await peer.open(protocol);
+    await stream.write(new Uint8Array([1, 2]));
+    await stream.write(new Uint8Array([3, 4]));
+    await stream.close();
+    const received: number[] = [];
+    for await (const bytes of stream) received.push(...bytes);
+    expect(received).toEqual([1, 2, 3, 4]);
+  });
+
+  it("rejects duplicate protocols and invalid stream limits", async () => {
+    const network = await localNetwork();
+    const protocol = {
+      id: "/brochain/duplicate/1.0.0",
+      accept: async () => {},
+    };
+    await network.network.provide({ first: { protocols: [protocol] } });
+    await expect(network.network.provide({ second: { protocols: [protocol] } }))
+      .rejects.toThrow("already provided");
+    await expect(network.network.provide({
+      invalid: { protocols: [{ ...protocol, id: "/invalid", maxInboundStreams: 0 }] },
+    })).rejects.toThrow("positive integer");
   });
 });

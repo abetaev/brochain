@@ -2,11 +2,8 @@ import "@picocss/pico/css/pico.min.css";
 import "./styles.css";
 import { Match, Switch, createSignal } from "solid-js";
 import { render } from "solid-js/web";
-import {
-  createMessaging,
-  type Messaging,
-} from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
+import type { Chat as ChatService } from "./services/chat";
 import type { Roster } from "./services/roster";
 import { Account } from "./views/Account";
 import { Chat } from "./views/Chat";
@@ -14,7 +11,7 @@ import { Home } from "./views/Home";
 
 interface ActiveSession {
   readonly session: Session;
-  readonly messaging: Messaging;
+  readonly chat: ChatService;
   readonly roster: Roster;
 }
 
@@ -27,11 +24,14 @@ function Vessel() {
   const [location, setLocation] = createSignal<Location>({ view: "account" });
   async function activate(session: Session): Promise<void> {
     try {
-      const { createRoster } = await import("./services/roster");
+      const [{ createChat }, { createRoster }] = await Promise.all([
+        import("./services/chat"),
+        import("./services/roster"),
+      ]);
       setLocation({
         view: "home",
         session,
-        messaging: await createMessaging(session),
+        chat: await createChat(session),
         roster: createRoster(session),
       });
     } catch (error) {
@@ -65,13 +65,13 @@ function Vessel() {
           {(current) => (
             <Home
               session={current().session}
-              messaging={current().messaging}
+              chat={current().chat}
               roster={current().roster}
               onOpenChat={(peerId) =>
                 setLocation({
                   view: "chat",
                   session: current().session,
-                  messaging: current().messaging,
+                  chat: current().chat,
                   roster: current().roster,
                   peerId,
                 })}
@@ -85,13 +85,13 @@ function Vessel() {
           {(current) => (
             <Chat
               session={current().session}
-              messaging={current().messaging}
+              chat={current().chat}
               roster={current().roster}
               peerId={current().peerId}
               onBack={() => setLocation({
                 view: "home",
                 session: current().session,
-                messaging: current().messaging,
+                chat: current().chat,
                 roster: current().roster,
               })}
             />
