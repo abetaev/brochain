@@ -12,6 +12,7 @@ import {
   createIdentity,
   identityServiceName,
 } from "@v/backend/network/services/identity";
+import { createOptions, type Options } from "@v/backend/options";
 import { createSignals, type Signals } from "@v/backend/signals";
 import {
   createStorage,
@@ -22,6 +23,7 @@ import {
 export interface Session {
   readonly username: string;
   network(): Promise<Network>;
+  options(): Promise<Options>;
   signals(): Signals;
   storage(options?: { readonly persistent?: false }): VolatileStorage;
   storage(options: { readonly persistent: true }): PersistentStorage;
@@ -89,6 +91,7 @@ export async function createSession(
   }
 
   let runtime: ReturnType<typeof createRuntime> | undefined;
+  let options: ReturnType<typeof createOptions> | undefined;
 
   async function getRuntime() {
     requireOpen();
@@ -134,6 +137,26 @@ export async function createSession(
     return current.network;
   }
 
+  async function accessOptions(): Promise<Options> {
+    requireOpen();
+    const attempt = options ??= getRuntime().then(async ({ network }) => {
+      requireOpen();
+      return await createOptions(
+        storage.persistent.peer(network.id).service("options"),
+        signals,
+      );
+    });
+
+    try {
+      const initialized = await attempt;
+      requireOpen();
+      return initialized;
+    } catch (error) {
+      if (!closed && options === attempt) options = undefined;
+      throw error;
+    }
+  }
+
   function accessStorage(): VolatileStorage;
   function accessStorage(options: { readonly persistent?: false }): VolatileStorage;
   function accessStorage(options: { readonly persistent: true }): PersistentStorage;
@@ -147,6 +170,7 @@ export async function createSession(
   return {
     username: identity.username,
     network: accessNetwork,
+    options: accessOptions,
     signals() {
       requireOpen();
       return signals;

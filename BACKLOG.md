@@ -11,32 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-options
--------
-
-type: feature
-scope: backend services
-
-The `options` core component uses persistent key/value Storage for editable
-settings. “Settings” designates the frontend which edits Options; it is not the
-backend component name. Observed remote data, such as cached identity, MUST
-remain owned by the service that observed it rather than Options.
-
-Options initializes an in-memory projection asynchronously from
-`session.storage({ persistent: true }).peer(network.id).service("options")`.
-Reads are synchronous. Writes and deletions update the projection and publish a
-change Signal only after persistent Storage succeeds.
-
-Option keys follow this documented convention:
-
-- terms use `[A-Za-z0-9_-]+` and designate entities
-- dots designate object properties, including nested properties
-- slashes designate collections and their members; a collection may contain
-  another collection but MUST NOT be nested inside an object property
-- a collection member may have properties
-
-The convention is descriptive and MUST NOT be enforced by Options.
-
 persistent roster
 -----------------
 

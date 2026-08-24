@@ -2,10 +2,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Network, Peer, Services } from "@c/backend/network";
+import type { Options } from "./options";
 
 const dependencies = vi.hoisted(() => ({
   createLibp2p: vi.fn(),
   createNetwork: vi.fn(),
+  createOptions: vi.fn(),
   generateKeyPairFromSeed: vi.fn(),
 }));
 
@@ -20,6 +22,7 @@ vi.mock("@libp2p/webrtc", () => ({ webRTC: () => ({}) }));
 vi.mock("@libp2p/websockets", () => ({ webSockets: () => ({}) }));
 vi.mock("libp2p", () => ({ createLibp2p: dependencies.createLibp2p }));
 vi.mock("@c/backend/network", () => ({ default: dependencies.createNetwork }));
+vi.mock("@v/backend/options", () => ({ createOptions: dependencies.createOptions }));
 
 import { createSession } from "./session.ts";
 
@@ -39,6 +42,7 @@ interface TestRuntime {
 }
 
 let runtime: TestRuntime;
+let options: Options;
 
 beforeEach(() => {
   vi.stubGlobal("window", {
@@ -46,6 +50,7 @@ beforeEach(() => {
   });
   dependencies.createLibp2p.mockReset();
   dependencies.createNetwork.mockReset();
+  dependencies.createOptions.mockReset();
   dependencies.generateKeyPairFromSeed.mockReset();
 
   const beacon = {
@@ -68,10 +73,20 @@ beforeEach(() => {
     stop: vi.fn(async () => {}),
   };
   runtime = { beacon, createdBeacon, network, node };
+  options = {
+    changes: {
+      publish: vi.fn(),
+      subscribe: vi.fn(() => vi.fn()),
+    },
+    get: vi.fn(),
+    set: vi.fn(async () => {}),
+    unset: vi.fn(async () => {}),
+  };
 
   dependencies.generateKeyPairFromSeed.mockResolvedValue({});
   dependencies.createLibp2p.mockResolvedValue(node);
   dependencies.createNetwork.mockResolvedValue(network);
+  dependencies.createOptions.mockResolvedValue(options);
 });
 
 afterEach(() => {
@@ -158,6 +173,46 @@ describe("Session access and lifetime", () => {
     expect(secondListener).not.toHaveBeenCalled();
 
     await Promise.all([first.close(), second.close()]);
+  });
+
+  it("memoizes Options in the local peer scope without Beacon bootstrap", async () => {
+    const session = await openSession();
+    const service = session.storage({ persistent: true })
+      .peer("local")
+      .service("options");
+
+    const [first, second] = await Promise.all([
+      session.options(),
+      session.options(),
+    ]);
+
+    expect(first).toBe(options);
+    expect(second).toBe(options);
+    expect(dependencies.createOptions).toHaveBeenCalledOnce();
+    expect(dependencies.createOptions).toHaveBeenCalledWith(
+      service,
+      session.signals(),
+    );
+    expect(dependencies.createLibp2p).toHaveBeenCalledOnce();
+    expect(dependencies.createNetwork).toHaveBeenCalledOnce();
+    expect(runtime.network.createPeer).not.toHaveBeenCalled();
+    await session.close();
+  });
+
+  it("reports Options initialization failure and retries it", async () => {
+    const failure = new Error("Options initialization failed.");
+    dependencies.createOptions
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(options);
+    const session = await openSession();
+
+    await expect(session.options()).rejects.toBe(failure);
+    await expect(session.options()).resolves.toBe(options);
+
+    expect(dependencies.createOptions).toHaveBeenCalledTimes(2);
+    expect(dependencies.createNetwork).toHaveBeenCalledOnce();
+    expect(runtime.network.createPeer).not.toHaveBeenCalled();
+    await session.close();
   });
 
   it("uses TLS when the Vessel page is served over HTTPS", async () => {
@@ -345,6 +400,7 @@ describe("Session access and lifetime", () => {
     expect(runtime.network.createPeer).not.toHaveBeenCalled();
     expect(() => session.signals()).toThrow("Session is closed");
     expect(() => session.storage()).toThrow("Session is closed");
+    await expect(session.options()).rejects.toThrow("Session is closed");
   });
 
   it("closes Account access even when Storage shutdown fails", async () => {

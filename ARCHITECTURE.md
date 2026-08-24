@@ -22,6 +22,7 @@ Vessel
 │   ├── Account
 │   └── Session
 │       ├── Signals
+│       ├── Options
 │       ├── Storage
 │       │   ├── Volatile
 │       │   │   └── PeerStorage × peer identity
@@ -145,9 +146,9 @@ the account record only when that succeeds.
 
 - **dependencies**: one unlocked Account identity and the browser networking
   runtime
-- **behavior**: provides stable account-bound Signals, volatile and persistent
-  Storage roots, and Network; maintains default-peer bootstrap and owns their
-  common shutdown
+- **behavior**: provides stable account-bound Signals, Options, volatile and
+  persistent Storage roots, and Network; maintains default-peer bootstrap and
+  owns their common shutdown
 - **structure**: one Session composes one instance of each core component and
   closes Network, Storage, and Account access together
 - **runtime**: browser Window
@@ -172,6 +173,28 @@ does not affect the publisher or later subscribers. Subscriber return values are
 ignored, and subscribers own failures from asynchronous work they start.
 Platform events, request/response flows, Common Network observers, and
 component-local reactivity remain outside Signals.
+
+##### Options
+
+- **dependencies**: its owning Session's persistent Storage and Signals; the
+  Session's private local Network identity selects its peer scope
+- **behavior**: exposes synchronous scalar configuration reads and serialized
+  persistence-first `set` and `unset` mutations
+- **structure**: one lazily initialized in-memory projection backed by the
+  default key/value store of the local peer's `options` service, plus one typed
+  change channel
+
+`session.options()` shares concurrent initialization and retries after failure.
+It creates the private Network runtime to obtain the local peer ID without
+starting Beacon bootstrap. Initialization loads the projection and removes
+persisted non-scalar values; failed cleanup rejects that attempt.
+
+Values may be strings, numbers, booleans, or `null`; `undefined` represents an
+absent option. Keys are accepted verbatim. Mutations run globally in invocation
+order, write persistent Storage before changing the projection, and publish only
+after both reflect the new value. Setting the current value and unsetting an
+absent key are no-ops. A subscriber therefore observes the updated projection
+synchronously, while persistence failure changes neither projection nor Signal.
 
 ##### Storage
 
