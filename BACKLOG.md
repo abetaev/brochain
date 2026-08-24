@@ -11,6 +11,50 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
+options path DSL
+----------------
+
+type: refactor
+scope: options and its consumers
+
+Replace raw Option keys and consumer-owned string construction/parsing with a
+hierarchical Options DSL. The initial direction is an alternating category and
+object path whose final property is read or mutated directly:
+
+```ts
+const peer = options.cat("peers").obj(peerId);
+
+peer.get("display_name");
+await peer.set("display_name", name);
+await peer.unset("display_name");
+
+const service = peer.cat("services").obj(serviceName);
+await service.set("enabled", false);
+```
+
+The examples resolve internally to `peers/${peerId}.display_name` and
+`peers/${peerId}/services/${serviceName}.enabled`. Consumers MUST express the
+semantic hierarchy through the DSL and MUST NOT know, assemble, or parse this
+serialized notation. This should remove option-path constants and helpers from
+Roster and prevent the upcoming service settings work from spreading opaque
+keys.
+
+Scoped change observation should likewise expose category, object, property,
+and value semantics without requiring subscribers to parse a raw key. Preserve
+Options' scalar values, synchronous reads, serialized persistence-first writes,
+no-op suppression, and notification-after-projection behavior.
+
+Before implementation, refine:
+
+- the exact scope and change-channel interfaces, including observation of all
+  objects in a category versus one selected object;
+- whether `cat` and `obj` scopes are stable entities or lightweight views over
+  one Options projection;
+- segment validation or escaping so `/` and `.` cannot make paths ambiguous;
+- whether the raw root `get`, `set`, `unset`, and change API is removed entirely;
+- the minimum recursive grammar needed for peer service options without making
+  arbitrary configuration trees part of the public contract.
+
 per-peer service options
 ------------------------
 
