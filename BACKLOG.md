@@ -153,6 +153,17 @@ beacon connections
 
 Support an explicitly configured Beacon URL for non-server environments and connections to multiple Beacons. The run-mode default remains sufficient until this task is refined.
 
+beacon evolution
+----------------
+
+Evolve Beacon into a feature-rich headless service host through the Common
+Network service catalog. Initially retain one process-lifetime volatile account
+and identity. Introduce Node-compatible Storage only when a hosted service needs
+retention, then reconsider whether a runtime-neutral Session should be shared
+with Vessel. Refine persistent identity, administration, service selection,
+Options, quotas, security, deployment, and whether multiple accounts are needed
+before implementation.
+
 peer discovery
 --------------
 

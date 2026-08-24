@@ -1,5 +1,5 @@
 import { multiaddr } from "@multiformats/multiaddr";
-import type { Libp2p } from "libp2p";
+import { createLibp2p, type Libp2p, type Libp2pOptions } from "libp2p";
 import { createByteStream, type ByteStream } from "./byte-stream.ts";
 import {
   createPeer as createManagedPeer,
@@ -30,9 +30,12 @@ export interface Service {
 }
 
 export type Services = Readonly<Record<string, Service>>;
+export type NetworkConfiguration = Omit<Libp2pOptions, "start">;
 
 export interface Network {
   readonly id: string;
+  addresses(): readonly string[];
+  subscribeAddresses(listener: () => void): () => void;
   createPeer(address: string, ...alternates: readonly string[]): Promise<Peer>;
   connectedPeers(): readonly Peer[];
   provide(services: Services): Promise<void>;
@@ -49,9 +52,10 @@ interface PendingConnection {
 }
 
 export default async function createNetwork(
-  node: Libp2p,
+  configuration: NetworkConfiguration,
   initialServices: Services = {},
 ): Promise<Network> {
+  const node = await createLibp2p({ ...configuration, start: false });
   const localId = node.peerId.toString();
   const activePeers = new Map<string, ManagedPeer>();
   const pendingConnections = new Map<string, PendingConnection>();
@@ -60,6 +64,7 @@ export default async function createNetwork(
     peer: Peer,
     event: "connected" | "disconnected",
   ) => void>();
+  const addressListeners = new Set<() => void>();
   const lifetime = new AbortController();
   const serviceDefinitions = new Map<string, Service>();
   const protocolDefinitions = new Map<
@@ -69,11 +74,6 @@ export default async function createNetwork(
   const rpcImplementations = new WeakMap<ManagedPeer, Map<string, object>>();
   let provisioning = Promise.resolve();
   let shutdown: Promise<void> | undefined;
-  let closed = false;
-
-  function requireOpen(): void {
-    if (closed) throw new Error("This network is closed.");
-  }
 
   function notifyTopology(
     peer: Peer,
@@ -84,12 +84,7 @@ export default async function createNetwork(
 
   function constructPeer(id: string): ManagedPeer {
     if (id === localId) throw new Error("The local peer cannot be created as a remote peer.");
-    const managed = createManagedPeer(
-      node,
-      id,
-      requireOpen,
-      connectManagedPeer,
-    );
+    const managed = createManagedPeer(node, id, connectManagedPeer);
     return managed;
   }
 
@@ -118,7 +113,6 @@ export default async function createNetwork(
   }
 
   async function registerServices(services: Services): Promise<void> {
-    requireOpen();
     const entries = Object.entries(services);
     const additions = new Map<string, Service>();
     const protocols = new Map<
@@ -236,7 +230,6 @@ export default async function createNetwork(
   }
 
   async function connectManagedPeer(candidate: ManagedPeer): Promise<Peer> {
-    requireOpen();
     const id = candidate.peer.id;
     const connected = activePeer(id);
     if (connected !== undefined) {
@@ -320,8 +313,12 @@ export default async function createNetwork(
 
   const network: Network = {
     id: localId,
+    addresses: () => Object.freeze(node.getMultiaddrs().map((address) => address.toString())),
+    subscribeAddresses(listener) {
+      addressListeners.add(listener);
+      return () => addressListeners.delete(listener);
+    },
     async createPeer(address, ...alternates) {
-      requireOpen();
       const addresses = [address, ...alternates].map((entry) => multiaddr(entry).toString());
       const identities = new Set(addresses.map(destinationPeerId).filter(isDefined));
       if (identities.size > 1) throw new Error("Peer addresses identify different peers.");
@@ -365,32 +362,28 @@ export default async function createNetwork(
       await addition;
     },
     services() {
-      requireOpen();
       return Object.freeze(Object.fromEntries(serviceDefinitions));
     },
     subscribe(listener) {
-      requireOpen();
       topologyListeners.add(listener);
       return () => topologyListeners.delete(listener);
     },
     async close() {
-      if (shutdown === undefined) {
-        closed = true;
-        shutdown = stopNetwork();
-      }
+      shutdown ??= stopNetwork();
       await shutdown;
     },
   };
 
   async function stopNetwork(): Promise<void> {
+    lifetime.abort();
     try {
       await node.stop();
     } finally {
-      lifetime.abort();
       for (const [id, peer] of activePeers) {
         deactivatePeer(id, peer);
       }
       topologyListeners.clear();
+      addressListeners.clear();
     }
   }
 
@@ -415,6 +408,9 @@ export default async function createNetwork(
         // A peer may only advertise addresses that identify its authenticated identity.
       }
     }
+  }, { signal: lifetime.signal });
+  node.addEventListener("self:peer:update", () => {
+    for (const listener of addressListeners) listener();
   }, { signal: lifetime.signal });
 
   try {
@@ -443,7 +439,6 @@ export default async function createNetwork(
     );
     await node.start();
   } catch (reason) {
-    closed = true;
     lifetime.abort();
     await Promise.allSettled([node.stop()]);
     throw reason;

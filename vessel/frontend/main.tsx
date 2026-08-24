@@ -28,10 +28,8 @@ function Vessel() {
         import("./services/chat"),
         import("./services/roster"),
       ]);
-      const [chat, roster] = await Promise.all([
-        createChat(session),
-        createRoster(session),
-      ]);
+      const chat = await createChat(session);
+      const roster = await createRoster(session);
       setLocation({
         view: "home",
         session,

@@ -161,9 +161,6 @@ describe("account operations and access", () => {
       await expect(staleValues.get("theme")).resolves.toBe("dark");
 
       await expect(accounts.operations.delete("ada", password)).resolves.toBe(true);
-      await expect(staleValues.get("theme")).rejects.toThrow(
-        "persistent Storage is no longer available",
-      );
       await expect(accounts.operations.list()).resolves.toEqual([]);
 
       await accounts.operations.create("ada", password);

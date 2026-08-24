@@ -418,7 +418,7 @@ describe("Session file Storage", () => {
     await storage.close();
   });
 
-  it("waits for pending initialization before closing and rejects its creation", async () => {
+  it("waits for accepted creation before closing and removes its file", async () => {
     let finishRoot: ((root: FileSystemDirectoryHandle) => void) | undefined;
     getDirectory.mockImplementationOnce(async () =>
       await new Promise<FileSystemDirectoryHandle>((resolve) => {
@@ -432,12 +432,11 @@ describe("Session file Storage", () => {
     const closing = storage.close();
     finishRoot?.(directoryHandle(root));
 
-    await expect(creation).rejects.toThrow("Storage is closed");
+    const writer = await creation;
     await expect(closing).resolves.toBeUndefined();
+    await expect(writer.file.blob()).rejects.toThrow("no longer available");
     expect(root.directories.get("brochain")?.directories.get("sessions")?.directories.size)
       .toBe(0);
-    await expect(storage.peer("peer").service("chat").fs().create(0))
-      .rejects.toThrow("Storage is closed");
   });
 
   it("aborts active writers and deletes completed files on shutdown", async () => {
@@ -453,6 +452,5 @@ describe("Session file Storage", () => {
 
     await expect(partial.file.blob()).rejects.toThrow();
     await expect(complete.file.blob()).rejects.toThrow();
-    await expect(files.create(0)).rejects.toThrow("Storage is closed");
   });
 });

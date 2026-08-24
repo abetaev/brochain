@@ -10,22 +10,15 @@ const reservedQuotaRatio = 0.1;
 
 export function createFileRoot(): FileRoot {
   let initialization: Promise<FileRoot> | undefined;
+  const creations = new Set<Promise<FileWriter>>();
   let shutdown: Promise<void> | undefined;
-  let closed = false;
-
-  function requireOpen(): void {
-    if (closed) throw new Error("This Storage is closed.");
-  }
 
   async function access(): Promise<FileRoot> {
-    requireOpen();
     const attempt = initialization ??= initializeFileRoot();
     try {
-      const files = await attempt;
-      requireOpen();
-      return files;
+      return await attempt;
     } catch (reason) {
-      if (!closed && initialization === attempt) initialization = undefined;
+      if (initialization === attempt) initialization = undefined;
       throw reason;
     }
   }
@@ -33,15 +26,18 @@ export function createFileRoot(): FileRoot {
   return {
     async create(size) {
       validateSize(size);
-      return await (await access()).create(size);
+      const creation = (async () => await (await access()).create(size))();
+      creations.add(creation);
+      void creation.finally(() => creations.delete(creation)).catch(() => {});
+      return await creation;
     },
     async close() {
       if (shutdown === undefined) {
-        closed = true;
-        const current = initialization;
-        shutdown = current === undefined
-          ? Promise.resolve()
-          : current.then(async (files) => await files.close());
+        shutdown = (async () => {
+          await Promise.allSettled([...creations]);
+          const files = await initialization?.catch(() => undefined);
+          await files?.close();
+        })();
       }
       await shutdown;
     },
@@ -80,19 +76,12 @@ async function initializeFileRoot(): Promise<FileRoot> {
   try {
     await removeAbandonedSessions(sessions, sessionId);
     const directory = await sessions.getDirectoryHandle(sessionId, { create: true });
-    const creations = new Set<Promise<FileWriter>>();
     const writers = new Set<(reason: Error) => Promise<void>>();
     let reserved = 0;
-    let closed = false;
     let shutdown: Promise<void> | undefined;
-
-    function requireOpen(): void {
-      if (closed) throw new Error("This Storage file system is closed.");
-    }
 
     async function createWriter(size: number): Promise<FileWriter> {
       const estimate = await navigator.storage.estimate();
-      requireOpen();
       const quota = estimate.quota ?? 0;
       const usage = estimate.usage ?? 0;
       const usable = Math.floor(quota * (1 - reservedQuotaRatio));
@@ -173,19 +162,11 @@ async function initializeFileRoot(): Promise<FileRoot> {
     }
 
     return {
-      create(size) {
-        requireOpen();
-        const creation = createWriter(size);
-        creations.add(creation);
-        void creation.finally(() => creations.delete(creation)).catch(() => {});
-        return creation;
-      },
+      create: createWriter,
       async close() {
         if (shutdown === undefined) {
-          closed = true;
           shutdown = (async () => {
             try {
-              await Promise.allSettled([...creations]);
               const reason = new Error("This Storage file system was closed.");
               await Promise.allSettled([...writers].map(async (abort) => await abort(reason)));
               await sessions.removeEntry(sessionId, { recursive: true }).catch((error) => {
