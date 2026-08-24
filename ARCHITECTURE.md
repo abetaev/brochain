@@ -63,11 +63,14 @@ Common
 
 #### Network
 
-- **dependencies**: a configured libp2p node
+- **dependencies**: environment-supplied libp2p configuration and hosted service
+  definitions
 - **behavior**: represents one local peer, creates and connects remote Peers,
-  owns active connections, and hosts an add-only catalog of named services
-- **structure**: Network owns active Peer entities, RPC projection, byte-stream
-  protocols, Registry, and optional Discovery
+  exposes immutable local-address snapshots and invalidations, owns active
+  connections, and hosts an add-only catalog of named services
+- **structure**: Network constructs and owns its private libp2p node, active Peer
+  entities, RPC projection, byte-stream protocols, Registry, and optional
+  Discovery
 - **technology**: libp2p connections and events; typed-rpc request/response
   projection
 
@@ -79,6 +82,9 @@ removes that Peer from Network, while a caller-held Peer may reconnect later.
 
 Network publishes topology changes through its own observer. This observer is
 part of standalone Common infrastructure and does not depend on Vessel Signals.
+Local-address invalidations are likewise synchronous, non-retained, and
+non-replaying; consumers recover the current immutable snapshot with
+`addresses()`.
 
 The service catalog may attach an RPC factory, byte-stream protocols, or both to
 one service name. Registry reports the subset currently available to an
@@ -144,20 +150,16 @@ the account record only when that succeeds.
 
 #### Session
 
-- **dependencies**: one unlocked Account identity and the browser networking
-  runtime
+- **dependencies**: one unlocked Account identity
 - **behavior**: provides stable account-bound Signals, Options, volatile and
-  persistent Storage roots, and Network; maintains default-peer bootstrap and
-  owns their common shutdown
+  persistent Storage roots, and Network, and owns their common shutdown
 - **structure**: one Session composes one instance of each core component and
   closes Network, Storage, and Account access together
 - **runtime**: browser Window
 
-Network startup is independent of connection to the inferred default bootstrap
-peer. Failure leaves a usable offline Network and is retried on later Network
-access. Successful bootstrap waits for a relay-backed WebRTC address. Sign-out
-aborts bootstrap, closes networking, removes Session files, and closes Account
-access.
+Session shutdown closes networking, removes Session files, and closes Account
+access. Consumers discard the Session and its components when shutdown begins;
+component access after that boundary is unsupported.
 
 ##### Signals
 
@@ -177,7 +179,7 @@ component-local reactivity remain outside Signals.
 ##### Options
 
 - **dependencies**: its owning Session's persistent Storage and Signals; the
-  Session's private local Network identity selects its peer scope
+  private Vessel Network identity selects its peer scope
 - **behavior**: exposes synchronous scalar configuration reads and serialized
   persistence-first `set` and `unset` mutations
 - **structure**: one lazily initialized in-memory projection backed by the
@@ -219,9 +221,8 @@ Persistent IndexedDB access opens `brochain/<username>` lazily and a failed
 attempt may be retried by a later operation. Storage owns this database and does
 not read Account data. Entries are immutable snapshots in ascending IndexedDB
 key order; default and explicitly empty store names remain distinct. A database
-version change closes and invalidates an open persistent root. Closing Storage
-waits for accepted operations and closes database access without deleting
-persistent values.
+version change closes the open connection. Closing Storage waits for accepted
+operations and closes database access without deleting persistent values.
 
 Storage exposes no notification API. A component which signals a retained
 mutation MUST update Storage before publishing the corresponding event.
@@ -238,13 +239,20 @@ writers, removes the Session directory, and releases its lock.
 ##### Network
 
 - **dependencies**: the Session identity and Common Network
-- **behavior**: connects Vessel to other peers and provides the services used by
-  frontend composition
-- **structure**: Session configures one Common Network and services attach their
-  RPC or byte-stream facets through its catalog
+- **behavior**: provides the local identity without bootstrap, connects Vessel
+  to the inferred default Beacon on full access, and exposes the services used
+  by frontend composition
+- **structure**: one lazy Vessel Network supplies browser-specific configuration
+  and Identity to Common Network and owns Beacon connection, WebRTC readiness,
+  retry, diagnostics, and shutdown
 - **technology**: libp2p WebSockets and Circuit Relay v2 for bootstrap, WebRTC
   for direct browser connections, Noise encryption, Yamux multiplexing, and
   Identify
+
+Common Network alone constructs and owns the live libp2p node. Bootstrap failure
+leaves the Common Network usable offline and is retried on later full access;
+successful bootstrap waits for a relay-backed WebRTC address through Common
+Network's local-address projection.
 
 ###### Identity
 
@@ -285,6 +293,10 @@ milliseconds plus its final state; interrupted transfers do not resume.
 - **structure**: application composition creates Chat and Roster services for an
   authenticated Session and passes them to complete views
 - **technology**: SolidJS, Pico CSS, and a Vite-generated PWA shell
+
+Application composition initializes Chat and then Roster before making the
+Session active. A failed initializer therefore cannot close a Session while a
+second initializer is still running.
 
 #### Services
 
@@ -358,11 +370,14 @@ Beacon
 - **dependencies**: Common Network and configured public relay information
 - **behavior**: bootstraps peers, relays connection establishment, and lets
   connected peers discover one another
-- **structure**: one headless Common Network hosts Registry, Discovery, and a
-  Circuit Relay without application message storage
+- **structure**: Beacon supplies WebSocket, relay, Identify, Discovery, and
+  public-address configuration to one Common Network, which constructs the live
+  node and hosts Registry, Discovery, and Circuit Relay without application
+  message storage
 - **runtime**: Node.js
 - **technology**: libp2p, WebSockets, Circuit Relay v2, Noise, Yamux, Identify,
   and Identify Push
 
 Development starts Beacon beside Vessel. Production serves the built Vessel and
-runs Beacon in the same process.
+runs Beacon in the same process. Beacon currently generates one identity for its
+process lifetime, so that identity may change after restart.

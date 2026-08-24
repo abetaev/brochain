@@ -23,7 +23,6 @@ export interface ManagedPeer {
 export function createPeer(
   node: Libp2p,
   id: string,
-  requireOpen: () => void,
   connect: (peer: ManagedPeer) => Promise<Peer>,
 ): ManagedPeer {
   const addresses = new Set<string>();
@@ -43,7 +42,6 @@ export function createPeer(
     addresses: () => [...addresses],
     isConnected: () => connected,
     async connect() {
-      requireOpen();
       return await connect(managed);
     },
     subscribe(listener) {
@@ -53,7 +51,6 @@ export function createPeer(
     service<Service extends object>(name: string) {
       validateServiceName(name);
       return remoteService<Service>(name, async (signal) => {
-        requireOpen();
         if (!connected) throw new Error("This peer is not connected.");
         const connection = usableConnection(node, id);
         if (connection === undefined) throw new Error("This peer is not connected.");
@@ -62,7 +59,6 @@ export function createPeer(
     },
     async open(protocol, options) {
       validateProtocol(protocol);
-      requireOpen();
       if (!connected) throw new Error("This peer is not connected.");
       const connection = usableConnection(node, id);
       if (connection === undefined) throw new Error("This peer is not connected.");

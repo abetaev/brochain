@@ -3,7 +3,6 @@ import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayServer } from "@libp2p/circuit-relay-v2";
 import { identify, identifyPush } from "@libp2p/identify";
 import { webSockets } from "@libp2p/websockets";
-import { createLibp2p } from "libp2p";
 import type { ServerOptions } from "node:https";
 import createNetwork from "../common/backend/network/index.ts";
 import {
@@ -21,8 +20,7 @@ interface BeaconConfiguration {
 export async function createBeacon(configuration: BeaconConfiguration) {
   const announcePort = configuration.announcePort ?? configuration.relayPort;
   const tlsAddress = configuration.tls === undefined ? "" : "/tls";
-  const node = await createLibp2p({
-    start: false,
+  return await createNetwork({
     addresses: {
       listen: [`/ip4/0.0.0.0/tcp/${configuration.relayPort}/ws`],
       announce: [`/dns4/${configuration.host}/tcp/${announcePort}${tlsAddress}/ws`],
@@ -42,9 +40,7 @@ export async function createBeacon(configuration: BeaconConfiguration) {
         },
       }),
     },
-  });
-
-  return await createNetwork(node, {
+  }, {
     [discoveryServiceName]: {
       rpc: (peer, network) => createDiscovery(
         peer,

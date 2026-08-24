@@ -37,32 +37,20 @@ export function createPersistentRoot(
   let initialization: Promise<IDBDatabase> | undefined;
   let database: IDBDatabase | undefined;
   let shutdown: Promise<void> | undefined;
-  let closed = false;
-  let invalidated = false;
-
-  function requireOpen(): void {
-    if (closed) throw new Error("This Storage is closed.");
-    if (invalidated) throw new Error("This persistent Storage is no longer available.");
-  }
 
   async function accessDatabase(): Promise<IDBDatabase> {
-    requireOpen();
-    const attempt = initialization ??= openPersistentStorage(databaseName, () => {
-      invalidated = true;
-      database?.close();
-    });
+    const attempt = initialization ??= openPersistentStorage(databaseName);
     try {
       const opened = await attempt;
       database = opened;
       return opened;
     } catch (reason) {
-      if (!closed && initialization === attempt) initialization = undefined;
+      if (initialization === attempt) initialization = undefined;
       throw reason;
     }
   }
 
   function operate<T>(operation: (database: IDBDatabase) => Promise<T>): Promise<T> {
-    requireOpen();
     const pending = (async () => await operation(await accessDatabase()))();
     operations.add(pending);
     void pending.finally(() => operations.delete(pending)).catch(() => {});
@@ -80,7 +68,6 @@ export function createPersistentRoot(
     },
     async close() {
       if (shutdown === undefined) {
-        closed = true;
         shutdown = (async () => {
           await initialization?.catch(() => undefined);
           await Promise.allSettled([...operations]);
@@ -256,7 +243,6 @@ function transactionResult(transaction: IDBTransaction): Promise<void> {
 
 function openPersistentStorage(
   databaseName: string,
-  invalidate: () => void,
 ): Promise<IDBDatabase> {
   if (globalThis.indexedDB === undefined) {
     return Promise.reject(new Error("This browser does not support IndexedDB."));
@@ -285,10 +271,7 @@ function openPersistentStorage(
       ]);
     };
     request.onsuccess = () => {
-      request.result.onversionchange = () => {
-        request.result.close();
-        invalidate();
-      };
+      request.result.onversionchange = () => request.result.close();
       resolve(request.result);
     };
     request.onerror = () => reject(

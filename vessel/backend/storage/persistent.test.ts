@@ -138,7 +138,7 @@ describe("persistent Storage", () => {
     await expect(values.get("key")).resolves.toBeUndefined();
   });
 
-  it("finishes accepted operations during shutdown and rejects later operations", async () => {
+  it("finishes accepted operations during idempotent shutdown", async () => {
     const root = storage("ada");
     const values = root.persistent.peer("local").service("options").kv<string>();
     const pending = values.put("key", "value");
@@ -147,7 +147,6 @@ describe("persistent Storage", () => {
     await expect(pending).resolves.toBeUndefined();
     await expect(firstClose).resolves.toBeUndefined();
     await expect(root.close()).resolves.toBeUndefined();
-    await expect(values.get("key")).rejects.toThrow("Storage is closed");
 
     const reopened = storage("ada");
     await expect(
@@ -155,17 +154,16 @@ describe("persistent Storage", () => {
     ).resolves.toBe("value");
   });
 
-  it("invalidates an open root when its account database is deleted", async () => {
+  it("closes an open database connection when its database is deleted", async () => {
     const databaseName = `${applicationDatabaseName}/ada`;
     const root = storage("ada");
     const values = root.persistent.peer("local").service("options").kv<string>();
     await values.put("key", "value");
 
-    await deleteDatabase(databaseName);
+    await expect(deleteDatabase(databaseName)).resolves.toBeUndefined();
 
-    await expect(values.get("key")).rejects.toThrow(
-      "persistent Storage is no longer available",
-    );
+    expect((await indexedDB.databases()).map(({ name }) => name))
+      .not.toContain(databaseName);
   });
 });
 

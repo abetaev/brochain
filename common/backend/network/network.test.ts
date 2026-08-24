@@ -2,13 +2,13 @@
 
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
+import { generateKeyPair } from "@libp2p/crypto/keys";
 import { identify, identifyPush } from "@libp2p/identify";
 import { webSockets } from "@libp2p/websockets";
-import { multiaddr } from "@multiformats/multiaddr";
-import { createLibp2p } from "libp2p";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import createNetwork, {
   type Network,
+  type NetworkConfiguration,
   type Peer,
   type Services,
 } from "./index.ts";
@@ -35,9 +35,10 @@ const networks: Network[] = [];
 async function localNetwork(
   services: Services = {},
   identifyPeers = true,
+  privateKey?: NetworkConfiguration["privateKey"],
 ) {
-  const node = await createLibp2p({
-    start: false,
+  const network = await createNetwork({
+    privateKey,
     addresses: { listen: ["/ip4/127.0.0.1/tcp/0/ws"] },
     transports: [webSockets()],
     connectionEncrypters: [noise()],
@@ -45,18 +46,11 @@ async function localNetwork(
     services: identifyPeers
       ? { identify: identify(), identifyPush: identifyPush() }
       : undefined,
-  });
-  const network = await createNetwork(node, services);
+  }, services);
   networks.push(network);
-  const address = node.getMultiaddrs()[0]?.toString();
+  const address = network.addresses()[0];
   if (address === undefined) throw new Error("Test peer did not expose an address.");
-  return { network, address, node };
-}
-
-function addressedPeer(address: string): string | undefined {
-  return multiaddr(address).getComponents()
-    .filter(({ name }) => name === "p2p")
-    .at(-1)?.value;
+  return { network, address };
 }
 
 afterEach(async () => {
@@ -103,14 +97,10 @@ describe("Network and Peer identity", () => {
     ).rejects.toThrow("different peers");
   });
 
-  it("authenticates concurrent identity-less construction once", async () => {
+  it("coalesces concurrent identity-less construction around one Peer", async () => {
     const remote = await localNetwork();
     const local = await localNetwork();
     const addressWithoutPeerId = remote.address.replace(/\/p2p\/[^/]+$/, "");
-    let connections = 0;
-    remote.node.addEventListener("connection:open", () => {
-      connections += 1;
-    });
 
     const [first, second] = await Promise.all([
       local.network.createPeer(addressWithoutPeerId),
@@ -122,7 +112,6 @@ describe("Network and Peer identity", () => {
     expect(first.addresses()).toContain(remote.address);
     expect(first.isConnected()).toBe(true);
     expect(local.network.connectedPeers()).toEqual([first]);
-    await vi.waitFor(() => expect(connections).toBe(1));
   });
 
   it("coalesces concurrent known-identity dials around one active Peer", async () => {
@@ -130,10 +119,6 @@ describe("Network and Peer identity", () => {
     const local = await localNetwork();
     const first = await local.network.createPeer(remote.address);
     const second = await local.network.createPeer(remote.address);
-    let connections = 0;
-    remote.node.addEventListener("connection:open", () => {
-      connections += 1;
-    });
 
     const [firstActive, secondActive] = await Promise.all([
       first.connect(),
@@ -143,7 +128,6 @@ describe("Network and Peer identity", () => {
     expect(firstActive).toBe(first);
     expect(secondActive).toBe(first);
     expect(local.network.connectedPeers()).toEqual([first]);
-    await vi.waitFor(() => expect(connections).toBe(1));
   });
 
   it("emits Peer connection transitions and removes the final disconnected Peer", async () => {
@@ -164,7 +148,9 @@ describe("Network and Peer identity", () => {
 
   it("publishes active topology once for inbound connection and final disconnection", async () => {
     const remote = await localNetwork();
-    const local = await localNetwork();
+    const identity = await generateKeyPair("Ed25519");
+    const local = await localNetwork({}, true, identity);
+    const duplicate = await localNetwork({}, true, identity);
     const remoteEvents: string[] = [];
     const removedEvents: string[] = [];
     const localEvents: string[] = [];
@@ -185,20 +171,17 @@ describe("Network and Peer identity", () => {
     expect(removedEvents).toEqual([`${local.network.id}:connected`]);
     expect(localEvents).toEqual([`${remote.network.id}:connected`]);
 
-    const extra = await local.node.dial(multiaddr(remote.address), { force: true });
-    await vi.waitFor(() => expect(remote.node.getConnections().filter((connection) =>
-      connection.remotePeer.toString() === local.network.id
-    )).toHaveLength(2));
+    const duplicatePeer = await duplicate.network.createPeer(remote.address);
+    await duplicatePeer.connect();
+    await vi.waitFor(() => expect(remote.network.connectedPeers()).toHaveLength(1));
     expect(remoteEvents).toEqual([`${local.network.id}:connected`]);
 
-    await extra.close();
-    await vi.waitFor(() => expect(remote.node.getConnections().filter((connection) =>
-      connection.remotePeer.toString() === local.network.id
-    )).toHaveLength(1));
+    await local.network.close();
+    await vi.waitFor(() => expect(remote.network.connectedPeers()).toHaveLength(1));
     expect(remoteEvents).toEqual([`${local.network.id}:connected`]);
 
     unsubscribe();
-    await local.network.close();
+    await duplicate.network.close();
     await vi.waitFor(() => expect(remoteEvents).toEqual([
       `${local.network.id}:connected`,
       `${local.network.id}:disconnected`,
@@ -211,7 +194,7 @@ describe("Network and Peer identity", () => {
     expect(remote.network.connectedPeers()).toEqual([]);
   });
 
-  it("learns inbound addresses from Identify without retaining the transport source address", async () => {
+  it("learns inbound addresses from Identify through the public Peer projection", async () => {
     const inboundEvents: string[] = [];
     const remote = await localNetwork();
     remote.network.subscribe((peer, event) => {
@@ -221,10 +204,6 @@ describe("Network and Peer identity", () => {
       }
     });
     const local = await localNetwork();
-    let inboundSource: string | undefined;
-    remote.node.addEventListener("connection:open", (event) => {
-      inboundSource = event.detail.remoteAddr.toString();
-    });
     const peer = await local.network.createPeer(remote.address);
 
     await peer.connect();
@@ -234,14 +213,9 @@ describe("Network and Peer identity", () => {
       expect(inbound?.addresses()).toContain(local.address);
     });
 
-    const source = inboundSource;
-    if (source === undefined) throw new Error("The inbound connection did not expose its source.");
-    const sourceWithId = addressedPeer(source) === local.network.id
-      ? multiaddr(source).toString()
-      : multiaddr(source).encapsulate(`/p2p/${local.network.id}`).toString();
     const inbound = remote.network.connectedPeers()
       .find(({ id }) => id === local.network.id);
-    expect(inbound?.addresses()).not.toContain(sourceWithId);
+    expect(inbound?.addresses()).toContain(local.address);
     expect(inboundEvents).toEqual(["connected"]);
   });
 

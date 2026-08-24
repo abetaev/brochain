@@ -23,22 +23,20 @@ function createAccount(): Account {
     await active?.close();
     await ready;
     await operation();
-    let session: Session;
     try {
       const { createSession } = await import("@v/backend/session");
-      session = await createSession(
+      const session = await createSession(
         async () => await access.activePeerIdentity(),
         async () => {
-          if (active !== session) return;
           await access.closeSession();
-          if (active === session) active = undefined;
+          active = undefined;
         },
       );
+      return (active = session);
     } catch (error) {
       await access.closeSession();
       throw error;
     }
-    return (active = session);
   }
 
   function queueAuthentication(operation: () => Promise<unknown>): Promise<Session> {
