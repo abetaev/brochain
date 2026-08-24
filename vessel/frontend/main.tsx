@@ -86,7 +86,6 @@ function Vessel() {
         <Match when={chat()}>
           {(current) => (
             <Chat
-              session={current().session}
               chat={current().chat}
               roster={current().roster}
               peerId={current().peerId}

@@ -1,18 +1,10 @@
 import { For, Show, createMemo, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
-import {
-  identityServiceName,
-  loadContact,
-  type IdentityService,
-} from "@v/backend/network/services/identity";
 import type { Session } from "@v/backend/session";
 import type { Chat } from "@v/frontend/services/chat";
-import type { Roster } from "@v/frontend/services/roster";
+import type { Roster, RosterEntry } from "@v/frontend/services/roster";
 
-interface ListedPeer {
-  readonly peer: Peer;
-  readonly name: string;
-  readonly connected: boolean;
+interface ListedPeer extends RosterEntry {
   readonly messaging: boolean;
 }
 
@@ -51,25 +43,18 @@ export function Home(props: {
       (receivedIds(peerId).size > props.chat.readCount(peerId));
   }
 
-  async function describe(peer: Peer): Promise<ListedPeer> {
-    const connected = peer.isConnected();
-    let name = peer.id;
+  async function describe(entry: RosterEntry): Promise<ListedPeer> {
     let messaging = false;
 
-    if (connected) {
+    if (entry.online && entry.peer !== undefined) {
       try {
-        const capabilities = await props.chat.capabilities(peer);
-        messaging = capabilities.text;
-        name = (await loadContact(
-          peer.service<IdentityService>(identityServiceName),
-          props.session.storage().peer(peer.id).service(identityServiceName),
-        )).name;
+        messaging = (await props.chat.capabilities(entry.peer)).text;
       } catch {
-        // A peer id is always available when remote services fail.
+        // The Roster entry remains usable when capability lookup fails.
       }
     }
 
-    return { peer, name, connected, messaging };
+    return { ...entry, messaging };
   }
 
   const [roster, { refetch }] = createResource(async () =>
@@ -174,7 +159,7 @@ export function Home(props: {
                   {(peer) => (
                     <PeerRow
                       listed={peer}
-                      unread={hasUnread(peer.peer.id)}
+                      unread={hasUnread(peer.peerId)}
                       busy={unavailable()}
                       onConnect={(selected) => void performAction(
                         () => connectAndOpen(selected),
@@ -227,8 +212,8 @@ function PeerRow(props: {
   return (
     <li>
       <span
-        classList={{ "connection-state": true, connected: props.listed.connected }}
-        aria-label={props.listed.connected ? "Connected" : "Not connected"}
+        classList={{ "connection-state": true, connected: props.listed.online }}
+        aria-label={props.listed.online ? "Connected" : "Not connected"}
       />
       <strong>{props.listed.name}</strong>{" "}
       <Show when={props.unread}>
@@ -237,21 +222,28 @@ function PeerRow(props: {
         </span>{" "}
       </Show>
       <Show
-        when={props.listed.connected}
+        when={props.listed.online}
         fallback={
-          <button
-            type="button"
-            disabled={props.busy}
-            onClick={() => props.onConnect(props.listed.peer)}
+          <Show
+            when={props.listed.peer}
+            fallback={<small>Not currently available</small>}
           >
-            Connect
-          </button>
+            {(peer) => (
+              <button
+                type="button"
+                disabled={props.busy}
+                onClick={() => props.onConnect(peer())}
+              >
+                Connect
+              </button>
+            )}
+          </Show>
         }
       >
         <Show when={props.listed.messaging} fallback={<small>Connected</small>}>
           <button
             type="button"
-            onClick={() => props.onOpenChat(props.listed.peer.id)}
+            onClick={() => props.onOpenChat(props.listed.peerId)}
           >
             Chat
           </button>

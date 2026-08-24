@@ -257,9 +257,10 @@ Network's local-address projection.
 ###### Identity
 
 - **dependencies**: Session account name
-- **behavior**: returns `{ name }` for the local peer; callers validate and
-  cache the response
-- **structure**: optional RPC service
+- **behavior**: returns `{ name }` for the local peer and validates every remote
+  response
+- **structure**: optional retention-free RPC service; Roster owns observed
+  remote Identity data
 
 ###### Messaging
 
@@ -302,18 +303,34 @@ second initializer is still running.
 
 ##### Roster
 
-- **dependencies**: Session Network and Signals; remote Registry and optional
-  Discovery services
-- **behavior**: returns the current connected and discovered peers and resolves a
-  requested peer; publishes invalidations when local topology changes
-- **structure**: one Session-bound service performs a fresh discovery sweep for
-  each list request and bridges the Common Network observer to one Signals
-  channel
+- **dependencies**: Session Network, persistent Storage, Options, and Signals;
+  remote Registry, Identity, and optional Discovery services
+- **behavior**: returns one collection of connected, discovered, and remembered
+  peers; refreshes and retains valid remote Identity observations; resolves each
+  presentation name; and publishes invalidations for topology or external name
+  changes
+- **structure**: one Session-bound service combines a fresh runtime discovery
+  sweep with an in-memory Identity projection backed by the local peer's
+  persistent `roster` key/value store
 
-Roster retains no peer projection. It asks each connected peer for Registry,
-uses Discovery only when advertised, groups valid addresses by remote identity,
-and creates disconnected Peers without dialing them. Provider failures and
-invalid results are isolated so healthy partial results remain available.
+Connected entries contain an online Peer, discovered entries contain an offline
+Peer, and remembered-only entries contain no Peer. Roster asks each connected
+peer for Registry, refreshes Identity only when advertised, uses Discovery only
+when advertised, and groups valid addresses by remote identity. Provider
+failures and invalid results are isolated so healthy peers and the latest valid
+Identity observations remain available.
+
+Each valid Identity is retained as one object under
+`peers/${peerId}.identity`. Roster initializes an absent
+`peers/${peerId}.display_name` Option from the first observed name but never
+overwrites an existing option. Presentation names resolve from a string display
+name, cached Identity name, then peer ID. Identity persistence precedes its
+projection update; addresses, availability, discovery results, and hosted
+service catalogs remain transient.
+
+Roster bridges Common Network topology changes and external display-name Option
+changes to one non-retained Signals invalidation channel. It suppresses the
+Option notification produced by its own initial display-name write.
 
 ##### Chat
 
@@ -343,17 +360,18 @@ and disappear when Session ends.
 
 ##### Home
 
-- **dependencies**: Session, Roster, Chat, and Identity
-- **behavior**: lists and refreshes peers, connects them, shows unread and
-  connection state, opens Chat, and signs out
+- **dependencies**: Session, Roster, and Chat
+- **behavior**: lists and refreshes available and remembered peers, connects
+  available peers, shows unread and connection state, opens Chat, and signs out
 - **structure**: one complete signed-in landing view with reusable peer rows
 - **technology**: SolidJS resources and signals
 
 ##### Chat
 
-- **dependencies**: Session, Roster, Chat service, and Identity
-- **behavior**: displays peer information and retained items, sends messages and
-  files, downloads received files, and marks received items read
+- **dependencies**: Roster and Chat service
+- **behavior**: obtains peer availability and presentation name from Roster,
+  displays retained items, sends messages and files, downloads received files,
+  and marks received items read
 - **structure**: one complete conversation view with file presentation
 - **technology**: SolidJS resources and signals
 

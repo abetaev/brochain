@@ -1,32 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { PromisedMethods } from "@c/backend/network";
 import {
-  createStorage as createStorageRoot,
-  type ServiceStorage,
-} from "@v/backend/storage";
-import {
   createIdentity,
-  loadContact,
+  loadIdentity,
+  validateIdentity,
   type IdentityService,
 } from "./identity.ts";
-
-function createStorage() {
-  return createStorageRoot("test-account");
-}
-
-function contactStorage(
-  peerId = "remote-peer",
-  storage = createStorage(),
-): ServiceStorage {
-  return storage.peer(peerId).service("identity");
-}
 
 function remoteIdentity(get: () => Promise<unknown>): PromisedMethods<IdentityService> {
   return { get } as PromisedMethods<IdentityService>;
 }
 
 describe("Identity", () => {
-  it("exposes the local Contact as a plain service object", () => {
+  it("exposes the local Identity as a plain service object", () => {
     const identity = createIdentity("local");
 
     expect(identity).toEqual({ get: expect.any(Function) });
@@ -34,48 +20,31 @@ describe("Identity", () => {
     expect("name" in identity).toBe(false);
   });
 
-  it("validates and caches a remote Contact in its designated singleton", async () => {
-    let calls = 0;
-    const remote = remoteIdentity(async () => {
-      calls += 1;
-      return { name: "ada" };
-    });
-    const storage = contactStorage();
+  it("loads and validates every remote Identity request without retention", async () => {
+    let name = "ada";
+    const get = async () => ({ name });
+    const remote = remoteIdentity(get);
 
-    await expect(loadContact(remote, storage)).resolves.toEqual({ name: "ada" });
-    await expect(loadContact(remoteIdentity(async () => ({ name: "ignored" })), storage))
-      .resolves.toEqual({ name: "ada" });
-
-    expect(calls).toBe(1);
-    expect(storage.singleton().get()).toEqual({ name: "ada" });
+    await expect(loadIdentity(remote)).resolves.toEqual({ name: "ada" });
+    name = "bea";
+    await expect(loadIdentity(remote)).resolves.toEqual({ name: "bea" });
   });
 
   it.each([
     { name: "Not valid" },
     { name: 1 },
     null,
-  ])("rejects an invalid remote Contact without caching it", async (value) => {
-    const storage = contactStorage();
-
-    await expect(loadContact(remoteIdentity(async () => value), storage)).rejects.toThrow(
+  ])("rejects an invalid Identity", async (value) => {
+    await expect(loadIdentity(remoteIdentity(async () => value))).rejects.toThrow(
       "Peer returned an invalid identity.",
     );
-    expect(storage.singleton().get()).toBeUndefined();
+    expect(() => validateIdentity(value)).toThrow("Peer returned an invalid identity.");
   });
 
-  it("isolates cached Contacts by peer and Session storage", async () => {
-    const firstSession = createStorage();
-    const secondSession = createStorage();
-    const firstPeer = contactStorage("first", firstSession);
-    const secondPeer = contactStorage("second", firstSession);
-    const nextSession = contactStorage("first", secondSession);
+  it("returns a normalized immutable Identity", () => {
+    const identity = validateIdentity({ name: "ada", ignored: true });
 
-    await loadContact(remoteIdentity(async () => ({ name: "ada" })), firstPeer);
-    await loadContact(remoteIdentity(async () => ({ name: "bea" })), secondPeer);
-    await loadContact(remoteIdentity(async () => ({ name: "cy" })), nextSession);
-
-    expect(firstPeer.singleton().get()).toEqual({ name: "ada" });
-    expect(secondPeer.singleton().get()).toEqual({ name: "bea" });
-    expect(nextSession.singleton().get()).toEqual({ name: "cy" });
+    expect(identity).toEqual({ name: "ada" });
+    expect(Object.isFrozen(identity)).toBe(true);
   });
 });

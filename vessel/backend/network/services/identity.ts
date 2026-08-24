@@ -1,14 +1,13 @@
 import type { PromisedMethods } from "@c/backend/network";
-import type { ServiceStorage } from "@v/backend/storage";
 
 export const identityServiceName = "identity";
 
-export interface Contact {
+export interface Identity {
   readonly name: string;
 }
 
 export interface IdentityService {
-  get(): Contact;
+  get(): Identity;
 }
 
 export function createIdentity(localName: string): IdentityService {
@@ -17,20 +16,13 @@ export function createIdentity(localName: string): IdentityService {
   };
 }
 
-export async function loadContact(
+export async function loadIdentity(
   remote: PromisedMethods<IdentityService>,
-  storage: ServiceStorage,
-): Promise<Contact> {
-  const contact = storage.singleton<Contact>();
-  const cached = contact.get();
-  if (cached !== undefined) return cached;
-
-  const loaded = validateContact(await remote.get());
-  contact.put(loaded);
-  return loaded;
+): Promise<Identity> {
+  return validateIdentity(await remote.get());
 }
 
-function validateContact(value: unknown): Contact {
+export function validateIdentity(value: unknown): Identity {
   if (
     typeof value !== "object" ||
     value === null ||
@@ -40,5 +32,5 @@ function validateContact(value: unknown): Contact {
   ) {
     throw new Error("Peer returned an invalid identity.");
   }
-  return { name: value.name };
+  return Object.freeze({ name: value.name });
 }

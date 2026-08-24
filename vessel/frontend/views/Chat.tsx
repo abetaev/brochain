@@ -1,16 +1,9 @@
 import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
 import type { Peer } from "@c/backend/network";
-import {
-  identityServiceName,
-  loadContact,
-  type IdentityService,
-} from "@v/backend/network/services/identity";
-import type { Session } from "@v/backend/session";
 import type { Chat as ChatService, ChatFile, ChatItem } from "@v/frontend/services/chat";
 import type { Roster } from "@v/frontend/services/roster";
 
 export function Chat(props: {
-  session: Session;
   chat: ChatService;
   roster: Roster;
   peerId: string;
@@ -33,6 +26,16 @@ export function Chat(props: {
       props.chat.markRead(currentPeer.id);
     }
   });
+
+  async function refreshName(): Promise<void> {
+    try {
+      const entry = await props.roster.get(props.peerId);
+      if (active && entry !== undefined) setName(entry.name);
+    } catch {
+      // The last resolved name remains available when refresh fails.
+    }
+  }
+  const stopRoster = props.roster.invalidations.subscribe(() => void refreshName());
 
   function attemptSend(operation: () => void): void {
     setError(undefined);
@@ -74,8 +77,13 @@ export function Chat(props: {
 
   async function initialize(): Promise<void> {
     try {
-      const peer = await props.roster.getPeer(props.peerId);
-      if (peer === undefined) throw new Error("This peer is no longer available.");
+      const entry = await props.roster.get(props.peerId);
+      if (entry === undefined) throw new Error("This peer is no longer available.");
+      if (!active) return;
+      setName(entry.name);
+
+      const peer = entry.peer;
+      if (peer === undefined) throw new Error("This peer is not currently available.");
       if (!peer.isConnected()) throw new Error("This peer is not connected.");
 
       const capabilities = await props.chat.capabilities(peer);
@@ -91,17 +99,6 @@ export function Chat(props: {
       props.chat.markRead(peer.id);
       setPeer(peer);
       setFilesAvailable(capabilities.files);
-
-      try {
-        const peerStorage = props.session.storage().peer(peer.id);
-        const contact = await loadContact(
-          peer.service<IdentityService>(identityServiceName),
-          peerStorage.service(identityServiceName),
-        );
-        if (active) setName(contact.name);
-      } catch {
-        // A peer id is always available as the display fallback.
-      }
     } catch (reason) {
       if (active) setError(errorMessage(reason));
     }
@@ -111,6 +108,7 @@ export function Chat(props: {
   onCleanup(() => {
     active = false;
     stopEvents();
+    stopRoster();
   });
 
   return (

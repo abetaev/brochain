@@ -11,35 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-persistent roster
------------------
-
-type: feature
-scope: frontend services, roster, storage, options
-
-Roster exposes one unified collection containing connected, discovered, and
-cached-only peers. Each entry includes the peer ID, an optional current Peer,
-current online state, the latest cached Identity, and its resolved presentation
-name. Roster uses persistent Storage to cache the latest valid whole Identity
-object for each remote peer at `peers/${peerId}.identity`. Identity currently has
-the shape `{ name: string }`.
-
-When a connected peer exposes Identity, Roster refreshes and validates the
-cached value. A failure MUST retain the last valid cache. Roster initializes the
-editable `peers/${peerId}.display_name` Option from `identity.name` only when the
-option is absent; later identity refreshes MUST NOT overwrite it.
-
-Roster resolves every entry's name in this order: display-name Option, cached
-identity name, peer ID. It does not persist peer availability, addresses, or
-Discovery results; a cached-only peer therefore cannot reconnect until it is
-discovered again.
-
-Persisted hosted-service observations are deferred. When introduced, Roster
-retains every service name ever observed and records whether it was present in
-the latest successful online catalog refresh. An offline entry exposes that
-status explicitly as historical information. Chat and other operations MUST
-still require current online capability and Options approval.
-
 per-peer service options
 ------------------------
 
@@ -168,6 +139,14 @@ peer discovery
 --------------
 
 Host peer discovery on Vessel so connected Vessels can discover peers without Beacon.
+
+roster service history
+----------------------
+
+Retain every remote service ever observed and distinguish historical support
+from presence in the latest successful online catalog refresh. Offline service
+history is informative only; operations still require current online capability
+and Options approval.
 
 calls
 -----

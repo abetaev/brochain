@@ -10,7 +10,8 @@ using brochain
    it. Account names use 1–64 lowercase English letters. The password-strength
    indicator is advice and does not prevent account creation.
 2. On Home, select **Refresh peers** to update the list of people you can connect
-   to.
+   to. People identified earlier remain listed for that account after a reload;
+   **Not currently available** means they must be found again before connecting.
 3. Select **Connect** beside a peer. If someone gives you a direct address, paste
    it under **Connect directly** instead.
 4. Select **Chat** after connecting. Enter text and select **Send message**. Use
