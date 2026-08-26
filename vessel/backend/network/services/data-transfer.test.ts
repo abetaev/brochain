@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { ByteStream, Network, Peer, Services } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
 import { createSignals } from "@v/backend/signals";
-import { createStorage as createStorageRoot } from "@v/backend/storage";
 import {
   createDataTransfer,
   dataTransferProtocol,
@@ -19,10 +18,6 @@ interface Pipe {
   }>;
   closed: boolean;
   error?: Error;
-}
-
-function createStorage() {
-  return createStorageRoot("test-account");
 }
 
 function createPipe(): Pipe {
@@ -86,7 +81,6 @@ function fail(pipe: Pipe, reason: Error): void {
 function testContext(id: string) {
   let services: Services = {};
   const signals = createSignals();
-  const storage = createStorage();
   const network = {
     id,
     provide: vi.fn(async (provided: Services) => {
@@ -97,7 +91,7 @@ function testContext(id: string) {
     username: id,
     network: vi.fn(async () => network),
     signals: () => signals,
-    storage: () => storage,
+    storage: vi.fn(),
     bootstrapError: () => undefined,
     close: vi.fn(),
   } as unknown as Session;

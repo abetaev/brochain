@@ -101,13 +101,6 @@ export async function createOptions<Schema = EffectiveSchema>(
   }
 
   const changes = signals.channel<OptionChange>({}, "changes");
-  let mutations = Promise.resolve();
-
-  function mutate(operation: () => Promise<void>): Promise<void> {
-    const result = mutations.then(operation);
-    mutations = result.then(() => undefined, () => undefined);
-    return result;
-  }
 
   function category(path: string): RuntimeCategory {
     return {
@@ -128,23 +121,19 @@ export async function createOptions<Schema = EffectiveSchema>(
           throw new TypeError("Options support only scalar values.");
         }
 
-        await mutate(async () => {
-          const key = `${path}.${property}`;
-          if (Object.is(values.get(key), value)) return;
-          await persisted.put(key, value);
-          values.set(key, value);
-          changes.publish({ object: path, property, value });
-        });
+        const key = `${path}.${property}`;
+        if (Object.is(values.get(key), value)) return;
+        await persisted.put(key, value);
+        values.set(key, value);
+        changes.publish({ object: path, property, value });
       },
       async unset(name) {
         const property = validateName(name, "property");
-        await mutate(async () => {
-          const key = `${path}.${property}`;
-          if (!values.has(key)) return;
-          await persisted.delete(key);
-          values.delete(key);
-          changes.publish({ object: path, property, value: undefined });
-        });
+        const key = `${path}.${property}`;
+        if (!values.has(key)) return;
+        await persisted.delete(key);
+        values.delete(key);
+        changes.publish({ object: path, property, value: undefined });
       },
       observe(name, listener) {
         const property = validateName(name, "property");

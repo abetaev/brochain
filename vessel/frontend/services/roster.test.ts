@@ -4,11 +4,13 @@ import type { Network, Peer } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
 import { createSignals } from "@v/backend/signals";
 import {
-  createStorage,
   type PersistentKeyValueStorage,
   type PersistentStorage,
-  type Storage,
 } from "@v/backend/storage";
+import {
+  createPersistentRoot,
+  type PersistentRoot,
+} from "@v/backend/storage/persistent";
 import { createRoster } from "./roster.ts";
 
 const firstId = "12D3KooWKnDdG3iXw9eTFijk3EWSunZcFi54Zka4wmtqtt6rPxc8";
@@ -444,7 +446,7 @@ describe("Roster persistence", () => {
       undefined,
       async () => ({ name: "ada" }),
     );
-    const firstStorage = createStorage("alice", application);
+    const firstStorage = await createPersistentRoot(`${application}/alice`);
     const firstNetwork = networkWith(() => [remote]);
     const firstSession = await persistentSession(firstNetwork, firstStorage);
     const firstRoster = await createRoster(firstSession);
@@ -452,7 +454,7 @@ describe("Roster persistence", () => {
     expect((await firstRoster.list())[0]?.identity).toEqual({ name: "ada" });
     await firstStorage.close();
 
-    const nextStorage = createStorage("alice", application);
+    const nextStorage = await createPersistentRoot(`${application}/alice`);
     const nextSession = await persistentSession(networkWith(() => []), nextStorage);
     const nextRoster = await createRoster(nextSession);
 
@@ -475,14 +477,15 @@ function networkWith(connected: () => readonly Peer[]): Network {
   } as unknown as Network;
 }
 
-async function persistentSession(network: Network, storage: Storage): Promise<Session> {
+async function persistentSession(
+  network: Network,
+  storage: PersistentRoot,
+): Promise<Session> {
   const signals = createSignals();
-  const accessStorage = (selection?: { readonly persistent?: boolean }) =>
-    selection?.persistent === true ? storage.persistent : storage;
   return {
     network: async () => network,
     signals: () => signals,
-    storage: accessStorage,
+    storage: () => storage,
   } as unknown as Session;
 }
 

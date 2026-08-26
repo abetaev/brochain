@@ -8,43 +8,7 @@ const applicationDirectory = "brochain";
 const sessionsDirectory = "sessions";
 const reservedQuotaRatio = 0.1;
 
-export function createFileRoot(): FileRoot {
-  let initialization: Promise<FileRoot> | undefined;
-  const creations = new Set<Promise<FileWriter>>();
-  let shutdown: Promise<void> | undefined;
-
-  async function access(): Promise<FileRoot> {
-    const attempt = initialization ??= initializeFileRoot();
-    try {
-      return await attempt;
-    } catch (reason) {
-      if (initialization === attempt) initialization = undefined;
-      throw reason;
-    }
-  }
-
-  return {
-    async create(size) {
-      validateSize(size);
-      const creation = (async () => await (await access()).create(size))();
-      creations.add(creation);
-      void creation.finally(() => creations.delete(creation)).catch(() => {});
-      return await creation;
-    },
-    async close() {
-      if (shutdown === undefined) {
-        shutdown = (async () => {
-          await Promise.allSettled([...creations]);
-          const files = await initialization?.catch(() => undefined);
-          await files?.close();
-        })();
-      }
-      await shutdown;
-    },
-  };
-}
-
-async function initializeFileRoot(): Promise<FileRoot> {
+export async function createFileRoot(): Promise<FileRoot> {
   if (
     typeof navigator === "undefined" ||
     navigator.storage?.getDirectory === undefined ||
@@ -76,6 +40,7 @@ async function initializeFileRoot(): Promise<FileRoot> {
   try {
     await removeAbandonedSessions(sessions, sessionId);
     const directory = await sessions.getDirectoryHandle(sessionId, { create: true });
+    const creations = new Set<Promise<FileWriter>>();
     const writers = new Set<(reason: Error) => Promise<void>>();
     let reserved = 0;
     let shutdown: Promise<void> | undefined;
@@ -162,11 +127,18 @@ async function initializeFileRoot(): Promise<FileRoot> {
     }
 
     return {
-      create: createWriter,
+      async create(size) {
+        validateSize(size);
+        const creation = createWriter(size);
+        creations.add(creation);
+        void creation.finally(() => creations.delete(creation)).catch(() => {});
+        return await creation;
+      },
       async close() {
         if (shutdown === undefined) {
           shutdown = (async () => {
             try {
+              await Promise.allSettled([...creations]);
               const reason = new Error("This Storage file system was closed.");
               await Promise.allSettled([...writers].map(async (abort) => await abort(reason)));
               await sessions.removeEntry(sessionId, { recursive: true }).catch((error) => {

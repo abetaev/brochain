@@ -193,44 +193,27 @@ describe("Options", () => {
     expect(second).toHaveBeenCalledTimes(2);
   });
 
-  it("serializes mutations, suppresses no-ops, and recovers its queue", async () => {
+  it("suppresses no-ops and permits later mutations after failure", async () => {
     const storage = createPersistentStorage();
     const options = await testOptions(storage);
     const current = options.cat("settings").obj("current");
-    const persistence = deferred();
-    storage.store.put.mockImplementationOnce(async (key, value) => {
-      await persistence.promise;
-      storage.values.set(key, value);
-    });
     const listener = vi.fn();
     current.observe("count", listener);
 
-    const first = current.set("count", 1);
-    const second = current.set("count", 2);
-    await Promise.resolve();
-    expect(storage.store.put).toHaveBeenCalledTimes(1);
-
-    persistence.resolve();
-    await Promise.all([first, second]);
-    expect(storage.store.put.mock.calls).toEqual([
-      ["settings/current.count", 1],
-      ["settings/current.count", 2],
-    ]);
-    expect(listener.mock.calls).toEqual([[1], [2]]);
-
-    await current.set("count", 2);
+    await current.set("count", 1);
+    await current.set("count", 1);
     await current.unset("text");
-    expect(storage.store.put).toHaveBeenCalledTimes(2);
+    expect(storage.store.put).toHaveBeenCalledOnce();
     expect(storage.store.delete).not.toHaveBeenCalled();
 
     const failure = new Error("Persistence failed.");
     storage.store.put.mockRejectedValueOnce(failure);
-    const failed = current.set("count", 3);
-    const recovered = current.set("count", 4);
-    await expect(failed).rejects.toBe(failure);
-    await expect(recovered).resolves.toBeUndefined();
-    expect(current.get("count")).toBe(4);
-    expect(listener).not.toHaveBeenCalledWith(3);
+    await expect(current.set("count", 2)).rejects.toBe(failure);
+    expect(current.get("count")).toBe(1);
+
+    await expect(current.set("count", 3)).resolves.toBeUndefined();
+    expect(current.get("count")).toBe(3);
+    expect(listener.mock.calls).toEqual([[1], [3]]);
   });
 
   it("isolates subscriber failures from persistence and later observers", async () => {

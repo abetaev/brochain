@@ -17,7 +17,6 @@ function createAccount(): Account {
   const access = wrap<SessionAccess>(channel.port1);
   const ready = backend.openSession(transfer(channel.port2, [channel.port2]));
   let active: Session | undefined;
-  let authentication = Promise.resolve();
 
   async function authenticate(operation: () => Promise<unknown>): Promise<Session> {
     await active?.close();
@@ -39,18 +38,10 @@ function createAccount(): Account {
     }
   }
 
-  function queueAuthentication(operation: () => Promise<unknown>): Promise<Session> {
-    const result = authentication.then(async () => await authenticate(operation));
-    authentication = result.then(() => undefined, () => undefined);
-    return result;
-  }
-
   return {
     list: () => backend.list(),
-    create: (username, password) =>
-      queueAuthentication(() => backend.create(username, password)),
-    unlock: (username, password) =>
-      queueAuthentication(() => backend.unlock(username, password)),
+    create: (username, password) => authenticate(() => backend.create(username, password)),
+    unlock: (username, password) => authenticate(() => backend.unlock(username, password)),
     delete: (username, password) => backend.delete(username, password),
     export: (username) => backend.export(username),
   };

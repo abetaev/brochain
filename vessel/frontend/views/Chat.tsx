@@ -1,4 +1,4 @@
-import { For, Show, createResource, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
 import type { Chat as ChatService, ChatFile, ChatItem } from "@v/frontend/services/chat";
 import type { Roster } from "@v/frontend/services/roster";
@@ -9,40 +9,38 @@ export function Chat(props: {
   peerId: string;
   onBack(): void;
 }) {
-  const [name, setName] = createSignal(props.peerId);
-  const [items, setItems] = createSignal<readonly ChatItem[]>([]);
-  const [error, setError] = createSignal<string>();
-  const [peer, setPeer] = createSignal<Peer>();
-  const [filesAvailable, setFilesAvailable] = createSignal(false);
-  const receivedIds = new Set<string>();
-  let active = true;
+  const [items, setItems] = createSignal(props.chat.history(props.peerId));
+  const [actionError, setActionError] = createSignal<string>();
+  const [entry, { refetch }] = createResource(async () =>
+    await props.roster.get(props.peerId)
+  );
+  const connectedPeer = (): Peer | undefined => {
+    const peer = entry()?.peer;
+    return peer?.isConnected() === true ? peer : undefined;
+  };
+  const [capabilities] = createResource(
+    connectedPeer,
+    async (peer) => await props.chat.capabilities(peer),
+  );
+  const name = () => entry()?.name ?? props.peerId;
+
+  props.chat.markRead(props.peerId);
 
   const stopEvents = props.chat.updates.subscribe((item) => {
-    const currentPeer = peer();
-    if (currentPeer === undefined || item.peerId !== currentPeer.id) return;
+    if (item.peerId !== props.peerId) return;
+    const received = item.direction === "received" &&
+      items().every((current) => current.id !== item.id);
     setItems((current) => replaceItem(current, item));
-    if (item.direction === "received" && !receivedIds.has(item.id)) {
-      receivedIds.add(item.id);
-      props.chat.markRead(currentPeer.id);
-    }
+    if (received) props.chat.markRead(item.peerId);
   });
-
-  async function refreshName(): Promise<void> {
-    try {
-      const entry = await props.roster.get(props.peerId);
-      if (active && entry !== undefined) setName(entry.name);
-    } catch {
-      // The last resolved name remains available when refresh fails.
-    }
-  }
-  const stopRoster = props.roster.invalidations.subscribe(() => void refreshName());
+  const stopRoster = props.roster.invalidations.subscribe(() => void refetch());
 
   function attemptSend(operation: () => void): void {
-    setError(undefined);
+    setActionError(undefined);
     try {
       operation();
     } catch (reason) {
-      setError(errorMessage(reason));
+      setActionError(errorMessage(reason));
     }
   }
 
@@ -52,8 +50,10 @@ export function Chat(props: {
     event.preventDefault();
     const form = event.currentTarget;
     attemptSend(() => {
-      const current = peer();
-      if (current === undefined) throw new Error("Chat is not ready.");
+      const current = connectedPeer();
+      if (current === undefined || capabilities()?.text !== true) {
+        throw new Error("Messaging is not available.");
+      }
       props.chat.sendText(
         current,
         String(new FormData(form).get("message") ?? ""),
@@ -66,8 +66,8 @@ export function Chat(props: {
     const file = event.currentTarget.files?.[0];
     if (file === undefined) return;
     attemptSend(() => {
-      const current = peer();
-      if (current === undefined || !filesAvailable()) {
+      const current = connectedPeer();
+      if (current === undefined || capabilities()?.files !== true) {
         throw new Error("Data transfer is not available.");
       }
       props.chat.sendFile(current, file);
@@ -75,38 +75,21 @@ export function Chat(props: {
     });
   }
 
-  async function initialize(): Promise<void> {
-    try {
-      const entry = await props.roster.get(props.peerId);
-      if (entry === undefined) throw new Error("This peer is no longer available.");
-      if (!active) return;
-      setName(entry.name);
-
-      const peer = entry.peer;
-      if (peer === undefined) throw new Error("This peer is not currently available.");
-      if (!peer.isConnected()) throw new Error("This peer is not connected.");
-
-      const capabilities = await props.chat.capabilities(peer);
-      if (!capabilities.text) {
-        throw new Error("This peer does not provide messaging.");
-      }
-      if (!active) return;
-
-      const history = props.chat.history(peer.id);
-      history.filter((item) => item.direction === "received")
-        .forEach((item) => receivedIds.add(item.id));
-      setItems(history);
-      props.chat.markRead(peer.id);
-      setPeer(peer);
-      setFilesAvailable(capabilities.files);
-    } catch (reason) {
-      if (active) setError(errorMessage(reason));
+  function availabilityError(): string | undefined {
+    if (entry.error !== undefined) return errorMessage(entry.error);
+    if (entry.loading) return undefined;
+    const current = entry();
+    if (current === undefined) return "This peer is no longer available.";
+    if (current.peer === undefined) return "This peer is not currently available.";
+    if (!current.peer.isConnected()) return "This peer is not connected.";
+    if (capabilities.error !== undefined) return errorMessage(capabilities.error);
+    if (!capabilities.loading && capabilities()?.text === false) {
+      return "This peer does not provide messaging.";
     }
+    return undefined;
   }
 
-  onMount(() => void initialize());
   onCleanup(() => {
-    active = false;
     stopEvents();
     stopRoster();
   });
@@ -117,7 +100,9 @@ export function Chat(props: {
         <button class="secondary" type="button" onClick={props.onBack}>Back to Home</button>
         <h2 id="chat-heading">Chat with {name()}</h2>
       </header>
-      <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
+      <Show when={actionError() ?? availabilityError()}>
+        {(message) => <p role="alert">{message()}</p>}
+      </Show>
       <For each={items()}>
         {(item) => (
           <article>
@@ -140,17 +125,22 @@ export function Chat(props: {
             id="message"
             name="message"
             required
-            disabled={peer() === undefined}
+            disabled={connectedPeer() === undefined || capabilities()?.text !== true}
           />
         </label>
-        <button type="submit" disabled={peer() === undefined}>Send message</button>
+        <button
+          type="submit"
+          disabled={connectedPeer() === undefined || capabilities()?.text !== true}
+        >
+          Send message
+        </button>
       </form>
       <label for="file">
         Send a file
         <input
           id="file"
           type="file"
-          disabled={peer() === undefined || !filesAvailable()}
+          disabled={connectedPeer() === undefined || capabilities()?.files !== true}
           onChange={sendFile}
         />
       </label>

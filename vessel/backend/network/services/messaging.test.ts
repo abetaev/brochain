@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { Network, Peer, Services } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
 import { createSignals } from "@v/backend/signals";
-import { createStorage as createStorageRoot } from "@v/backend/storage";
 import {
   createMessaging,
   messagingServiceName,
@@ -12,10 +11,6 @@ import {
 
 interface MessagingRpc {
   send(message: TextMessage): void;
-}
-
-function createStorage() {
-  return createStorageRoot("test-account");
 }
 
 function testPeer(
@@ -46,7 +41,7 @@ function testContext() {
     username: "alice",
     network: vi.fn(async () => network),
     signals: () => signals,
-    storage: () => createStorage(),
+    storage: vi.fn(),
     bootstrapError: () => undefined,
     close: vi.fn(),
   } as unknown as Session;

@@ -81,19 +81,15 @@ afterEach(() => {
 });
 
 describe("Vessel Network construction", () => {
-  it("initializes one configured Common Network and exposes its ID without bootstrap", async () => {
-    const component = createNetwork("alice", "AA==");
-    expect(dependencies.createCommonNetwork).not.toHaveBeenCalled();
-
-    await expect(Promise.all([component.id(), component.id()]))
-      .resolves.toEqual(["local", "local"]);
+  it("eagerly initializes one configured Common Network and exposes its ID", async () => {
+    const component = await createNetwork("alice", "AA==");
 
     expect(dependencies.generateKeyPairFromSeed).toHaveBeenCalledWith(
       "Ed25519",
       new Uint8Array([0]),
     );
     expect(dependencies.createCommonNetwork).toHaveBeenCalledOnce();
-    expect(network.createPeer).not.toHaveBeenCalled();
+    expect(component.id).toBe("local");
     const [configuration, services] = dependencies.createCommonNetwork.mock.calls[0] as [
       Record<string, unknown>,
       Services,
@@ -111,26 +107,19 @@ describe("Vessel Network construction", () => {
     await component.close();
   });
 
-  it("reports initialization failure and retries it", async () => {
+  it("rejects construction when Common Network initialization fails", async () => {
     const failure = new Error("Network initialization failed.");
-    dependencies.createCommonNetwork
-      .mockRejectedValueOnce(failure)
-      .mockResolvedValueOnce(network);
-    const component = createNetwork("alice", "AA==");
+    dependencies.createCommonNetwork.mockRejectedValueOnce(failure);
 
-    await expect(component.id()).rejects.toBe(failure);
-    await expect(component.id()).resolves.toBe("local");
+    await expect(createNetwork("alice", "AA==")).rejects.toBe(failure);
 
-    expect(dependencies.createCommonNetwork).toHaveBeenCalledTimes(2);
-    await component.close();
+    expect(dependencies.createCommonNetwork).toHaveBeenCalledOnce();
   });
 });
 
 describe("Vessel Network bootstrap", () => {
-  it("connects the inferred default Beacon only on full access", async () => {
-    const component = createNetwork("alice", "AA==");
-
-    await expect(component.access()).resolves.toBe(network);
+  it("connects the inferred default Beacon during construction", async () => {
+    const component = await createNetwork("alice", "AA==");
 
     expect(network.createPeer).toHaveBeenCalledWith("/dns4/localhost/tcp/9090/ws");
     expect(createdBeacon.connect).toHaveBeenCalledOnce();
@@ -143,9 +132,7 @@ describe("Vessel Network bootstrap", () => {
     vi.stubGlobal("window", {
       location: { hostname: "vessel.example", protocol: "https:" },
     });
-    const component = createNetwork("alice", "AA==");
-
-    await component.access();
+    const component = await createNetwork("alice", "AA==");
 
     expect(network.createPeer).toHaveBeenCalledWith(
       "/dns4/vessel.example/tcp/9090/tls/ws",
@@ -157,9 +144,8 @@ describe("Vessel Network bootstrap", () => {
     network.createPeer
       .mockRejectedValueOnce(new Error("Beacon unavailable."))
       .mockResolvedValueOnce(createdBeacon);
-    const component = createNetwork("alice", "AA==");
+    const component = await createNetwork("alice", "AA==");
 
-    await expect(component.access()).resolves.toBe(network);
     expect(component.bootstrapError()).toBe("Beacon unavailable.");
     expect(createdBeacon.connect).not.toHaveBeenCalled();
 
@@ -171,14 +157,13 @@ describe("Vessel Network bootstrap", () => {
 
   it("waits for address invalidation and releases the listener after WebRTC is ready", async () => {
     advertised = [];
-    const component = createNetwork("alice", "AA==");
-    const access = component.access();
+    const construction = createNetwork("alice", "AA==");
     await vi.waitFor(() => expect(network.subscribeAddresses).toHaveBeenCalledOnce());
 
     advertised = ["/p2p-circuit/webrtc"];
     for (const listener of addressListeners) listener();
 
-    await expect(access).resolves.toBe(network);
+    const component = await construction;
     expect(unsubscribeAddress).toHaveBeenCalledOnce();
     expect(component.bootstrapError()).toBeUndefined();
     await component.close();
@@ -189,13 +174,12 @@ describe("Vessel Network bootstrap", () => {
     const timeout = new AbortController();
     vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeout.signal);
     vi.spyOn(AbortSignal, "any").mockReturnValue(timeout.signal);
-    const component = createNetwork("alice", "AA==");
-    const access = component.access();
+    const construction = createNetwork("alice", "AA==");
     await vi.waitFor(() => expect(network.subscribeAddresses).toHaveBeenCalledOnce());
 
     timeout.abort();
 
-    await expect(access).resolves.toBe(network);
+    const component = await construction;
     expect(component.bootstrapError()).toBe(
       "The Beacon did not provide a relay reservation.",
     );
@@ -204,7 +188,7 @@ describe("Vessel Network bootstrap", () => {
   });
 
   it("retains a connected Beacon and retries after it disconnects", async () => {
-    const component = createNetwork("alice", "AA==");
+    const component = await createNetwork("alice", "AA==");
 
     await component.access();
     await component.access();
@@ -220,30 +204,18 @@ describe("Vessel Network bootstrap", () => {
 });
 
 describe("Vessel Network shutdown", () => {
-  it("waits for pending initialization and closes the resulting Common Network once", async () => {
-    let finishInitialization: ((value: CommonNetwork) => void) | undefined;
-    dependencies.createCommonNetwork.mockImplementationOnce(async () =>
-      await new Promise<CommonNetwork>((resolve) => {
-        finishInitialization = resolve;
-      })
-    );
-    const component = createNetwork("alice", "AA==");
-    const id = component.id();
-    await vi.waitFor(() => expect(finishInitialization).toBeDefined());
+  it("closes the Common Network once", async () => {
+    const component = await createNetwork("alice", "AA==");
 
-    const firstClose = component.close();
-    const secondClose = component.close();
-    finishInitialization?.(network);
-
-    await expect(id).resolves.toBe("local");
-    await expect(Promise.all([firstClose, secondClose])).resolves.toEqual([undefined, undefined]);
+    await expect(Promise.all([component.close(), component.close()]))
+      .resolves.toEqual([undefined, undefined]);
     expect(network.close).toHaveBeenCalledOnce();
-    expect(network.createPeer).not.toHaveBeenCalled();
   });
 
   it("cancels pending relay readiness without retaining a bootstrap error", async () => {
+    const component = await createNetwork("alice", "AA==");
     advertised = [];
-    const component = createNetwork("alice", "AA==");
+    beacon.isConnected.mockReturnValue(false);
     const access = component.access();
     await vi.waitFor(() => expect(network.subscribeAddresses).toHaveBeenCalledOnce());
 
