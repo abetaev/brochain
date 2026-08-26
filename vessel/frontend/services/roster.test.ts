@@ -1,9 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Network, Peer } from "@c/backend/network";
-import { createOptions, type OptionValue, type Options } from "@v/backend/options";
 import type { Session } from "@v/backend/session";
-import { createSignals, type Signals } from "@v/backend/signals";
+import { createSignals } from "@v/backend/signals";
 import {
   createStorage,
   type PersistentKeyValueStorage,
@@ -83,40 +82,12 @@ function persistentValues(
   };
 }
 
-function testOptions(
-  signals: Signals,
-  initial: readonly (readonly [string, OptionValue])[] = [],
-) {
-  const values = new Map(initial);
-  const changes = signals.channel<{
-    readonly key: string;
-    readonly value: OptionValue | undefined;
-  }>({}, "options");
-  const set = vi.fn(async (key: string, value: OptionValue) => {
-    values.set(key, value);
-    changes.publish({ key, value });
-  });
-  const unset = vi.fn(async (key: string) => {
-    values.delete(key);
-    changes.publish({ key, value: undefined });
-  });
-  const options: Options = {
-    changes,
-    get: (key) => values.get(key),
-    set,
-    unset,
-  };
-  return { options, values, set, unset };
-}
-
 function testContext(
   connected: () => readonly Peer[],
   initialIdentities: readonly (readonly [string, unknown])[] = [],
-  initialOptions: readonly (readonly [string, OptionValue])[] = [],
 ) {
   const created: Peer[] = [];
   const signals = createSignals();
-  const optionState = testOptions(signals, initialOptions);
   const identities = persistentValues(initialIdentities);
   const topologyListeners = new Set<
     (peer: Peer, event: "connected" | "disconnected") => void
@@ -149,7 +120,6 @@ function testContext(
   });
   const session = {
     network: vi.fn(async () => network),
-    options: vi.fn(async () => optionState.options),
     signals: () => signals,
     storage,
   } as unknown as Session;
@@ -159,7 +129,6 @@ function testContext(
     session,
     created,
     identities,
-    options: optionState,
     storage,
     peerStorage,
     service,
@@ -191,7 +160,6 @@ describe("persistent unified Roster", () => {
     const context = testContext(
       () => [first, beacon],
       [["peers/cached.identity", { name: "cy" }]],
-      [[`peers/${firstId}.display_name`, "friend"]],
     );
 
     const roster = await createRoster(context.session);
@@ -209,7 +177,7 @@ describe("persistent unified Roster", () => {
       peer: first,
       online: true,
       identity: { name: "ada" },
-      name: "friend",
+      name: "ada",
     });
     expect(entries[2]).toMatchObject({
       peerId: secondId,
@@ -259,7 +227,6 @@ describe("persistent unified Roster", () => {
       identity: { name: "bea" },
       name: "bea",
     }]);
-    expect(context.options.values.get("peers/good.display_name")).toBe("bea");
   });
 
   it("rejects construction when invalid-record cleanup fails", async () => {
@@ -270,7 +237,7 @@ describe("persistent unified Roster", () => {
     await expect(createRoster(context.session)).rejects.toBe(failure);
   });
 
-  it("persists Identity before initializing a name and never overwrites that name", async () => {
+  it("persists Identity and publishes each changed name", async () => {
     let remoteName = "ada";
     const remote = provider(
       firstId,
@@ -294,40 +261,16 @@ describe("persistent unified Roster", () => {
       `peers/${firstId}.identity`,
       { name: "ada" },
     );
-    expect(context.identities.put.mock.invocationCallOrder[0])
-      .toBeLessThan(context.options.set.mock.invocationCallOrder[0]!);
-    expect(context.options.set).toHaveBeenCalledWith(
-      `peers/${firstId}.display_name`,
-      "ada",
-    );
-    expect(invalidated).not.toHaveBeenCalled();
-
-    await context.options.options.set(`peers/${firstId}.display_name`, "friend");
     expect(invalidated).toHaveBeenCalledOnce();
     remoteName = "bea";
     const [entry] = await roster.list();
 
     expect(entry?.identity).toEqual({ name: "bea" });
-    expect(entry?.name).toBe("friend");
-    expect(context.options.values.get(`peers/${firstId}.display_name`)).toBe("friend");
-  });
+    expect(entry?.name).toBe("bea");
+    expect(invalidated).toHaveBeenCalledTimes(2);
 
-  it("ignores a non-string display Option without overwriting it", async () => {
-    const remote = provider(
-      firstId,
-      async () => ["registry", "identity"],
-      undefined,
-      async () => ({ name: "ada" }),
-    );
-    const key = `peers/${firstId}.display_name`;
-    const context = testContext(() => [remote], [], [[key, null]]);
-    const roster = await createRoster(context.session);
-
-    const [entry] = await roster.list();
-
-    expect(entry?.name).toBe("ada");
-    expect(context.options.values.get(key)).toBeNull();
-    expect(context.options.set).not.toHaveBeenCalled();
+    await roster.list();
+    expect(invalidated).toHaveBeenCalledTimes(2);
   });
 
   it("retains a cached Identity after remote failure or invalid data", async () => {
@@ -346,7 +289,6 @@ describe("persistent unified Roster", () => {
     const context = testContext(
       () => [remote],
       [[key, { name: "ada" }]],
-      [[`peers/${firstId}.display_name`, "ada"]],
     );
     const roster = await createRoster(context.session);
 
@@ -368,7 +310,6 @@ describe("persistent unified Roster", () => {
     const context = testContext(
       () => [remote],
       [[key, { name: "ada" }]],
-      [[`peers/${firstId}.display_name`, "ada"]],
     );
     const failure = new Error("Persistence failed.");
     context.identities.put.mockRejectedValueOnce(failure);
@@ -379,31 +320,6 @@ describe("persistent unified Roster", () => {
 
     value = { name: "Not valid" };
     expect((await roster.list())[0]?.identity).toEqual({ name: "ada" });
-  });
-
-  it("keeps a persisted Identity when first-name initialization fails and retries it", async () => {
-    const remote = provider(
-      firstId,
-      async () => ["registry", "identity"],
-      undefined,
-      async () => ({ name: "ada" }),
-    );
-    const context = testContext(() => [remote]);
-    const failure = new Error("Option persistence failed.");
-    context.options.set.mockRejectedValueOnce(failure);
-    const roster = await createRoster(context.session);
-    const identityKey = `peers/${firstId}.identity`;
-    const displayKey = `peers/${firstId}.display_name`;
-
-    await expect(roster.list()).rejects.toBe(failure);
-    expect(context.identities.values.get(identityKey)).toEqual({ name: "ada" });
-    expect(context.options.values.has(displayKey)).toBe(false);
-
-    const [entry] = await roster.list();
-    expect(entry?.identity).toEqual({ name: "ada" });
-    expect(entry?.name).toBe("ada");
-    expect(context.identities.put).toHaveBeenCalledOnce();
-    expect(context.options.values.get(displayKey)).toBe("ada");
   });
 });
 
@@ -488,8 +404,17 @@ describe("Roster discovery and invalidation", () => {
     expect(sourceDiscovery).toHaveBeenCalledOnce();
   });
 
-  it("bridges topology and external display-name changes without replay", async () => {
-    const context = testContext(() => []);
+  it("bridges topology and Identity name changes without replay", async () => {
+    const remote = provider(
+      firstId,
+      async () => ["registry", "identity"],
+      undefined,
+      async () => ({ name: "bea" }),
+    );
+    const context = testContext(
+      () => [remote],
+      [[`peers/${firstId}.identity`, { name: "ada" }]],
+    );
     const roster = await createRoster(context.session);
     const listener = vi.fn();
     const changedPeer = disconnectedPeer(firstId);
@@ -499,9 +424,7 @@ describe("Roster discovery and invalidation", () => {
     expect(listener).not.toHaveBeenCalled();
 
     context.topologyChanged(changedPeer, "connected");
-    await context.options.options.set(`peers/${firstId}.display_name`, "friend");
-    await context.options.options.set("unrelated", true);
-    await context.options.options.set(`peers/${localId}.display_name`, "local");
+    await roster.list();
     expect(listener).toHaveBeenCalledTimes(2);
 
     stop();
@@ -554,15 +477,10 @@ function networkWith(connected: () => readonly Peer[]): Network {
 
 async function persistentSession(network: Network, storage: Storage): Promise<Session> {
   const signals = createSignals();
-  const options = await createOptions(
-    storage.persistent.peer(network.id).service("options"),
-    signals,
-  );
   const accessStorage = (selection?: { readonly persistent?: boolean }) =>
     selection?.persistent === true ? storage.persistent : storage;
   return {
     network: async () => network,
-    options: async () => options,
     signals: () => signals,
     storage: accessStorage,
   } as unknown as Session;

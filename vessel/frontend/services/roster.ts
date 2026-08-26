@@ -37,32 +37,15 @@ export interface Roster {
 const rosterServiceName = "roster";
 const identityPrefix = "peers/";
 const identitySuffix = ".identity";
-const displayNameSuffix = ".display_name";
 
 export async function createRoster(session: Session): Promise<Roster> {
-  const [network, options] = await Promise.all([
-    session.network(),
-    session.options(),
-  ]);
+  const network = await session.network();
   const persisted = session.storage({ persistent: true })
     .peer(network.id)
     .service(rosterServiceName)
     .kv<unknown>();
   const identities = new Map<string, Identity>();
-  const initializingNames = new Set<string>();
   const invalidations = session.signals().channel<void>({}, "invalidations");
-
-  async function initializeName(peerId: string, identity: Identity): Promise<void> {
-    const key = displayNameKey(peerId);
-    if (options.get(key) !== undefined) return;
-
-    initializingNames.add(key);
-    try {
-      await options.set(key, identity.name);
-    } finally {
-      initializingNames.delete(key);
-    }
-  }
 
   for (const [key, value] of await persisted.entries()) {
     const peerId = identityPeerId(key);
@@ -82,21 +65,7 @@ export async function createRoster(session: Session): Promise<Roster> {
     identities.set(peerId, identity);
   }
 
-  for (const [peerId, identity] of identities) {
-    await initializeName(peerId, identity);
-  }
-
   network.subscribe(() => invalidations.publish(undefined));
-  options.changes.subscribe(({ key }) => {
-    const peerId = displayNamePeerId(key);
-    if (
-      peerId !== undefined &&
-      peerId !== network.id &&
-      !initializingNames.has(key)
-    ) {
-      invalidations.publish(undefined);
-    }
-  });
 
   async function services(peer: Peer): Promise<readonly string[] | undefined> {
     try {
@@ -127,8 +96,8 @@ export async function createRoster(session: Session): Promise<Roster> {
     if (previous?.name !== identity.name) {
       await persisted.put(identityKey(peer.id), identity);
       identities.set(peer.id, identity);
+      invalidations.publish(undefined);
     }
-    await initializeName(peer.id, identity);
   }
 
   async function discover(
@@ -157,15 +126,12 @@ export async function createRoster(session: Session): Promise<Roster> {
 
   function entry(peerId: string, peer?: Peer): RosterEntry {
     const identity = identities.get(peerId);
-    const displayName = options.get(displayNameKey(peerId));
     return Object.freeze({
       peerId,
       ...(peer === undefined ? {} : { peer }),
       online: peer?.isConnected() ?? false,
       ...(identity === undefined ? {} : { identity }),
-      name: typeof displayName === "string"
-        ? displayName
-        : identity?.name ?? peerId,
+      name: identity?.name ?? peerId,
     });
   }
 
@@ -240,16 +206,8 @@ function identityKey(peerId: string): string {
   return `${identityPrefix}${peerId}${identitySuffix}`;
 }
 
-function displayNameKey(peerId: string): string {
-  return `${identityPrefix}${peerId}${displayNameSuffix}`;
-}
-
 function identityPeerId(key: string): string | undefined {
   return peerProperty(key, identitySuffix);
-}
-
-function displayNamePeerId(key: string): string | undefined {
-  return peerProperty(key, displayNameSuffix);
 }
 
 function peerProperty(key: string, suffix: string): string | undefined {

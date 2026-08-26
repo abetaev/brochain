@@ -27,15 +27,7 @@ beforeEach(() => {
     bootstrapError: vi.fn(),
     close: vi.fn(async () => {}),
   };
-  options = {
-    changes: {
-      publish: vi.fn(),
-      subscribe: vi.fn(() => vi.fn()),
-    },
-    get: vi.fn(),
-    set: vi.fn(async () => {}),
-    unset: vi.fn(async () => {}),
-  };
+  options = { cat: vi.fn() } as unknown as Options;
   dependencies.createNetwork.mockReset().mockReturnValue(network);
   dependencies.createOptions.mockReset().mockResolvedValue(options);
 });

@@ -180,11 +180,11 @@ component-local reactivity remain outside Signals.
 
 - **dependencies**: its owning Session's persistent Storage and Signals; the
   private Vessel Network identity selects its peer scope
-- **behavior**: exposes synchronous scalar configuration reads and serialized
-  persistence-first `set` and `unset` mutations
-- **structure**: one lazily initialized in-memory projection backed by the
-  default key/value store of the local peer's `options` service, plus one typed
-  change channel
+- **behavior**: exposes schema-constrained hierarchical scalar reads,
+  persistence-first mutations, and property-specific observation
+- **structure**: component-contributed TypeScript schema fragments project one
+  lazily initialized in-memory map through lightweight category and object
+  scopes; one private change channel integrates observers
 
 `session.options()` shares concurrent initialization and retries after failure.
 It creates the private Network runtime to obtain the local peer ID without
@@ -192,11 +192,20 @@ starting Beacon bootstrap. Initialization loads the projection and removes
 persisted non-scalar values; failed cleanup rejects that attempt.
 
 Values may be strings, numbers, booleans, or `null`; `undefined` represents an
-absent option. Keys are accepted verbatim. Mutations run globally in invocation
-order, write persistent Storage before changing the projection, and publish only
-after both reflect the new value. Setting the current value and unsetting an
-absent key are no-ops. A subscriber therefore observes the updated projection
-synchronously, while persistence failure changes neither projection nor Signal.
+absent option. Components extend the compile-time schema without creating a
+runtime dependency from Options back to them. Callers traverse alternating
+`cat()` and `obj()` scopes, then use typed `get()`, `set()`, `unset()`, or
+`observe()` operations. Serialized keys remain private to Options. Dynamic
+object identifiers are percent-encoded, while category and property names are
+unambiguous path segments.
+
+The schema constrains project code but does not perform exact runtime scalar
+validation. Initialization still removes non-scalar persisted values. Mutations
+run globally in invocation order, write persistent Storage before changing the
+projection, and notify only after both reflect the new value. Setting the current
+value and unsetting an absent property are no-ops. Observation is synchronous,
+ordered, non-replaying, and scoped to one object's selected property; persistence
+failure changes neither projection nor Signal.
 
 ##### Storage
 
@@ -303,11 +312,11 @@ second initializer is still running.
 
 ##### Roster
 
-- **dependencies**: Session Network, persistent Storage, Options, and Signals;
-  remote Registry, Identity, and optional Discovery services
+- **dependencies**: Session Network, persistent Storage, and Signals; remote
+  Registry, Identity, and optional Discovery services
 - **behavior**: returns one collection of connected, discovered, and remembered
   peers; refreshes and retains valid remote Identity observations; resolves each
-  presentation name; and publishes invalidations for topology or external name
+  presentation name; and publishes invalidations for topology or Identity name
   changes
 - **structure**: one Session-bound service combines a fresh runtime discovery
   sweep with an in-memory Identity projection backed by the local peer's
@@ -321,16 +330,11 @@ failures and invalid results are isolated so healthy peers and the latest valid
 Identity observations remain available.
 
 Each valid Identity is retained as one object under
-`peers/${peerId}.identity`. Roster initializes an absent
-`peers/${peerId}.display_name` Option from the first observed name but never
-overwrites an existing option. Presentation names resolve from a string display
-name, cached Identity name, then peer ID. Identity persistence precedes its
-projection update; addresses, availability, discovery results, and hosted
-service catalogs remain transient.
-
-Roster bridges Common Network topology changes and external display-name Option
-changes to one non-retained Signals invalidation channel. It suppresses the
-Option notification produced by its own initial display-name write.
+`peers/${peerId}.identity`. Presentation names resolve from the cached Identity
+name, then peer ID. Identity persistence precedes its projection update and name
+invalidation; addresses, availability, discovery results, and hosted service
+catalogs remain transient. Roster bridges these name invalidations and Common
+Network topology changes through one non-retained Signals channel.
 
 ##### Chat
 
