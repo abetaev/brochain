@@ -1,5 +1,5 @@
 import type { ZxcvbnFactory } from "@zxcvbn-ts/core";
-import { For, Show, createResource, createSignal } from "solid-js";
+import { For, Show, createMemo, createResource, createSignal } from "solid-js";
 import account from "@v/backend/account";
 import type { Session } from "@v/backend/session";
 
@@ -9,18 +9,6 @@ type AccountScreen =
 type FormSubmitEvent = SubmitEvent & { currentTarget: HTMLFormElement };
 
 const passwordStrengthLabels = ["Very weak", "Weak", "Fair", "Strong", "Very strong"];
-let passwords: Promise<ZxcvbnFactory> | undefined;
-
-async function loadPasswords(): Promise<ZxcvbnFactory> {
-  const loading = passwords ??= initializePasswords();
-
-  try {
-    return await loading;
-  } catch (error) {
-    if (passwords === loading) passwords = undefined;
-    throw error;
-  }
-}
 
 async function initializePasswords(): Promise<ZxcvbnFactory> {
   const [{ ZxcvbnFactory }, common, english] = await Promise.all([
@@ -298,25 +286,19 @@ function errorMessage(reason: unknown): string {
 }
 
 function PasswordStrength(props: { password: string }) {
-  const [strength] = createResource(
-    () => props.password || undefined,
-    async (password) => {
-      const score = (await loadPasswords()).check(password).score;
-      return {
-        level: Math.max(1, score),
-        label: passwordStrengthLabels[score],
-      };
-    },
-  );
-  const current = () => {
+  const [passwords] = createResource(initializePasswords);
+  const current = createMemo(() => {
     if (props.password.length === 0) return { level: 0, label: "Enter a password" };
-    if (strength.loading) return { level: 0, label: "Checking…" };
-    if (strength.error !== undefined) return { level: 0, label: "Unavailable" };
+    if (passwords.loading) return { level: 0, label: "Checking…" };
+    if (passwords.error !== undefined) return { level: 0, label: "Unavailable" };
+    const checker = passwords();
+    if (checker === undefined) return { level: 0, label: "Unavailable" };
+    const score = checker.check(props.password).score;
     return {
-      level: strength()?.level ?? 0,
-      label: strength()?.label ?? "Unavailable",
+      level: Math.max(1, score),
+      label: passwordStrengthLabels[score] ?? "Unavailable",
     };
-  };
+  });
   const description = () => {
     if (current().label === "Checking…") return "Checking password strength…";
     if (current().label === "Unavailable") return "Password strength unavailable.";
@@ -330,7 +312,7 @@ function PasswordStrength(props: { password: string }) {
         data-level={current().level}
         role="meter"
         aria-label={description()}
-        aria-busy={strength.loading}
+        aria-busy={passwords.loading}
         aria-valuemin="0"
         aria-valuemax="4"
         aria-valuenow={current().level}

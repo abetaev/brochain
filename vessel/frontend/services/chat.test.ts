@@ -15,14 +15,10 @@ import type {
 import type { Session } from "@v/backend/session";
 import { createSignals, type Channel } from "@v/backend/signals";
 import {
-  createStorage as createStorageRoot,
   type FileWriter,
+  type Storage,
   type StoredFile,
 } from "@v/backend/storage";
-
-function createStorage() {
-  return createStorageRoot("test-account");
-}
 
 const dependencies = vi.hoisted(() => ({
   createMessaging: vi.fn(),
@@ -47,6 +43,39 @@ let dataTransfer: DataTransfer & { send: ReturnType<typeof vi.fn> };
 let writer: FileWriter;
 let createFile: ReturnType<typeof vi.fn>;
 let session: Session;
+
+function createStorage(createFile: ReturnType<typeof vi.fn>): Storage {
+  const events: unknown[] = [];
+  const values = new Map<string, unknown>();
+  let singleton: unknown;
+  const service = {
+    event: () => ({
+      append: (event: unknown) => events.push(event),
+      read: () => Object.freeze([...events]),
+    }),
+    singleton: () => ({
+      get: () => singleton,
+      put: (value: unknown) => {
+        singleton = value;
+      },
+      clear: () => {
+        singleton = undefined;
+      },
+    }),
+    kv: () => ({
+      get: (key: string) => values.get(key),
+      put: (key: string, value: unknown) => values.set(key, value),
+      delete: (key: string) => values.delete(key),
+      entries: () => Object.freeze([...values.entries()]),
+    }),
+    fs: () => ({ create: createFile }),
+  };
+  const peer = { service: () => service };
+  return {
+    peer: () => peer,
+    close: vi.fn(async () => {}),
+  } as unknown as Storage;
+}
 
 beforeEach(() => {
   const transportSignals = createSignals();
@@ -76,9 +105,8 @@ beforeEach(() => {
     abort: vi.fn(async () => {}),
   };
   const signals = createSignals();
-  const storage = createStorage();
-  createFile = vi.spyOn(storage.peer("remote").service("chat").fs(), "create")
-    .mockResolvedValue(writer);
+  createFile = vi.fn(async () => writer);
+  const storage = createStorage(createFile);
   session = {
     username: "alice",
     network: vi.fn(),

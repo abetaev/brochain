@@ -14,7 +14,10 @@ import {
   type AccountService,
   type SessionAccess,
 } from "./service.ts";
-import { createStorage } from "@v/backend/storage";
+import {
+  createPersistentRoot,
+  type PersistentRoot,
+} from "@v/backend/storage/persistent";
 
 function endpoint(port: MessagePort): Endpoint {
   return port as unknown as Endpoint;
@@ -144,13 +147,13 @@ describe("account operations and access", () => {
     const databaseName = `brochain-deletion-${crypto.randomUUID()}`;
     const accounts = await openAccountService(databaseName);
     const password = "partition password";
-    let staleStorage: ReturnType<typeof createStorage> | undefined;
-    let replacementStorage: ReturnType<typeof createStorage> | undefined;
+    let staleStorage: PersistentRoot | undefined;
+    let replacementStorage: PersistentRoot | undefined;
 
     try {
       await accounts.operations.create("ada", password);
-      staleStorage = createStorage("ada", databaseName);
-      const staleValues = staleStorage.persistent
+      staleStorage = await createPersistentRoot(`${databaseName}/ada`);
+      const staleValues = staleStorage
         .peer("local")
         .service("options")
         .kv<string>();
@@ -164,9 +167,9 @@ describe("account operations and access", () => {
       await expect(accounts.operations.list()).resolves.toEqual([]);
 
       await accounts.operations.create("ada", password);
-      replacementStorage = createStorage("ada", databaseName);
+      replacementStorage = await createPersistentRoot(`${databaseName}/ada`);
       await expect(
-        replacementStorage.persistent.peer("local").service("options")
+        replacementStorage.peer("local").service("options")
           .kv<string>().get("theme"),
       ).resolves.toBeUndefined();
     } finally {
@@ -179,9 +182,9 @@ describe("account operations and access", () => {
   it("retains the account when its database cannot be deleted", async () => {
     const databaseName = `brochain-deletion-failure-${crypto.randomUUID()}`;
     const accounts = await openAccountService(databaseName);
-    const storage = createStorage("cy", databaseName);
+    const storage = await createPersistentRoot(`${databaseName}/cy`);
     await accounts.operations.create("cy", "a password");
-    const values = storage.persistent.peer("local").service("options").kv<string>();
+    const values = storage.peer("local").service("options").kv<string>();
     await values.put("theme", "dark");
     const deletion = vi.spyOn(indexedDB, "deleteDatabase")
       .mockImplementationOnce(() => {

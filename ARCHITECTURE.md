@@ -137,9 +137,9 @@ Vessel
   of local accounts; creation and unlocking produce an authenticated Session;
   deletion removes the account's persistent Storage database before its account
   record
-- **structure**: a Window facade serializes authentication and projects the
-  account service running in a Worker; decrypted identity material remains
-  behind the private Session boundary
+- **structure**: a Window facade calls the account service running in a Worker
+  and projects successful authentication into a Session; decrypted identity
+  material remains behind the private Session boundary
 - **technology**: Comlink Worker RPC, IndexedDB, PBKDF2, and AES-GCM
 
 The `brochain` IndexedDB database stores only versioned encrypted account
@@ -147,19 +147,24 @@ records. Password handling, decryption, derived keys, and the peer identity seed
 remain in the Worker; the public Account API exposes no identity material.
 After password validation, deletion removes `brochain/<username>` and removes
 the account record only when that succeeds.
+Window authentication calls execute directly and have no concurrent ordering
+contract. The Account view prevents concurrent submission while one is active.
 
 #### Session
 
 - **dependencies**: one unlocked Account identity
 - **behavior**: provides stable account-bound Signals, Options, volatile and
   persistent Storage roots, and Network, and owns their common shutdown
-- **structure**: one Session composes one instance of each core component and
-  closes Network, Storage, and Account access together
+- **structure**: one Session eagerly composes one instance of each core
+  component and closes Network, Storage, and Account access together
 - **runtime**: browser Window
 
-Session shutdown closes networking, removes Session files, and closes Account
-access. Consumers discard the Session and its components when shutdown begins;
-component access after that boundary is unsupported.
+Session construction opens Storage, constructs Network through its first Beacon
+attempt, and loads Options before returning. A failed construction closes every
+dependency already created. Session shutdown closes networking, removes Session
+files, and closes Account access. Consumers discard the Session and its
+components when shutdown begins; component access after that boundary is
+unsupported.
 
 ##### Signals
 
@@ -183,13 +188,13 @@ component-local reactivity remain outside Signals.
 - **behavior**: exposes schema-constrained hierarchical scalar reads,
   persistence-first mutations, and property-specific observation
 - **structure**: component-contributed TypeScript schema fragments project one
-  lazily initialized in-memory map through lightweight category and object
-  scopes; one private change channel integrates observers
+  initialized in-memory map through lightweight category and object scopes; one
+  private change channel integrates observers
 
-`session.options()` shares concurrent initialization and retries after failure.
-It creates the private Network runtime to obtain the local peer ID without
-starting Beacon bootstrap. Initialization loads the projection and removes
-persisted non-scalar values; failed cleanup rejects that attempt.
+Session construction creates Options in the local Network peer scope.
+`session.options()` returns that initialized component synchronously.
+Construction loads the projection and removes persisted non-scalar values;
+failed cleanup rejects Session construction.
 
 Values may be strings, numbers, booleans, or `null`; `undefined` represents an
 absent option. Components extend the compile-time schema without creating a
@@ -200,17 +205,18 @@ object identifiers are percent-encoded, while category and property names are
 unambiguous path segments.
 
 The schema constrains project code but does not perform exact runtime scalar
-validation. Initialization still removes non-scalar persisted values. Mutations
-run globally in invocation order, write persistent Storage before changing the
-projection, and notify only after both reflect the new value. Setting the current
-value and unsetting an absent property are no-ops. Observation is synchronous,
-ordered, non-replaying, and scoped to one object's selected property; persistence
-failure changes neither projection nor Signal.
+validation. Construction still removes non-scalar persisted values. Each
+mutation writes persistent Storage directly before changing the projection and
+notifies only after both reflect the new value. Concurrent mutations have no
+ordering contract; callers requiring order await them sequentially. Setting the
+current value and unsetting an absent property are no-ops. Observation is
+synchronous, ordered, non-replaying, and scoped to one object's selected
+property; persistence failure changes neither projection nor Signal.
 
 ##### Storage
 
-- **dependencies**: its owning Session and account username; browser IndexedDB
-  for persistence; OPFS and Web Locks only when a file store is first used
+- **dependencies**: its owning Session and account username; browser IndexedDB,
+  OPFS, and Web Locks during construction
 - **behavior**: selects volatile or persistent retention while preserving one
   stable peer, service, kind, and optional-name hierarchy per mode
 - **structure**: one public root composes in-memory structured stores, one shared
@@ -226,42 +232,44 @@ true })` returns a separate stable root whose initial store kind is asynchronous
 key/value. Persistent values are stored without encryption and survive Session
 shutdown.
 
-Persistent IndexedDB access opens `brochain/<username>` lazily and a failed
-attempt may be retried by a later operation. Storage owns this database and does
-not read Account data. Entries are immutable snapshots in ascending IndexedDB
-key order; default and explicitly empty store names remain distinct. A database
-version change closes the open connection. Closing Storage waits for accepted
-operations and closes database access without deleting persistent values.
+Persistent IndexedDB access opens `brochain/<username>` during Storage
+construction. Storage owns this database and does not read Account data.
+Entries are immutable snapshots in ascending IndexedDB key order; default and
+explicitly empty store names remain distinct. A database version change closes
+the open connection. Closing Storage waits for accepted operations and closes
+database access without deleting persistent values.
 
 Storage exposes no notification API. A component which signals a retained
 mutation MUST update Storage before publishing the corresponding event.
 Interaction state is scoped by the remote peer ID; local-service state uses the
 local Network identity.
 
-All file stores share one lazily initialized Session OPFS root and quota
-accounting. Writers declare an exact size, preserve backpressure, and expose a
-completed value as an opaque Blob. Ten percent of browser quota is reserved.
-Web Locks protect active tabs while abandoned Session directories are removed.
-Closing Storage waits for pending initialization and file creation, aborts active
-writers, removes the Session directory, and releases its lock.
+All file stores share one Session OPFS root and quota accounting initialized
+during Storage construction. Writers declare an exact size, preserve
+backpressure, and expose a completed value as an opaque Blob. Ten percent of
+browser quota is reserved. Web Locks protect active tabs while abandoned
+Session directories are removed. Closing Storage waits for accepted file
+creation, aborts active writers, removes the Session directory, and releases its
+lock. IndexedDB, OPFS, or Web Lock unavailability rejects Session construction.
 
 ##### Network
 
 - **dependencies**: the Session identity and Common Network
-- **behavior**: provides the local identity without bootstrap, connects Vessel
-  to the inferred default Beacon on full access, and exposes the services used
-  by frontend composition
-- **structure**: one lazy Vessel Network supplies browser-specific configuration
-  and Identity to Common Network and owns Beacon connection, WebRTC readiness,
-  retry, diagnostics, and shutdown
+- **behavior**: exposes the local identity after construction, attempts the
+  inferred default Beacon once during construction, and exposes the services
+  used by frontend composition
+- **structure**: one eagerly constructed Vessel Network supplies
+  browser-specific configuration and Identity to Common Network and owns Beacon
+  connection, WebRTC readiness, retry, diagnostics, and shutdown
 - **technology**: libp2p WebSockets and Circuit Relay v2 for bootstrap, WebRTC
   for direct browser connections, Noise encryption, Yamux multiplexing, and
   Identify
 
-Common Network alone constructs and owns the live libp2p node. Bootstrap failure
-leaves the Common Network usable offline and is retried on later full access;
-successful bootstrap waits for a relay-backed WebRTC address through Common
-Network's local-address projection.
+Common Network alone constructs and owns the live libp2p node. Network exposes
+its local ID synchronously after construction. The first Beacon attempt is
+awaited but its failure leaves the Common Network usable offline; later Network
+access directly retries it. Successful bootstrap waits for a relay-backed WebRTC
+address through Common Network's local-address projection.
 
 ###### Identity
 
@@ -376,7 +384,9 @@ and disappear when Session ends.
 - **behavior**: obtains peer availability and presentation name from Roster,
   displays retained items, sends messages and files, downloads received files,
   and marks received items read
-- **structure**: one complete conversation view with file presentation
+- **structure**: one thin conversation adapter which initializes its projection
+  from Chat history, follows Chat and Roster channels, and uses Solid resources
+  for the Roster entry and current capabilities
 - **technology**: SolidJS resources and signals
 
 ```text

@@ -16,7 +16,7 @@ import {
 } from "./services/identity";
 
 export interface Network {
-  id(): Promise<string>;
+  readonly id: string;
   access(): Promise<CommonNetwork>;
   bootstrapError(): string | undefined;
   close(): Promise<void>;
@@ -24,95 +24,73 @@ export interface Network {
 
 const relayReservationTimeout = 5_000;
 
-export function createNetwork(name: string, identitySeed: string): Network {
+export async function createNetwork(
+  name: string,
+  identitySeed: string,
+): Promise<Network> {
   const lifetime = new AbortController();
-  let initialization: Promise<CommonNetwork> | undefined;
+  const privateKey = await generateKeyPairFromSeed(
+    "Ed25519",
+    base64ToBytes(identitySeed),
+  );
+  const network = await createCommonNetwork({
+    privateKey,
+    addresses: { listen: ["/p2p-circuit", "/webrtc"] },
+    transports: [
+      webSockets(),
+      webRTC(),
+      circuitRelayTransport({ reservationCompletionTimeout: relayReservationTimeout }),
+    ],
+    connectionEncrypters: [noise()],
+    streamMuxers: [yamux()],
+    connectionGater: { denyDialMultiaddr: () => false },
+    services: {
+      identify: identify(),
+      identifyPush: identifyPush({ debounce: 0 }),
+    },
+  }, {
+    [identityServiceName]: {
+      rpc: () => createIdentity(name),
+    },
+  });
   let beacon: Peer | undefined;
-  let bootstrapAttempt: Promise<void> | undefined;
   let bootstrapFailure: string | undefined;
   let shutdown: Promise<void> | undefined;
 
-  async function initialize(): Promise<CommonNetwork> {
-    const privateKey = await generateKeyPairFromSeed(
-      "Ed25519",
-      base64ToBytes(identitySeed),
-    );
-    return await createCommonNetwork({
-      privateKey,
-      addresses: { listen: ["/p2p-circuit", "/webrtc"] },
-      transports: [
-        webSockets(),
-        webRTC(),
-        circuitRelayTransport({ reservationCompletionTimeout: relayReservationTimeout }),
-      ],
-      connectionEncrypters: [noise()],
-      streamMuxers: [yamux()],
-      connectionGater: { denyDialMultiaddr: () => false },
-      services: {
-        identify: identify(),
-        identifyPush: identifyPush({ debounce: 0 }),
-      },
-    }, {
-      [identityServiceName]: {
-        rpc: () => createIdentity(name),
-      },
-    });
-  }
-
-  async function accessRuntime(): Promise<CommonNetwork> {
-    const attempt = initialization ??= initialize();
-    try {
-      return await attempt;
-    } catch (error) {
-      if (initialization === attempt) initialization = undefined;
-      throw error;
-    }
-  }
-
-  async function maintainBootstrap(network: CommonNetwork): Promise<void> {
+  async function maintainBootstrap(): Promise<void> {
     if (beacon?.isConnected()) {
       bootstrapFailure = undefined;
       return;
     }
 
-    const attempt = bootstrapAttempt ??= (async () => {
+    try {
       beacon = await bootstrap(
         network,
         async () => await waitForWebRtcAddress(network, lifetime.signal),
       );
-    })();
-    try {
-      await attempt;
       bootstrapFailure = undefined;
     } catch (reason) {
       if (!lifetime.signal.aborted) bootstrapFailure = errorMessage(reason);
-    } finally {
-      if (bootstrapAttempt === attempt) bootstrapAttempt = undefined;
     }
   }
 
-  return {
-    async id() {
-      return (await accessRuntime()).id;
-    },
+  const component: Network = {
+    id: network.id,
     async access() {
-      const network = await accessRuntime();
-      if (!lifetime.signal.aborted) await maintainBootstrap(network);
+      if (!lifetime.signal.aborted) await maintainBootstrap();
       return network;
     },
     bootstrapError: () => bootstrapFailure,
     async close() {
       if (shutdown === undefined) {
         lifetime.abort();
-        const pending = initialization;
-        shutdown = (async () => {
-          const network = await pending?.catch(() => undefined);
-          await network?.close();
-        })();
+        shutdown = network.close();
       }
       await shutdown;
     },
   };
+  await maintainBootstrap();
+  return component;
 }
 
 async function bootstrap(

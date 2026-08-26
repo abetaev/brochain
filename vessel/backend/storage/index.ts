@@ -1,5 +1,5 @@
 import { createFileRoot, type FileRoot } from "./file";
-import { createPersistentRoot } from "./persistent";
+import { createPersistentRoot, type PersistentRoot } from "./persistent";
 
 export interface EventStorage<T> {
   append(event: T): void;
@@ -74,13 +74,20 @@ export interface Storage extends VolatileStorage {
   readonly persistent: PersistentStorage;
 }
 
-export function createStorage(
+export async function createStorage(
   username: string,
   applicationDatabaseName = "brochain",
-): Storage {
+): Promise<Storage> {
+  const files = await createFileRoot();
+  let persistent: PersistentRoot;
+  try {
+    persistent = await createPersistentRoot(`${applicationDatabaseName}/${username}`);
+  } catch (reason) {
+    await files.close().catch(() => {});
+    throw reason;
+  }
+
   const peers = new Map<string, PeerStorage>();
-  const files = createFileRoot();
-  const persistent = createPersistentRoot(`${applicationDatabaseName}/${username}`);
   let shutdown: Promise<void> | undefined;
 
   return {

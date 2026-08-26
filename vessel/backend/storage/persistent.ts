@@ -29,29 +29,16 @@ interface PersistentScope {
   readonly storeName: string;
 }
 
-export function createPersistentRoot(
+export async function createPersistentRoot(
   databaseName: string,
-): PersistentRoot {
+): Promise<PersistentRoot> {
+  const database = await openPersistentStorage(databaseName);
   const peers = new Map<string, PersistentPeerStorage>();
   const operations = new Set<Promise<unknown>>();
-  let initialization: Promise<IDBDatabase> | undefined;
-  let database: IDBDatabase | undefined;
   let shutdown: Promise<void> | undefined;
 
-  async function accessDatabase(): Promise<IDBDatabase> {
-    const attempt = initialization ??= openPersistentStorage(databaseName);
-    try {
-      const opened = await attempt;
-      database = opened;
-      return opened;
-    } catch (reason) {
-      if (initialization === attempt) initialization = undefined;
-      throw reason;
-    }
-  }
-
   function operate<T>(operation: (database: IDBDatabase) => Promise<T>): Promise<T> {
-    const pending = (async () => await operation(await accessDatabase()))();
+    const pending = operation(database);
     operations.add(pending);
     void pending.finally(() => operations.delete(pending)).catch(() => {});
     return pending;
@@ -69,9 +56,8 @@ export function createPersistentRoot(
     async close() {
       if (shutdown === undefined) {
         shutdown = (async () => {
-          await initialization?.catch(() => undefined);
           await Promise.allSettled([...operations]);
-          database?.close();
+          database.close();
         })();
       }
       await shutdown;

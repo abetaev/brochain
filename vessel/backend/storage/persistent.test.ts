@@ -2,10 +2,10 @@
 
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createStorage, type Storage } from "./index";
+import { createPersistentRoot, type PersistentRoot } from "./persistent";
 
 let applicationDatabaseName: string;
-let roots: Storage[];
+let roots: PersistentRoot[];
 let databases: Set<string>;
 
 beforeEach(() => {
@@ -19,8 +19,8 @@ afterEach(async () => {
   await Promise.all([...databases].map(deleteDatabase));
 });
 
-function storage(username: string): Storage {
-  const root = createStorage(username, applicationDatabaseName);
+async function storage(username: string): Promise<PersistentRoot> {
+  const root = await createPersistentRoot(`${applicationDatabaseName}/${username}`);
   roots.push(root);
   databases.add(`${applicationDatabaseName}/${username}`);
   return root;
@@ -28,7 +28,7 @@ function storage(username: string): Storage {
 
 describe("persistent Storage", () => {
   it("returns stable stores and keeps every hierarchy dimension independent", async () => {
-    const root = storage("ada").persistent;
+    const root = await storage("ada");
     const service = root.peer("peer").service("options");
     const values = service.kv<string>();
 
@@ -51,7 +51,7 @@ describe("persistent Storage", () => {
   });
 
   it("provides asynchronous CRUD and immutable entries in IndexedDB key order", async () => {
-    const values = storage("ada").persistent
+    const values = (await storage("ada"))
       .peer("local")
       .service("options")
       .kv<{ enabled: boolean }>();
@@ -76,8 +76,8 @@ describe("persistent Storage", () => {
   });
 
   it("uses IndexedDB structured cloning and reports unsupported values", async () => {
-    const root = storage("ada");
-    const values = root.persistent
+    const root = await storage("ada");
+    const values = root
       .peer("local")
       .service("options")
       .kv<{ nested: string[] }>();
@@ -88,29 +88,29 @@ describe("persistent Storage", () => {
 
     await expect(values.get("copy")).resolves.toEqual({ nested: ["one"] });
     await expect(
-      root.persistent.peer("local").service("options")
+      root.peer("local").service("options")
         .kv<unknown>().put("invalid", () => undefined),
     ).rejects.toMatchObject({ name: "DataCloneError" });
   });
 
   it("persists values across Storage lifetimes and isolates accounts", async () => {
-    const first = storage("ada");
-    const firstValues = first.persistent.peer("local").service("options").kv<string>();
+    const first = await storage("ada");
+    const firstValues = first.peer("local").service("options").kv<string>();
     await firstValues.put("theme", "dark");
     await first.close();
 
-    const reopened = storage("ada");
+    const reopened = await storage("ada");
     await expect(
-      reopened.persistent.peer("local").service("options").kv<string>().get("theme"),
+      reopened.peer("local").service("options").kv<string>().get("theme"),
     ).resolves.toBe("dark");
     await expect(
-      storage("bea").persistent.peer("local").service("options")
+      (await storage("bea")).peer("local").service("options")
         .kv<string>().get("theme"),
     ).resolves.toBeUndefined();
   });
 
   it("operates without an Account database", async () => {
-    const values = storage("unregistered").persistent
+    const values = (await storage("unregistered"))
       .peer("local")
       .service("options")
       .kv<string>();
@@ -122,25 +122,22 @@ describe("persistent Storage", () => {
       .not.toContain(applicationDatabaseName);
   });
 
-  it("initializes lazily, reports open failures, and retries a later operation", async () => {
+  it("rejects eager construction after an open failure and permits a fresh attempt", async () => {
     const databaseName = `${applicationDatabaseName}/ada`;
     databases.add(databaseName);
     const newer = await openDatabaseVersion(databaseName, 3);
-    const values = storage("ada").persistent
-      .peer("local")
-      .service("options")
-      .kv<string>();
-
-    await expect(values.get("key")).rejects.toMatchObject({ name: "VersionError" });
+    await expect(storage("ada")).rejects.toMatchObject({ name: "VersionError" });
 
     newer.close();
     await deleteDatabase(databaseName);
-    await expect(values.get("key")).resolves.toBeUndefined();
+    const root = await storage("ada");
+    await expect(root.peer("local").service("options").kv().get("key"))
+      .resolves.toBeUndefined();
   });
 
   it("finishes accepted operations during idempotent shutdown", async () => {
-    const root = storage("ada");
-    const values = root.persistent.peer("local").service("options").kv<string>();
+    const root = await storage("ada");
+    const values = root.peer("local").service("options").kv<string>();
     const pending = values.put("key", "value");
 
     const firstClose = root.close();
@@ -148,16 +145,16 @@ describe("persistent Storage", () => {
     await expect(firstClose).resolves.toBeUndefined();
     await expect(root.close()).resolves.toBeUndefined();
 
-    const reopened = storage("ada");
+    const reopened = await storage("ada");
     await expect(
-      reopened.persistent.peer("local").service("options").kv<string>().get("key"),
+      reopened.peer("local").service("options").kv<string>().get("key"),
     ).resolves.toBe("value");
   });
 
   it("closes an open database connection when its database is deleted", async () => {
     const databaseName = `${applicationDatabaseName}/ada`;
-    const root = storage("ada");
-    const values = root.persistent.peer("local").service("options").kv<string>();
+    const root = await storage("ada");
+    const values = root.peer("local").service("options").kv<string>();
     await values.put("key", "value");
 
     await expect(deleteDatabase(databaseName)).resolves.toBeUndefined();

@@ -1,15 +1,49 @@
 // @vitest-environment node
 
+import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createStorage as createStorageRoot } from "./storage";
+import { createStorage as createStorageRoot, type Storage } from "./storage";
 
-function createStorage() {
-  return createStorageRoot("test-account");
+let root: DirectoryNode;
+let quota = 100;
+let usage = 0;
+let getDirectory: ReturnType<typeof vi.fn>;
+let storages: Storage[];
+let storageNumber = 0;
+
+beforeEach(() => {
+  root = directoryNode();
+  quota = 100;
+  usage = 0;
+  storages = [];
+  getDirectory = vi.fn(async () => directoryHandle(root));
+  vi.stubGlobal("navigator", {
+    storage: {
+      getDirectory,
+      estimate: async () => ({ quota, usage }),
+    },
+    locks: testLocks(),
+  });
+});
+
+afterEach(async () => {
+  await Promise.allSettled(storages.map(async (storage) => await storage.close()));
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+async function createStorage(): Promise<Storage> {
+  const storage = await createStorageRoot(
+    "test-account",
+    `brochain-storage-test-${storageNumber++}`,
+  );
+  storages.push(storage);
+  return storage;
 }
 
 describe("Session Storage", () => {
-  it("returns stable scopes for each peer identity and service", () => {
-    const storage = createStorage();
+  it("returns stable scopes for each peer identity and service", async () => {
+    const storage = await createStorage();
     const peer = storage.peer("peer");
     const service = peer.service("messaging");
 
@@ -19,8 +53,8 @@ describe("Session Storage", () => {
     expect(peer.service("identity")).not.toBe(service);
   });
 
-  it("returns stable and independent default and named file stores", () => {
-    const storage = createStorage();
+  it("returns stable and independent default and named file stores", async () => {
+    const storage = await createStorage();
     const service = storage.peer("peer").service("chat");
     const files = service.fs();
 
@@ -30,8 +64,8 @@ describe("Session Storage", () => {
     expect(storage.peer("other-peer").service("chat").fs()).not.toBe(files);
   });
 
-  it("retains events and returns immutable snapshots", () => {
-    const storage = createStorage();
+  it("retains events and returns immutable snapshots", async () => {
+    const storage = await createStorage();
     const events = storage.peer("peer").service("messaging").event<string>();
 
     events.append("first");
@@ -43,8 +77,8 @@ describe("Session Storage", () => {
     expect(events.read()).toEqual(["first", "second"]);
   });
 
-  it("stores and clears singleton values", () => {
-    const storage = createStorage();
+  it("stores and clears singleton values", async () => {
+    const storage = await createStorage();
     const value = storage.peer("peer").service("identity").singleton<string>();
 
     expect(value.get()).toBeUndefined();
@@ -54,8 +88,8 @@ describe("Session Storage", () => {
     expect(value.get()).toBeUndefined();
   });
 
-  it("stores and deletes key/value entries while returning immutable snapshots", () => {
-    const storage = createStorage();
+  it("stores and deletes key/value entries while returning immutable snapshots", async () => {
+    const storage = await createStorage();
     const values = storage.peer("peer").service("contacts").kv<number>();
 
     values.put("ada", 1);
@@ -72,8 +106,8 @@ describe("Session Storage", () => {
     expect(values.entries()).toEqual([["bob", 2], ["ignored", 3]]);
   });
 
-  it("keeps storage kinds, default names, and named stores independent", () => {
-    const storage = createStorage();
+  it("keeps storage kinds, default names, and named stores independent", async () => {
+    const storage = await createStorage();
     const service = storage.peer("peer").service("service");
     const events = service.event<string>();
     const namedEvents = service.event<string>("");
@@ -95,9 +129,9 @@ describe("Session Storage", () => {
     expect(keyValues.entries()).toEqual([["key", "value"]]);
   });
 
-  it("isolates peer, service, and Session scopes", () => {
-    const first = createStorage();
-    const second = createStorage();
+  it("isolates peer, service, and Session scopes", async () => {
+    const first = await createStorage();
+    const second = await createStorage();
     const events = first.peer("peer").service("messaging").event<string>();
 
     events.append("first Session only");
@@ -107,13 +141,26 @@ describe("Session Storage", () => {
     expect(second.peer("peer").service("messaging").event().read()).toEqual([]);
   });
 
-  it("does not require browser file storage for structured values or unused shutdown", async () => {
-    const storage = createStorage();
-    storage.peer("peer").service("identity").singleton<string>().put("name");
+  it("rejects construction when private file storage is unavailable", async () => {
+    vi.stubGlobal("navigator", {});
 
-    expect(storage.peer("peer").service("identity").singleton<string>().get())
-      .toBe("name");
-    await expect(storage.close()).resolves.toBeUndefined();
+    await expect(createStorageRoot("test-account"))
+      .rejects.toThrow("browser does not provide private file storage");
+  });
+
+  it("closes its file root when persistent Storage construction fails", async () => {
+    const application = `brochain-storage-failure-${storageNumber++}`;
+    const databaseName = `${application}/test-account`;
+    const newer = await openDatabase(databaseName, 2);
+
+    await expect(createStorageRoot("test-account", application))
+      .rejects.toMatchObject({ name: "VersionError" });
+
+    expect(
+      root.directories.get("brochain")?.directories.get("sessions")?.directories.size,
+    ).toBe(0);
+    newer.close();
+    await deleteDatabase(databaseName);
   });
 });
 
@@ -247,45 +294,25 @@ function testLocks(): LockManager {
   } as unknown as LockManager;
 }
 
-let root: DirectoryNode;
-let quota = 100;
-let usage = 0;
-let getDirectory: ReturnType<typeof vi.fn>;
+async function openDatabase(name: string, version: number): Promise<IDBDatabase> {
+  return await new Promise((resolve, reject) => {
+    const request = indexedDB.open(name, version);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deleteDatabase(name: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
 
 describe("Session file Storage", () => {
-  beforeEach(() => {
-    root = directoryNode();
-    quota = 100;
-    usage = 0;
-    getDirectory = vi.fn(async () => directoryHandle(root));
-    vi.stubGlobal("navigator", {
-      storage: {
-        getDirectory,
-        estimate: async () => ({ quota, usage }),
-      },
-      locks: testLocks(),
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
-  it("keeps structured stores usable when private file storage is unavailable", async () => {
-    vi.stubGlobal("navigator", {});
-    const storage = createStorage();
-    const service = storage.peer("peer").service("chat");
-    service.singleton<string>().put("available");
-
-    expect(service.singleton<string>().get()).toBe("available");
-    await expect(service.fs().create(0)).rejects
-      .toThrow("browser does not provide private file storage");
-    await storage.close();
-  });
-
   it("writes exact bytes and exposes an opaque Blob", async () => {
-    const storage = createStorage();
+    const storage = await createStorage();
     const writer = await storage.peer("peer").service("chat").fs().create(4);
 
     await writer.write(new Uint8Array([1, 2]));
@@ -300,7 +327,7 @@ describe("Session file Storage", () => {
   });
 
   it("supports empty files and idempotent close and removal", async () => {
-    const storage = createStorage();
+    const storage = await createStorage();
     const writer = await storage.peer("peer").service("chat").fs().create(0);
 
     await writer.close();
@@ -314,7 +341,7 @@ describe("Session file Storage", () => {
   });
 
   it("validates sizes, byte writes, and exact declared length", async () => {
-    const storage = createStorage();
+    const storage = await createStorage();
     const files = storage.peer("peer").service("chat").fs();
 
     await expect(files.create(-1)).rejects.toThrow("non-negative safe size");
@@ -342,7 +369,7 @@ describe("Session file Storage", () => {
 
   it("shares quota reservations across peer and service file stores", async () => {
     usage = 20;
-    const storage = createStorage();
+    const storage = await createStorage();
     const first = storage.peer("first").service("chat").fs();
     const second = storage.peer("second").service("other").fs("files");
     const writer = await first.create(40);
@@ -362,17 +389,16 @@ describe("Session file Storage", () => {
     await storage.close();
   });
 
-  it("deletes partial and abandoned Session files", async () => {
+  it("deletes abandoned Sessions during construction and removes partial files", async () => {
     const application = directoryNode();
     const sessions = directoryNode();
     sessions.directories.set("abandoned", directoryNode());
     application.directories.set("sessions", sessions);
     root.directories.set("brochain", application);
 
-    const storage = createStorage();
-    expect(sessions.directories.has("abandoned")).toBe(true);
-    const writer = await storage.peer("peer").service("chat").fs().create(2);
+    const storage = await createStorage();
     expect(sessions.directories.has("abandoned")).toBe(false);
+    const writer = await storage.peer("peer").service("chat").fs().create(2);
     await writer.write(new Uint8Array([1]));
     await expect(writer.close()).rejects.toThrow("did not reach its declared size");
     expect([...sessions.directories.values()].flatMap((directory) => [...directory.files]))
@@ -388,12 +414,12 @@ describe("Session file Storage", () => {
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000002")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000003")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000004");
-    const first = createStorage();
+    const first = await createStorage();
     const firstWriter = await first.peer("peer").service("chat").fs().create(0);
     await firstWriter.close();
     const sessions = root.directories.get("brochain")?.directories.get("sessions");
 
-    const second = createStorage();
+    const second = await createStorage();
     const secondWriter = await second.peer("peer").service("chat").fs().create(0);
     await secondWriter.close();
 
@@ -403,34 +429,32 @@ describe("Session file Storage", () => {
     await first.close();
   });
 
-  it("retries lazy initialization after failure", async () => {
+  it("rejects eager initialization failures and permits a fresh construction", async () => {
     getDirectory
       .mockRejectedValueOnce(new Error("OPFS temporarily failed."))
       .mockResolvedValue(directoryHandle(root));
-    const storage = createStorage();
-    const files = storage.peer("peer").service("chat").fs();
 
-    await expect(files.create(0)).rejects.toThrow("temporarily failed");
-    const writer = await files.create(0);
+    await expect(createStorage()).rejects.toThrow("temporarily failed");
+    const storage = await createStorage();
+    const writer = await storage.peer("peer").service("chat").fs().create(0);
     await writer.close();
 
     expect(getDirectory).toHaveBeenCalledTimes(2);
-    await storage.close();
   });
 
   it("waits for accepted creation before closing and removes its file", async () => {
-    let finishRoot: ((root: FileSystemDirectoryHandle) => void) | undefined;
-    getDirectory.mockImplementationOnce(async () =>
-      await new Promise<FileSystemDirectoryHandle>((resolve) => {
-        finishRoot = resolve;
+    const storage = await createStorage();
+    let finishEstimate: ((estimate: StorageEstimate) => void) | undefined;
+    vi.spyOn(navigator.storage, "estimate").mockImplementationOnce(async () =>
+      await new Promise<StorageEstimate>((resolve) => {
+        finishEstimate = resolve;
       })
     );
-    const storage = createStorage();
     const creation = storage.peer("peer").service("chat").fs().create(1);
-    await vi.waitFor(() => expect(finishRoot).toBeDefined());
+    await vi.waitFor(() => expect(finishEstimate).toBeDefined());
 
     const closing = storage.close();
-    finishRoot?.(directoryHandle(root));
+    finishEstimate?.({ quota, usage });
 
     const writer = await creation;
     await expect(closing).resolves.toBeUndefined();
@@ -440,7 +464,7 @@ describe("Session file Storage", () => {
   });
 
   it("aborts active writers and deletes completed files on shutdown", async () => {
-    const storage = createStorage();
+    const storage = await createStorage();
     const files = storage.peer("peer").service("chat").fs();
     const partial = await files.create(2);
     await partial.write(new Uint8Array([1]));

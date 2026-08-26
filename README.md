@@ -8,7 +8,10 @@ using brochain
 
 1. Open brochain and create an account, or select an existing account and unlock
    it. Account names use 1–64 lowercase English letters. The password-strength
-   indicator is advice and does not prevent account creation.
+   indicator is advice and does not prevent account creation. Signing in requires
+   browser support for IndexedDB, private file storage, and Web Locks. If the
+   default Beacon is unavailable, sign-in still succeeds in offline mode and a
+   later network action retries the connection.
 2. On Home, select **Refresh peers** to update the list of people you can connect
    to. People identified earlier remain listed for that account after a reload;
    **Not currently available** means they must be found again before connecting.
