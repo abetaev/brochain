@@ -10,406 +10,291 @@ structure
 ---------
 
 ```text
-Common
-└── Backend
-    └── Network
-        ├── Peer
-        ├── RPC and ByteStream
-        └── Registry and Discovery
+Common Network
+├── Peer × remote identity
+├── Registry
+├── optional hosted services
+└── RPC and ByteStream adapters
 
 Vessel
 ├── Backend
 │   ├── Account
+│   │   ├── Window facade
+│   │   └── Worker account service
 │   └── Session
 │       ├── Signals
 │       ├── Options
 │       ├── Storage
-│       │   ├── Volatile
-│       │   │   └── PeerStorage × peer identity
-│       │   │       └── ServiceStorage × service
-│       │   │           └── Event, singleton, key/value, and file stores
-│       │   └── Persistent
-│       │       └── PeerStorage × peer identity
-│       │           └── ServiceStorage × service
-│       │               └── Key/value stores
+│       │   ├── volatile root
+│       │   └── persistent root
 │       └── Network
 │           ├── Common Network
-│           └── Identity, Messaging, and DataTransfer services
+│           └── Identity
 └── Frontend
-    ├── Services
-    │   ├── Roster
-    │   └── Chat
-    └── Views
-        ├── Account
-        ├── Home
-        └── Chat
+    ├── Roster
+    ├── Chat
+    │   ├── Messaging
+    │   └── DataTransfer
+    └── Account, Home, and Chat views
 
 Beacon
 └── Common Network
-    ├── Registry and Discovery
-    └── Circuit relay
+    ├── Registry
+    ├── Discovery
+    └── Circuit Relay
 ```
 
 Backend and frontend are dependency layers, not separate deployments. Both
-Vessel layers run in the browser, with Account operations isolated in a Worker.
-Vessel and Beacon compose the same Common Network implementation. The `@v` and
-`@c` aliases are build-time conveniences for Vessel; Common and Beacon use
-explicit relative imports so Beacon remains directly executable by Node.js.
+Vessel layers run in the browser; Account operations run in a Worker. Vessel
+and Beacon use the same Common Network implementation.
 
 Common
 ------
 
-### Backend
+### Network
+
+- **dependencies**: valid libp2p configuration and initial hosted service
+  definitions
+- **structure**: one libp2p node, Peer components, a service catalog, Registry,
+  and RPC and ByteStream adapters
+- **use cases**: read local identity and addresses; observe address and topology
+  changes; create and list Peers; add hosted services; close Network
+- **behavior**: an identified address creates a disconnected Peer; an
+  unidentified address is dialed to resolve its identity. Concurrent connection
+  and authentication attempts for one identity converge on one active Peer.
+  Losing its final direct connection removes that Peer from Network; a
+  caller-held Peer may reconnect.
+  Address and topology observers are synchronous and non-retained. Registry and
+  incoming service access reflect the authenticated Peer's current permitted
+  service subset.
+
+#### Peer
+
+- **dependencies**: an owning Common Network and a resolved remote identity
+- **structure**: a connection observer, remote RPC projections, and a
+  ByteStream factory
+- **use cases**: read addresses and connection state; connect; observe
+  connection changes; access RPC services; open byte streams
+- **behavior**: explicit dial targets and Identify results supply retained
+  addresses; inbound transport source addresses do not. RPC values may contain
+  JSON-compatible data and bytes. ByteStream provides asynchronous reads,
+  backpressured writes, half-close, and abort without exposing libp2p streams.
+
+#### Registry
+
+- **dependencies**: an owning Common Network service catalog
+- **structure**: one mandatory RPC service
+- **use cases**: list services available to the requesting Peer
+- **behavior**: each response reflects the current permitted service subset
+
+#### Discovery
+
+- **dependencies**: an owning Common Network
+- **structure**: one optional RPC service, currently hosted by Beacon
+- **use cases**: list advertised addresses for other connected Peers
+- **behavior**: only currently advertised addresses are returned
+
+Vessel backend
+--------------
+
+### Account
+
+- **dependencies**: browser IndexedDB and Web Crypto, a Worker, and the Session
+  factory
+- **structure**: a Window facade, Worker account service, and private
+  Session-access channel
+- **use cases**: list, create, unlock, export, and delete local accounts
+- **behavior**: account records contain only versioned encrypted data;
+  passwords, decrypted secrets, and the peer identity seed remain in the
+  Worker. Creation and unlock create a Session. Deletion password-confirms and
+  removes `brochain/<username>` before its account record. Window authentication
+  calls execute directly and have no concurrent ordering contract.
+
+### Session
+
+- **dependencies**: an unlocked Account identity and available IndexedDB, OPFS,
+  and Web Locks
+- **structure**: one instance each of Signals, Storage, Vessel Network, and
+  Options
+- **use cases**: access Signals, Storage, Options, and Common Network; inspect
+  Beacon failure; close the authenticated Session
+- **behavior**: construction creates Storage, Network through its first Beacon
+  attempt, then Options. Failure closes created dependencies. Options and
+  Storage access are synchronous afterward; Common Network access may await a
+  Beacon retry. Closing Session closes Network, Storage, and Account access;
+  consumers then discard the Session and its components.
+
+#### Signals
+
+- **dependencies**: its owning Session
+- **structure**: typed Channels keyed by owner and local name
+- **use cases**: obtain a Channel; publish; subscribe; unsubscribe
+- **behavior**: publication is synchronous, ordered, non-retained, and
+  non-replaying. A subscriber failure is logged without event data and does not
+  affect the publisher or later subscribers. Platform events, request/response
+  flows, Common Network observers, and local reactivity remain outside Signals.
+
+#### Options
+
+- **dependencies**: the local Network identity's persistent Storage scope and
+  Session Signals
+- **structure**: category and object accessors plus one change Channel
+- **use cases**: traverse category and object scopes; get, set, unset, and
+  observe properties
+- **behavior**: construction loads scalar values and removes persisted
+  non-scalars. Mutations persist before updating the projection and publishing;
+  failure changes neither. Concurrent mutations have no ordering contract.
+  Values are strings, numbers, booleans, or `null`; `undefined` means absent.
+  The TypeScript schema does not validate exact persisted scalar types. Dynamic
+  object identifiers are percent-encoded. Observation is synchronous, ordered,
+  non-retained, and property-specific.
+
+#### Storage
+
+- **dependencies**: an account username and available browser IndexedDB, OPFS,
+  Storage quota estimates, and Web Locks
+- **structure**: one volatile root and one persistent root; the volatile root
+  contains event, singleton, key/value, and shared file stores; the persistent
+  root contains IndexedDB key/value stores
+- **use cases**: select retention; access peer-, service-, kind-, and name-scoped
+  stores; read and mutate values; create files; close Storage
+- **behavior**: construction opens both roots. Volatile data lasts for the
+  Session; unencrypted persistent values survive it. Persistent entry lists are
+  immutable and key-ordered. File stores share quota accounting and one
+  Web-Lock-protected Session OPFS directory; writers declare exact sizes and
+  expose completed Blobs while reserving ten percent of quota. Close finishes
+  or aborts accepted work before releasing resources. Storage publishes no
+  mutations itself.
 
 #### Network
 
-- **dependencies**: environment-supplied libp2p configuration and hosted service
-  definitions
-- **behavior**: represents one local peer, creates and connects remote Peers,
-  exposes immutable local-address snapshots and invalidations, owns active
-  connections, and hosts an add-only catalog of named services
-- **structure**: Network constructs and owns its private libp2p node, active Peer
-  entities, RPC projection, byte-stream protocols, Registry, and optional
-  Discovery
-- **technology**: libp2p connections and events; typed-rpc request/response
-  projection
+- **dependencies**: the Session identity, browser origin, Beacon relay
+  configuration, and Common Network factory
+- **structure**: one Common Network, one Identity service, and an optional
+  default-Beacon Peer
+- **use cases**: read local peer ID; access Common Network; inspect Beacon
+  failure; close Network
+- **behavior**: construction awaits one Beacon attempt. Failure is non-fatal and
+  leaves Common Network available offline; later access retries. Success waits
+  for a relay-backed WebRTC address. Local peer ID is synchronous after
+  construction.
 
-Network accepts one or more multiaddresses when creating a Peer. An address
-which identifies a remote peer can produce a disconnected Peer without dialing;
-an unidentified address is authenticated by connecting. Concurrent attempts for
-one identity converge on one active Peer. Losing the final direct connection
-removes that Peer from Network, while a caller-held Peer may reconnect later.
+##### Identity
 
-Network publishes topology changes through its own observer. This observer is
-part of standalone Common infrastructure and does not depend on Vessel Signals.
-Local-address invalidations are likewise synchronous, non-retained, and
-non-replaying; consumers recover the current immutable snapshot with
-`addresses()`.
+- **dependencies**: the Session account name and Vessel Network
+- **structure**: one local RPC facet and one remote response validator
+- **use cases**: return local `{ name }`; request and validate remote Identity
+- **behavior**: Identity retains no remote data; Roster owns valid observations
 
-The service catalog may attach an RPC factory, byte-stream protocols, or both to
-one service name. Registry reports the subset currently available to an
-authenticated peer. Availability is checked for every RPC request and inbound
-byte stream.
+##### Messaging
 
-##### Peer
+- **dependencies**: Session Common Network and Signals
+- **structure**: one RPC service and one peer-tagged event Channel
+- **use cases**: send text; observe sent, received, and failed messages
+- **behavior**: messages require valid opaque IDs and text; Messaging retains no
+  Chat state
 
-- **dependencies**: its owning Network and an authenticated remote identity
-- **behavior**: connects or reconnects that identity, exposes current addresses
-  and connection state, projects remote RPC services, and opens byte streams
-- **structure**: one public Peer represents the Network's current connection to
-  one remote identity; its local observer reports connection transitions
+##### DataTransfer
 
-`Peer.service(name)` returns a typed RPC projection. `Peer.open(protocol)`
-returns a project-owned `ByteStream` with asynchronous reads, backpressured
-writes, graceful half-close, and abort. Libp2p stream types do not cross the
-Common Network boundary.
+- **dependencies**: Session Common Network and Signals
+- **structure**: one byte-stream protocol and one ordered event Channel
+- **use cases**: offer and send declared-length data; accept with a sink; observe
+  progress, completion, and failure
+- **behavior**: metadata and length are validated before bytes. A receiver must
+  claim an offer during synchronous publication. Transfers preserve
+  backpressure, require final acknowledgement, and allow two streams per
+  direction per Peer. Progress is limited to one event per 250 milliseconds plus
+  the final state. Interrupted transfers do not resume.
 
-Explicit dial targets and Identify supply retained addresses. Inbound transport
-source addresses are not treated as dialable; an inbound Peer may therefore be
-temporarily addressless and omitted from Discovery.
+Vessel frontend
+---------------
 
-##### Registry
+### Application
 
-- **dependencies**: Network service catalog
-- **behavior**: lists the services currently available to the requesting peer
-- **structure**: mandatory RPC service on every Peer
+- **dependencies**: Account and, after authentication, an active Session
+- **structure**: Roster and Chat services plus one active Account, Home, or Chat
+  view
+- **use cases**: authenticate; sign out; navigate between account, peer list,
+  and conversation views
+- **behavior**: after authentication, Application constructs Chat and then
+  Roster before exposing Home. Initialization failure closes the Session.
 
-##### Discovery
+### Roster
 
-- **dependencies**: Network and its connected Peers
-- **behavior**: lists advertised addresses for other connected peers
-- **structure**: optional RPC service; currently hosted by Beacon
+- **dependencies**: Session Common Network, persistent Storage, and Signals
+- **structure**: one persistent Identity store, peer-discovery resolver, and
+  invalidation Channel
+- **use cases**: list peers; get one Peer; observe topology and name
+  invalidations
+- **behavior**: each query combines connected, discovered, and remembered
+  Peers. Registry controls whether Identity and Discovery are queried; provider
+  failures are isolated. Valid Identity is persisted before its projection and
+  invalidation. Display name falls back from cached Identity name to peer ID.
+  Addresses, availability, discovery, and service catalogs remain transient.
 
-RPC service facets are plain method objects. Remote results are promises, values
-may contain JSON-compatible data and bytes, and the authenticated connection
-selects the requesting Peer and its permitted services.
+### Chat
 
-Vessel
-------
+- **dependencies**: Session Storage, Common Network, and Signals
+- **structure**: Messaging, DataTransfer, peer-scoped item/order/read/file
+  stores, and update and read Channels
+- **use cases**: inspect history, unread count, and capabilities; mark read; send
+  text or files; observe item and read updates
+- **behavior**: Chat retains item state before publishing updates. Incoming files
+  stream into Chat's file store. Messaging capability gates text and
+  DataTransfer capability gates files. Conversation state survives view
+  navigation and lasts for the Session.
 
-### Backend
+### Account view
 
-#### Account
+- **dependencies**: Account
+- **structure**: account forms, PasswordStrength, export controls, and deletion
+  controls
+- **use cases**: create, unlock, export, and delete accounts
+- **behavior**: one busy state prevents concurrent mutations; successful
+  authentication hands Session to Application
 
-- **dependencies**: browser IndexedDB, Web Crypto, and a Session factory after
-  successful authentication
-- **behavior**: lists, creates, unlocks, exports, and password-confirms deletion
-  of local accounts; creation and unlocking produce an authenticated Session;
-  deletion removes the account's persistent Storage database before its account
-  record
-- **structure**: a Window facade calls the account service running in a Worker
-  and projects successful authentication into a Session; decrypted identity
-  material remains behind the private Session boundary
-- **technology**: Comlink Worker RPC, IndexedDB, PBKDF2, and AES-GCM
-
-The `brochain` IndexedDB database stores only versioned encrypted account
-records. Password handling, decryption, derived keys, and the peer identity seed
-remain in the Worker; the public Account API exposes no identity material.
-After password validation, deletion removes `brochain/<username>` and removes
-the account record only when that succeeds.
-Window authentication calls execute directly and have no concurrent ordering
-contract. The Account view prevents concurrent submission while one is active.
-
-#### Session
-
-- **dependencies**: one unlocked Account identity
-- **behavior**: provides stable account-bound Signals, Options, volatile and
-  persistent Storage roots, and Network, and owns their common shutdown
-- **structure**: one Session eagerly composes one instance of each core
-  component and closes Network, Storage, and Account access together
-- **runtime**: browser Window
-
-Session construction opens Storage, constructs Network through its first Beacon
-attempt, and loads Options before returning. A failed construction closes every
-dependency already created. Session shutdown closes networking, removes Session
-files, and closes Account access. Consumers discard the Session and its
-components when shutdown begins; component access after that boundary is
-unsupported.
-
-##### Signals
-
-- **dependencies**: its owning Session only
-- **behavior**: integrates independently extensible network services, frontend
-  services, and views through typed component-owned channels
-- **structure**: channel identity combines the Signals instance, owner identity,
-  and local channel name; subscriptions and channel lookup remain Session-local
-
-Publication is synchronous, ordered, non-retained, and non-replaying. A
-subscriber which throws synchronously is logged without event payload data and
-does not affect the publisher or later subscribers. Subscriber return values are
-ignored, and subscribers own failures from asynchronous work they start.
-Platform events, request/response flows, Common Network observers, and
-component-local reactivity remain outside Signals.
-
-##### Options
-
-- **dependencies**: its owning Session's persistent Storage and Signals; the
-  private Vessel Network identity selects its peer scope
-- **behavior**: exposes schema-constrained hierarchical scalar reads,
-  persistence-first mutations, and property-specific observation
-- **structure**: component-contributed TypeScript schema fragments project one
-  initialized in-memory map through lightweight category and object scopes; one
-  private change channel integrates observers
-
-Session construction creates Options in the local Network peer scope.
-`session.options()` returns that initialized component synchronously.
-Construction loads the projection and removes persisted non-scalar values;
-failed cleanup rejects Session construction.
-
-Values may be strings, numbers, booleans, or `null`; `undefined` represents an
-absent option. Components extend the compile-time schema without creating a
-runtime dependency from Options back to them. Callers traverse alternating
-`cat()` and `obj()` scopes, then use typed `get()`, `set()`, `unset()`, or
-`observe()` operations. Serialized keys remain private to Options. Dynamic
-object identifiers are percent-encoded, while category and property names are
-unambiguous path segments.
-
-The schema constrains project code but does not perform exact runtime scalar
-validation. Construction still removes non-scalar persisted values. Each
-mutation writes persistent Storage directly before changing the projection and
-notifies only after both reflect the new value. Concurrent mutations have no
-ordering contract; callers requiring order await them sequentially. Setting the
-current value and unsetting an absent property are no-ops. Observation is
-synchronous, ordered, non-replaying, and scoped to one object's selected
-property; persistence failure changes neither projection nor Signal.
-
-##### Storage
-
-- **dependencies**: its owning Session and account username; browser IndexedDB,
-  OPFS, and Web Locks during construction
-- **behavior**: selects volatile or persistent retention while preserving one
-  stable peer, service, kind, and optional-name hierarchy per mode
-- **structure**: one public root composes in-memory structured stores, one shared
-  Session file root, and one independent per-account persistent backend
-- **technology**: in-memory collections for volatile structured stores;
-  IndexedDB structured cloning for persistent values; OPFS, Storage quota
-  estimates, and Web Locks for volatile files
-
-`session.storage()` and `session.storage({ persistent: false })` return the same
-volatile root. Its synchronous event, singleton, key/value, and asynchronous file
-stores retain data for the Session lifetime. `session.storage({ persistent:
-true })` returns a separate stable root whose initial store kind is asynchronous
-key/value. Persistent values are stored without encryption and survive Session
-shutdown.
-
-Persistent IndexedDB access opens `brochain/<username>` during Storage
-construction. Storage owns this database and does not read Account data.
-Entries are immutable snapshots in ascending IndexedDB key order; default and
-explicitly empty store names remain distinct. A database version change closes
-the open connection. Closing Storage waits for accepted operations and closes
-database access without deleting persistent values.
-
-Storage exposes no notification API. A component which signals a retained
-mutation MUST update Storage before publishing the corresponding event.
-Interaction state is scoped by the remote peer ID; local-service state uses the
-local Network identity.
-
-All file stores share one Session OPFS root and quota accounting initialized
-during Storage construction. Writers declare an exact size, preserve
-backpressure, and expose a completed value as an opaque Blob. Ten percent of
-browser quota is reserved. Web Locks protect active tabs while abandoned
-Session directories are removed. Closing Storage waits for accepted file
-creation, aborts active writers, removes the Session directory, and releases its
-lock. IndexedDB, OPFS, or Web Lock unavailability rejects Session construction.
-
-##### Network
-
-- **dependencies**: the Session identity and Common Network
-- **behavior**: exposes the local identity after construction, attempts the
-  inferred default Beacon once during construction, and exposes the services
-  used by frontend composition
-- **structure**: one eagerly constructed Vessel Network supplies
-  browser-specific configuration and Identity to Common Network and owns Beacon
-  connection, WebRTC readiness, retry, diagnostics, and shutdown
-- **technology**: libp2p WebSockets and Circuit Relay v2 for bootstrap, WebRTC
-  for direct browser connections, Noise encryption, Yamux multiplexing, and
-  Identify
-
-Common Network alone constructs and owns the live libp2p node. Network exposes
-its local ID synchronously after construction. The first Beacon attempt is
-awaited but its failure leaves the Common Network usable offline; later Network
-access directly retries it. Successful bootstrap waits for a relay-backed WebRTC
-address through Common Network's local-address projection.
-
-###### Identity
-
-- **dependencies**: Session account name
-- **behavior**: returns `{ name }` for the local peer and validates every remote
-  response
-- **structure**: optional retention-free RPC service; Roster owns observed
-  remote Identity data
-
-###### Messaging
-
-- **dependencies**: Session Network and Signals
-- **behavior**: sends validated opaque-ID text messages and publishes peer-tagged
-  sent, received, and failed events
-- **structure**: one Session-bound entity with an RPC facet and event channel; it
-  retains no Chat state
-
-###### DataTransfer
-
-- **dependencies**: Session Network and Signals
-- **behavior**: streams declared-length binary data after explicit receiver
-  acceptance and publishes offer, progress, completion, and failure events
-- **structure**: one Session-bound entity with the
-  `/brochain/data-transfer/1.0.0` byte-stream protocol and an ordered event
-  channel
-
-DataTransfer validates bounded JSON metadata before accepting bytes, enforces
-the declared length and two streams per direction per peer, preserves
-backpressure, and requires a final acknowledgement. A consumer MUST claim an
-offer during synchronous publication by supplying a sink or sink promise.
-Unclaimed offers are rejected. Progress is published no more than once per 250
-milliseconds plus its final state; interrupted transfers do not resume.
-
-### Frontend
-
-- **dependencies**: Account and an active Session
-- **behavior**: presents account management, peer connection, messaging, file
-  transfer, unread state, and navigation
-- **structure**: application composition creates Chat and Roster services for an
-  authenticated Session and passes them to complete views
-- **technology**: SolidJS, Pico CSS, and a Vite-generated PWA shell
-
-Application composition initializes Chat and then Roster before making the
-Session active. A failed initializer therefore cannot close a Session while a
-second initializer is still running.
-
-#### Services
-
-##### Roster
-
-- **dependencies**: Session Network, persistent Storage, and Signals; remote
-  Registry, Identity, and optional Discovery services
-- **behavior**: returns one collection of connected, discovered, and remembered
-  peers; refreshes and retains valid remote Identity observations; resolves each
-  presentation name; and publishes invalidations for topology or Identity name
-  changes
-- **structure**: one Session-bound service combines a fresh runtime discovery
-  sweep with an in-memory Identity projection backed by the local peer's
-  persistent `roster` key/value store
-
-Connected entries contain an online Peer, discovered entries contain an offline
-Peer, and remembered-only entries contain no Peer. Roster asks each connected
-peer for Registry, refreshes Identity only when advertised, uses Discovery only
-when advertised, and groups valid addresses by remote identity. Provider
-failures and invalid results are isolated so healthy peers and the latest valid
-Identity observations remain available.
-
-Each valid Identity is retained as one object under
-`peers/${peerId}.identity`. Presentation names resolve from the cached Identity
-name, then peer ID. Identity persistence precedes its projection update and name
-invalidation; addresses, availability, discovery results, and hosted service
-catalogs remain transient. Roster bridges these name invalidations and Common
-Network topology changes through one non-retained Signals channel.
-
-##### Chat
-
-- **dependencies**: Session Storage and Signals, Messaging, DataTransfer, and
-  remote Registry
-- **behavior**: retains chat history and unread counts, sends text and files,
-  accepts incoming files, exposes text/file capability, and publishes complete
-  presentation updates
-- **structure**: one Session-bound frontend service composes both transports with
-  peer- and Chat-scoped stores and its update and read channels
-
-Chat retains ordered item IDs and item snapshots before publishing updates.
-Received files stream into its file store; Chat alone assigns their display name
-and media type. Text capability gates Chat, while DataTransfer capability gates
-file controls independently. History and unread counts survive view navigation
-and disappear when Session ends.
-
-#### Views
-
-##### Account
-
-- **dependencies**: Account backend facade
-- **behavior**: creates, unlocks, exports, and deletes accounts and shows advisory
-  password strength
-- **structure**: one complete account-management view
-- **technology**: SolidJS and zxcvbn
-
-##### Home
+### Home view
 
 - **dependencies**: Session, Roster, and Chat
-- **behavior**: lists and refreshes available and remembered peers, connects
-  available peers, shows unread and connection state, opens Chat, and signs out
-- **structure**: one complete signed-in landing view with reusable peer rows
-- **technology**: SolidJS resources and signals
+- **structure**: one Roster resource, peer rows, and direct-connection controls
+- **use cases**: refresh peers; connect a listed or direct Peer; open Chat; sign
+  out
+- **behavior**: Roster and Chat invalidations update peer availability,
+  capabilities, and unread presentation
 
-##### Chat
+### Chat view
 
-- **dependencies**: Roster and Chat service
-- **behavior**: obtains peer availability and presentation name from Roster,
-  displays retained items, sends messages and files, downloads received files,
-  and marks received items read
-- **structure**: one thin conversation adapter which initializes its projection
-  from Chat history, follows Chat and Roster channels, and uses Solid resources
-  for the Roster entry and current capabilities
-- **technology**: SolidJS resources and signals
-
-```text
-Account --create/unlock--> Home --open peer ID--> Chat
-Account <--sign out------- Home <--back----------- Chat
-```
+- **dependencies**: Roster and Chat
+- **structure**: Roster-entry and capability resources, Chat-history projection,
+  text and file controls, and file downloads
+- **use cases**: return Home; read a conversation; send text or files; download
+  received files
+- **behavior**: the view initializes from Chat history, follows service
+  invalidations, and marks existing and new received items read. It retains only
+  interaction errors and subscription cleanup; Roster owns name and availability
+  while Chat owns conversation data.
 
 Beacon
 ------
 
 ### Network
 
-- **dependencies**: Common Network and configured public relay information
-- **behavior**: bootstraps peers, relays connection establishment, and lets
-  connected peers discover one another
-- **structure**: Beacon supplies WebSocket, relay, Identify, Discovery, and
-  public-address configuration to one Common Network, which constructs the live
-  node and hosts Registry, Discovery, and Circuit Relay without application
-  message storage
-- **runtime**: Node.js
-- **technology**: libp2p, WebSockets, Circuit Relay v2, Noise, Yamux, Identify,
-  and Identify Push
+- **dependencies**: configured public relay information, a process identity,
+  and Common Network factory
+- **structure**: one Common Network with Registry, Discovery, Identify, and
+  Circuit Relay services
+- **use cases**: accept Vessel bootstrap connections; relay connection
+  establishment; advertise connected Peers
+- **behavior**: Beacon retains no application messages and keeps one identity
+  for its process lifetime. Development starts it beside Vessel; production runs
+  it beside the built Vessel in one process. Restart creates a new identity.
 
-Development starts Beacon beside Vessel. Production serves the built Vessel and
-runs Beacon in the same process. Beacon currently generates one identity for its
-process lifetime, so that identity may change after restart.
+runtime and technologies
+------------------------
+
+- **Common Network**: libp2p and typed-rpc
+- **Vessel backend**: browser Worker, Comlink, IndexedDB, OPFS, Web Locks, Web
+  Crypto, libp2p WebSockets, Circuit Relay v2, WebRTC, Noise, Yamux, and Identify
+- **Vessel frontend**: SolidJS, Pico CSS, and a Vite-generated PWA shell
+- **Beacon**: Node.js, libp2p WebSockets, Circuit Relay v2, Noise, Yamux,
+  Identify, and Identify Push
