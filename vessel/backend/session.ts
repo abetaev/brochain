@@ -3,6 +3,11 @@ import {
   createNetwork,
   type Network as NetworkComponent,
 } from "@v/backend/network";
+import { isServiceEnabled } from "@v/backend/options/network-services";
+import {
+  createIdentity,
+  identityServiceName,
+} from "@v/backend/network/services/identity";
 import { createOptions, type Options } from "@v/backend/options";
 import { createSignals, type Signals } from "@v/backend/signals";
 import {
@@ -38,7 +43,7 @@ export async function createSession(
   const storage = await createStorage(identity.username);
   let network: NetworkComponent;
   try {
-    network = await createNetwork(identity.username, identity.identitySeed);
+    network = await createNetwork(identity.identitySeed);
   } catch (reason) {
     await storage.close().catch(() => {});
     throw reason;
@@ -50,6 +55,16 @@ export async function createSession(
       storage.persistent.peer(network.id).service("options"),
       signals,
     );
+    await network.provide({
+      [identityServiceName]: {
+        enabled: (peer) => isServiceEnabled(
+          options,
+          peer.id,
+          identityServiceName,
+        ),
+        rpc: () => createIdentity(identity.username),
+      },
+    });
   } catch (reason) {
     await Promise.allSettled([network.close(), storage.close()]);
     throw reason;

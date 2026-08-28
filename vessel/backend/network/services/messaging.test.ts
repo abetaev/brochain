@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Network, Peer, Services } from "@c/backend/network";
+import type { Options } from "@v/backend/options";
 import type { Session } from "@v/backend/session";
 import { createSignals } from "@v/backend/signals";
 import {
@@ -30,6 +31,7 @@ function testPeer(
 
 function testContext() {
   const signals = createSignals();
+  const disabled = new Set<string>();
   let provided: Services = {};
   const network = {
     id: "local",
@@ -37,9 +39,23 @@ function testContext() {
       provided = { ...provided, ...services };
     }),
   } as unknown as Network;
+  const options = {
+    cat: () => ({
+      obj: (peerId: string) => ({
+        cat: () => ({
+          obj: (serviceName: string) => ({
+            get: () => disabled.has(`${peerId}/${serviceName}`)
+              ? false
+              : undefined,
+          }),
+        }),
+      }),
+    }),
+  } as unknown as Options;
   const session = {
     username: "alice",
     network: vi.fn(async () => network),
+    options: () => options,
     signals: () => signals,
     storage: vi.fn(),
     bootstrapError: () => undefined,
@@ -49,6 +65,10 @@ function testContext() {
   return {
     session,
     network,
+    disable(peerId: string, serviceName: string) {
+      disabled.add(`${peerId}/${serviceName}`);
+    },
+    services: () => provided,
     inbound(peer: Peer): MessagingRpc {
       const rpc = provided[messagingServiceName]?.rpc;
       if (rpc === undefined) throw new Error("Messaging RPC was not provided.");
@@ -70,8 +90,24 @@ describe("Messaging", () => {
       send: expect.any(Function),
     });
     expect(context.network.provide).toHaveBeenCalledWith({
-      [messagingServiceName]: { rpc: expect.any(Function) },
+      [messagingServiceName]: {
+        enabled: expect.any(Function),
+        rpc: expect.any(Function),
+      },
     });
+  });
+
+  it("attaches the shared per-peer availability predicate", async () => {
+    const context = testContext();
+    await createMessaging(context.session);
+    const enabled = context.services()[messagingServiceName]?.enabled;
+    const first = testPeer("first");
+    const second = testPeer("second");
+
+    expect(enabled?.(first, context.network)).toBe(true);
+    context.disable("first", messagingServiceName);
+    expect(enabled?.(first, context.network)).toBe(false);
+    expect(enabled?.(second, context.network)).toBe(true);
   });
 
   it("publishes exact validated peer-tagged inbound messages", async () => {

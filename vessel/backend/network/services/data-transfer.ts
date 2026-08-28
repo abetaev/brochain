@@ -1,6 +1,7 @@
 import type { ByteStream, Peer } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
 import type { Channel } from "@v/backend/signals";
+import { isServiceEnabled } from "@v/backend/options/network-services";
 
 export const dataTransferServiceName = "data-transfer";
 export const dataTransferProtocol = "/brochain/data-transfer/1.0.0";
@@ -64,10 +65,16 @@ export async function createDataTransfer(session: Session): Promise<DataTransfer
   const events = session.signals().channel<DataTransferEvent>({}, "events");
   const inbound = new Map<string, number>();
   const outbound = new Map<string, number>();
+  const options = session.options();
   const network = await session.network();
 
   await network.provide({
     [dataTransferServiceName]: {
+      enabled: (peer) => isServiceEnabled(
+        options,
+        peer.id,
+        dataTransferServiceName,
+      ),
       protocols: [{
         id: dataTransferProtocol,
         maxInboundStreams: 2,

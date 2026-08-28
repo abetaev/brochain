@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ByteStream, Network, Peer, Services } from "@c/backend/network";
+import type { Options } from "@v/backend/options";
 import type { Session } from "@v/backend/session";
 import { createSignals } from "@v/backend/signals";
 import {
@@ -81,21 +82,44 @@ function fail(pipe: Pipe, reason: Error): void {
 function testContext(id: string) {
   let services: Services = {};
   const signals = createSignals();
+  const disabled = new Set<string>();
   const network = {
     id,
     provide: vi.fn(async (provided: Services) => {
       services = { ...services, ...provided };
     }),
   } as unknown as Network;
+  const options = {
+    cat: () => ({
+      obj: (peerId: string) => ({
+        cat: () => ({
+          obj: (serviceName: string) => ({
+            get: () => disabled.has(`${peerId}/${serviceName}`)
+              ? false
+              : undefined,
+          }),
+        }),
+      }),
+    }),
+  } as unknown as Options;
   const session = {
     username: id,
     network: vi.fn(async () => network),
+    options: () => options,
     signals: () => signals,
     storage: vi.fn(),
     bootstrapError: () => undefined,
     close: vi.fn(),
   } as unknown as Session;
-  return { id, network, session, services: () => services };
+  return {
+    id,
+    network,
+    session,
+    services: () => services,
+    disable(peerId: string, serviceName: string) {
+      disabled.add(`${peerId}/${serviceName}`);
+    },
+  };
 }
 
 function connect(
@@ -142,6 +166,19 @@ async function* bytes(...chunks: readonly number[][]): AsyncIterable<Uint8Array>
 }
 
 describe("DataTransfer", () => {
+  it("attaches the shared per-peer availability predicate", async () => {
+    const context = testContext("local");
+    await createDataTransfer(context.session);
+    const enabled = context.services()[dataTransferServiceName]?.enabled;
+    const first = peer("first");
+    const second = peer("second");
+
+    expect(enabled?.(first, context.network)).toBe(true);
+    context.disable("first", dataTransferServiceName);
+    expect(enabled?.(first, context.network)).toBe(false);
+    expect(enabled?.(second, context.network)).toBe(true);
+  });
+
   it("streams accepted data with exact metadata, progress, and completion", async () => {
     const localContext = testContext("local");
     const remoteContext = testContext("remote");

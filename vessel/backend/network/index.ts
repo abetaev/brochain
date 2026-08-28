@@ -9,25 +9,20 @@ import { base64ToBytes } from "@c/base64";
 import createCommonNetwork, {
   type Network as CommonNetwork,
   type Peer,
+  type Services,
 } from "@c/backend/network";
-import {
-  createIdentity,
-  identityServiceName,
-} from "./services/identity";
 
 export interface Network {
   readonly id: string;
   access(): Promise<CommonNetwork>;
+  provide(services: Services): Promise<void>;
   bootstrapError(): string | undefined;
   close(): Promise<void>;
 }
 
 const relayReservationTimeout = 5_000;
 
-export async function createNetwork(
-  name: string,
-  identitySeed: string,
-): Promise<Network> {
+export async function createNetwork(identitySeed: string): Promise<Network> {
   const lifetime = new AbortController();
   const privateKey = await generateKeyPairFromSeed(
     "Ed25519",
@@ -47,10 +42,6 @@ export async function createNetwork(
     services: {
       identify: identify(),
       identifyPush: identifyPush({ debounce: 0 }),
-    },
-  }, {
-    [identityServiceName]: {
-      rpc: () => createIdentity(name),
     },
   });
   let beacon: Peer | undefined;
@@ -80,6 +71,7 @@ export async function createNetwork(
       if (!lifetime.signal.aborted) await maintainBootstrap();
       return network;
     },
+    provide: network.provide,
     bootstrapError: () => bootstrapFailure,
     async close() {
       if (shutdown === undefined) {

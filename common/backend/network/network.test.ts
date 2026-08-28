@@ -276,10 +276,11 @@ describe("per-Peer RPC services", () => {
 
   it("initializes and authorizes services independently for each Peer", async () => {
     const authorized = await localNetwork();
+    let privateEnabled = true;
     const remote = await localNetwork({
       audience: { rpc: (peer) => ({ identify: () => peer.id }) },
       private: {
-        enabled: (peer) => peer.id === authorized.network.id,
+        enabled: (peer) => privateEnabled && peer.id === authorized.network.id,
         rpc: () => ({ read: () => "allowed" }),
       },
     });
@@ -296,6 +297,23 @@ describe("per-Peer RPC services", () => {
       .toEqual([registryServiceName, "audience", "private"]);
     expect(await otherRemote.service<Registry>(registryServiceName).list())
       .toEqual([registryServiceName, "audience"]);
+    const privateService = authorizedRemote.service<{ read(): string }>("private");
+    await expect(privateService.read()).resolves.toBe("allowed");
+
+    privateEnabled = false;
+    expect(await authorizedRemote.service<Registry>(registryServiceName).list())
+      .toEqual([registryServiceName, "audience"]);
+    await expect(privateService.read()).rejects.toThrow();
+    expect(remote.network.services()).toEqual({
+      registry: expect.any(Object),
+      audience: expect.any(Object),
+      private: expect.any(Object),
+    });
+
+    privateEnabled = true;
+    expect(await authorizedRemote.service<Registry>(registryServiceName).list())
+      .toEqual([registryServiceName, "audience", "private"]);
+    await expect(privateService.read()).resolves.toBe("allowed");
 
     await remote.network.provide({
       later: { rpc: () => ({ read: () => "live" }) },
@@ -345,16 +363,23 @@ describe("per-Peer RPC services", () => {
 });
 
 describe("byte-stream protocols", () => {
-  it("opens an authenticated stream and applies write backpressure through ByteStream", async () => {
+  it("checks new streams dynamically while accepted streams finish", async () => {
     const protocol = "/brochain/test-bytes/1.0.0";
+    let enabled = true;
+    let accepted!: () => void;
+    const firstAccepted = new Promise<void>((resolve) => {
+      accepted = resolve;
+    });
     const remote = await localNetwork();
     await remote.network.provide({
       bytes: {
+        enabled: () => enabled,
         protocols: [{
           id: protocol,
           maxInboundStreams: 2,
           maxOutboundStreams: 2,
           async accept(_peer, stream) {
+            accepted();
             for await (const bytes of stream) await stream.write(bytes);
             await stream.close();
           },
@@ -368,12 +393,40 @@ describe("byte-stream protocols", () => {
     expect(await peer.service<Registry>(registryServiceName).list())
       .toEqual([registryServiceName, "bytes"]);
     const stream = await peer.open(protocol);
+    await firstAccepted;
+    enabled = false;
+    expect(await peer.service<Registry>(registryServiceName).list())
+      .toEqual([registryServiceName]);
+    expect(remote.network.services()).toEqual({
+      registry: expect.any(Object),
+      bytes: expect.any(Object),
+    });
+
     await stream.write(new Uint8Array([1, 2]));
     await stream.write(new Uint8Array([3, 4]));
     await stream.close();
     const received: number[] = [];
     for await (const bytes of stream) received.push(...bytes);
     expect(received).toEqual([1, 2, 3, 4]);
+
+    await expect((async () => {
+      const rejected = await peer.open(protocol);
+      await rejected.write(new Uint8Array([5]));
+      await rejected.close();
+      for await (const _bytes of rejected) {
+        // The disabled remote aborts without returning data.
+      }
+    })()).rejects.toThrow();
+
+    enabled = true;
+    expect(await peer.service<Registry>(registryServiceName).list())
+      .toEqual([registryServiceName, "bytes"]);
+    const restored = await peer.open(protocol);
+    await restored.write(new Uint8Array([6]));
+    await restored.close();
+    const restoredBytes: number[] = [];
+    for await (const bytes of restored) restoredBytes.push(...bytes);
+    expect(restoredBytes).toEqual([6]);
   });
 
   it("rejects duplicate protocols and invalid stream limits", async () => {

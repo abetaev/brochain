@@ -11,24 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-per-peer service options
-------------------------
-
-type: feature
-scope: network, services, options
-
-Use Network's existing service-facet catalog as the single source for service
-publication and settings introspection; this task MUST NOT introduce another
-registry. Registry remains mandatory. Other supported services are enabled by
-default for each remote peer and may be disabled with
-`peers/${peerId}/services/${serviceName}.enabled`. Each Peer publishes only its
-enabled subset to that identified remote peer, and Registry reports that current
-subset. Option changes MUST affect RPC and byte-stream facets for an existing
-connected Peer immediately.
-
-Existing plain service names remain unchanged. Versioned service identifiers
-and plugin extensibility are future work.
-
 settings frontend and peer view
 -------------------------------
 

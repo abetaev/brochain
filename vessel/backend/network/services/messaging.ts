@@ -1,6 +1,7 @@
 import type { Peer, PromisedMethods } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
 import type { Channel } from "@v/backend/signals";
+import { isServiceEnabled } from "@v/backend/options/network-services";
 
 export const messagingServiceName = "messaging";
 
@@ -26,10 +27,16 @@ interface MessagingRpc {
 
 export async function createMessaging(session: Session): Promise<Messaging> {
   const events = session.signals().channel<MessagingEvent>({}, "events");
+  const options = session.options();
   const network = await session.network();
 
   await network.provide({
     [messagingServiceName]: {
+      enabled: (peer) => isServiceEnabled(
+        options,
+        peer.id,
+        messagingServiceName,
+      ),
       rpc: (peer) => receive(peer.id),
     },
   });

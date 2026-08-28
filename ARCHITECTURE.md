@@ -66,7 +66,9 @@ Common
   caller-held Peer may reconnect.
   Address and topology observers are synchronous and non-retained. Registry and
   incoming service access reflect the authenticated Peer's current permitted
-  service subset.
+  service subset. Availability is checked for every Registry request, new RPC
+  call, and new byte stream; accepted work is not interrupted. The local service
+  catalog always contains every supported service.
 
 #### Peer
 
@@ -85,7 +87,8 @@ Common
 - **dependencies**: an owning Common Network service catalog
 - **structure**: one mandatory RPC service
 - **use cases**: list services available to the requesting Peer
-- **behavior**: each response reflects the current permitted service subset
+- **behavior**: each response reflects the current permitted service subset;
+  Registry itself is always included
 
 #### Discovery
 
@@ -119,9 +122,9 @@ Vessel backend
 - **use cases**: access Signals, Storage, Options, and Common Network; inspect
   Beacon failure; close the authenticated Session
 - **behavior**: construction creates Storage, Network through its first Beacon
-  attempt, then Options. Failure closes created dependencies. Options and
-  Storage access are synchronous afterward; Common Network access may await a
-  Beacon retry. Closing Session closes Network, Storage, and Account access;
+  attempt, Options, then Identity. Failure closes created dependencies. Options
+  and Storage access are synchronous afterward; Common Network access may await
+  a Beacon retry. Closing Session closes Network, Storage, and Account access;
   consumers then discard the Session and its components.
 
 #### Signals
@@ -146,8 +149,10 @@ Vessel backend
   failure changes neither. Concurrent mutations have no ordering contract.
   Values are strings, numbers, booleans, or `null`; `undefined` means absent.
   The TypeScript schema does not validate exact persisted scalar types. Dynamic
-  object identifiers are percent-encoded. Observation is synchronous, ordered,
-  non-retained, and property-specific.
+  object identifiers are percent-encoded. A missing or true
+  `peers/${peerId}/services/${serviceName}.enabled` permits that hosted service;
+  false denies it. Observation is synchronous, ordered, non-retained, and
+  property-specific.
 
 #### Storage
 
@@ -170,33 +175,35 @@ Vessel backend
 
 - **dependencies**: the Session identity, browser origin, Beacon relay
   configuration, and Common Network factory
-- **structure**: one Common Network, one Identity service, and an optional
-  default-Beacon Peer
-- **use cases**: read local peer ID; access Common Network; inspect Beacon
-  failure; close Network
+- **structure**: one Common Network with Identity and an optional default-Beacon
+  Peer
+- **use cases**: read local peer ID; provide services; access Common Network;
+  inspect Beacon failure; close Network
 - **behavior**: construction awaits one Beacon attempt. Failure is non-fatal and
   leaves Common Network available offline; later access retries. Success waits
-  for a relay-backed WebRTC address. Local peer ID is synchronous after
-  construction.
+  for a relay-backed WebRTC address. Providing a service forwards directly and
+  does not retry Beacon. Local peer ID is synchronous after construction.
 
 ##### Identity
 
-- **dependencies**: the Session account name and Vessel Network
+- **dependencies**: the Session account name, Options, and Vessel Network
 - **structure**: one local RPC facet and one remote response validator
 - **use cases**: return local `{ name }`; request and validate remote Identity
-- **behavior**: Identity retains no remote data; Roster owns valid observations
+- **behavior**: Identity retains no remote data; Roster owns valid observations.
+  Its RPC facet is available only when Options permits it for the requesting Peer
 
 ##### Messaging
 
-- **dependencies**: Session Common Network and Signals
+- **dependencies**: Session Common Network, Options, and Signals
 - **structure**: one RPC service and one peer-tagged event Channel
 - **use cases**: send text; observe sent, received, and failed messages
 - **behavior**: messages require valid opaque IDs and text; Messaging retains no
-  Chat state
+  Chat state. Its RPC facet is available only when Options permits it for the
+  requesting Peer
 
 ##### DataTransfer
 
-- **dependencies**: Session Common Network and Signals
+- **dependencies**: Session Common Network, Options, and Signals
 - **structure**: one byte-stream protocol and one ordered event Channel
 - **use cases**: offer and send declared-length data; accept with a sink; observe
   progress, completion, and failure
@@ -204,7 +211,8 @@ Vessel backend
   claim an offer during synchronous publication. Transfers preserve
   backpressure, require final acknowledgement, and allow two streams per
   direction per Peer. Progress is limited to one event per 250 milliseconds plus
-  the final state. Interrupted transfers do not resume.
+  the final state. New streams are available only when Options permits them for
+  the requesting Peer. Interrupted transfers do not resume.
 
 Vessel frontend
 ---------------
