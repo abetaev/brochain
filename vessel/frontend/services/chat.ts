@@ -1,17 +1,10 @@
 import type { Peer } from "@c/backend/network";
 import {
-  registryServiceName,
-  validateServiceNames,
-  type Registry,
-} from "@c/backend/network/services/registry";
-import {
-  createDataTransfer,
   dataTransferServiceName,
   type DataTransferEvent,
   type TransferMetadata,
 } from "@v/backend/network/services/data-transfer";
 import {
-  createMessaging,
   messagingServiceName,
   type MessagingEvent,
 } from "@v/backend/network/services/messaging";
@@ -59,7 +52,7 @@ export interface ChatCapabilities {
 export interface Chat {
   readonly updates: Channel<ChatItem>;
   readonly reads: Channel<ChatRead>;
-  capabilities(peer: Peer): Promise<ChatCapabilities>;
+  capabilities(peer: Peer): ChatCapabilities;
   history(peerId: string): readonly ChatItem[];
   readCount(peerId: string): number;
   markRead(peerId: string): void;
@@ -69,14 +62,15 @@ export interface Chat {
 
 const chatServiceName = "chat";
 
-export async function createChat(session: Session): Promise<Chat> {
+export function createChat(session: Session): Chat {
   const signals = session.signals();
   const updates = signals.channel<ChatItem>({}, "updates");
   const reads = signals.channel<ChatRead>({}, "reads");
   const incomingWriters = new Map<string, FileWriter>();
-  const messaging = await createMessaging(session);
+  const network = session.network();
+  const messaging = network.messaging();
   messaging.events.subscribe(receiveMessaging);
-  const dataTransfer = await createDataTransfer(session);
+  const dataTransfer = network.dataTransfer();
   dataTransfer.events.subscribe(receiveTransfer);
 
   function itemStorage(peerId: string) {
@@ -205,11 +199,9 @@ export async function createChat(session: Session): Promise<Chat> {
   return {
     updates,
     reads,
-    async capabilities(peer) {
+    capabilities(peer) {
       if (!peer.isConnected()) return { text: false, files: false };
-      const services = validateServiceNames(
-        await peer.service<Registry>(registryServiceName).list(),
-      );
+      const services = peer.services();
       return {
         text: services.includes(messagingServiceName),
         files: services.includes(dataTransferServiceName),

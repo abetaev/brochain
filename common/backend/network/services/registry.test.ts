@@ -14,13 +14,13 @@ describe("Registry", () => {
     expect(registry.list()).toEqual(["registry", "identity"]);
   });
 
-  it("accepts only unique non-empty names that include Registry", () => {
+  it("accepts only unique non-empty service names", () => {
     expect(validateServiceNames(["registry", "identity"]))
       .toEqual(["registry", "identity"]);
+    expect(validateServiceNames([])).toEqual([]);
+    expect(validateServiceNames(["identity"])).toEqual(["identity"]);
 
     for (const names of [
-      [],
-      ["identity"],
       ["registry", "registry"],
       ["registry", ""],
       ["registry", 1],

@@ -7,28 +7,70 @@ import { webRTC } from "@libp2p/webrtc";
 import { webSockets } from "@libp2p/websockets";
 import { base64ToBytes } from "@c/base64";
 import createCommonNetwork, {
-  type Network as CommonNetwork,
+  type NetworkServiceFactories,
   type Peer,
-  type Services,
 } from "@c/backend/network";
+import {
+  createDataTransfer,
+  dataTransferServiceName,
+  type DataTransfer,
+} from "@v/backend/network/services/data-transfer";
+import {
+  createIdentity,
+  identityServiceName,
+} from "@v/backend/network/services/identity";
+import {
+  createMessaging,
+  messagingServiceName,
+  type Messaging,
+} from "@v/backend/network/services/messaging";
+import {
+  isServiceEnabled,
+  observeServiceEnabled,
+} from "@v/backend/options/network-services";
+import type { Options } from "@v/backend/options";
+import type { Channel, Signals } from "@v/backend/signals";
+
+export type NetworkUpdate = Readonly<
+  | {
+    type: "set";
+    peer: Peer;
+    changed: "connection" | "addresses" | "services";
+  }
+  | { type: "remove"; peerId: string }
+>;
 
 export interface Network {
   readonly id: string;
-  access(): Promise<CommonNetwork>;
-  provide(services: Services): Promise<void>;
-  bootstrapError(): string | undefined;
+  readonly updates: Channel<NetworkUpdate>;
+  connect(address: string, ...alternates: readonly string[]): Promise<Peer>;
+  connectedPeers(): readonly Peer[];
+  services(): readonly string[];
+  messaging(): Messaging;
+  dataTransfer(): DataTransfer;
   close(): Promise<void>;
 }
 
 const relayReservationTimeout = 5_000;
 
-export async function createNetwork(identitySeed: string): Promise<Network> {
-  const lifetime = new AbortController();
+export async function createNetwork(
+  identitySeed: string,
+  username: string,
+  options: Options,
+  signals: Signals,
+): Promise<Network> {
   const privateKey = await generateKeyPairFromSeed(
     "Ed25519",
     base64ToBytes(identitySeed),
   );
-  const network = await createCommonNetwork({
+  const messaging = createMessaging(signals);
+  const dataTransfer = createDataTransfer(signals);
+  const serviceFactories: NetworkServiceFactories = {
+    [identityServiceName]: () => ({ rpc: createIdentity(username) }),
+    [messagingServiceName]: messaging.factory,
+    [dataTransferServiceName]: dataTransfer.factory,
+  };
+  const common = await createCommonNetwork({
     privateKey,
     addresses: { listen: ["/p2p-circuit", "/webrtc"] },
     transports: [
@@ -43,99 +85,62 @@ export async function createNetwork(identitySeed: string): Promise<Network> {
       identify: identify(),
       identifyPush: identifyPush({ debounce: 0 }),
     },
-  });
-  let beacon: Peer | undefined;
-  let bootstrapFailure: string | undefined;
+  }, serviceFactories, (peer, serviceName) =>
+    isServiceEnabled(options, peer.id, serviceName)
+  );
+  const updates = signals.channel<NetworkUpdate>({}, "updates");
+  const optionObservers = new Map<string, readonly (() => void)[]>();
   let shutdown: Promise<void> | undefined;
 
-  async function maintainBootstrap(): Promise<void> {
-    if (beacon?.isConnected()) {
-      bootstrapFailure = undefined;
+  const stopNetworkUpdates = common.subscribe((peer, event) => {
+    if (event === "connected") {
+      optionObservers.set(peer.id, common.services().map((serviceName) =>
+        observeServiceEnabled(options, peer.id, serviceName, (enabled) => {
+          common.publish(peer, serviceName, enabled);
+        })
+      ));
+      updates.publish({ type: "set", peer, changed: "connection" });
       return;
     }
-
-    try {
-      beacon = await bootstrap(
-        network,
-        async () => await waitForWebRtcAddress(network, lifetime.signal),
-      );
-      bootstrapFailure = undefined;
-    } catch (reason) {
-      if (!lifetime.signal.aborted) bootstrapFailure = errorMessage(reason);
+    if (event === "disconnected") {
+      stopObservingPeer(peer.id);
+      updates.publish({ type: "remove", peerId: peer.id });
+      return;
     }
+    updates.publish({
+      type: "set",
+      peer,
+      changed: event === "addresses" ? "addresses" : "services",
+    });
+  });
+
+  function stopObservingPeer(peerId: string): void {
+    for (const stop of optionObservers.get(peerId) ?? []) stop();
+    optionObservers.delete(peerId);
   }
 
-  const component: Network = {
-    id: network.id,
-    async access() {
-      if (!lifetime.signal.aborted) await maintainBootstrap();
-      return network;
+  return {
+    id: common.id,
+    updates,
+    async connect(address, ...alternates) {
+      return await (await common.createPeer(address, ...alternates)).connect();
     },
-    provide: network.provide,
-    bootstrapError: () => bootstrapFailure,
+    connectedPeers: common.connectedPeers,
+    services: common.services,
+    messaging: () => messaging,
+    dataTransfer: () => dataTransfer,
     async close() {
       if (shutdown === undefined) {
-        lifetime.abort();
-        shutdown = network.close();
+        stopNetworkUpdates();
+        for (const peerId of optionObservers.keys()) stopObservingPeer(peerId);
+        shutdown = common.close();
       }
       await shutdown;
     },
   };
-  await maintainBootstrap();
-  return component;
 }
 
-async function bootstrap(
-  network: CommonNetwork,
-  ready: () => Promise<void>,
-): Promise<Peer> {
-  const created = await network.createPeer(defaultBeaconAddress());
-  const peer = await created.connect();
-  await ready();
-  return peer;
-}
-
-function defaultBeaconAddress(): string {
+export function defaultBeaconAddress(): string {
   const tls = window.location.protocol === "https:" ? "/tls" : "";
   return `/dns4/${window.location.hostname}/tcp/${import.meta.env.BEACON_RELAY_PORT}${tls}/ws`;
-}
-
-async function waitForWebRtcAddress(
-  network: CommonNetwork,
-  signal: AbortSignal,
-): Promise<void> {
-  const ready = () => network.addresses().some((address) => address.includes("/webrtc"));
-  if (ready()) return;
-  const readiness = AbortSignal.any([
-    signal,
-    AbortSignal.timeout(relayReservationTimeout),
-  ]);
-
-  await new Promise<void>((resolve, reject) => {
-    let unsubscribe = () => {};
-    const cleanup = () => {
-      unsubscribe();
-      readiness.removeEventListener("abort", aborted);
-    };
-    const updated = () => {
-      if (!ready()) return;
-      cleanup();
-      resolve();
-    };
-    const aborted = () => {
-      cleanup();
-      reject(new Error("The Beacon did not provide a relay reservation."));
-    };
-
-    unsubscribe = network.subscribeAddresses(updated);
-    readiness.addEventListener("abort", aborted, { once: true });
-    if (readiness.aborted) aborted();
-    else updated();
-  });
-}
-
-function errorMessage(reason: unknown): string {
-  return reason instanceof Error && reason.message.length > 0
-    ? reason.message
-    : "Unable to connect to the default Beacon.";
 }

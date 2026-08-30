@@ -24,3 +24,17 @@ export function isServiceEnabled(
     .obj(serviceName)
     .get("enabled") !== false;
 }
+
+export function observeServiceEnabled(
+  options: Options,
+  peerId: string,
+  serviceName: string,
+  listener: (enabled: boolean) => unknown,
+): () => void {
+  return options
+    .cat("peers")
+    .obj(peerId)
+    .cat("services")
+    .obj(serviceName)
+    .observe("enabled", (enabled) => listener(enabled !== false));
+}

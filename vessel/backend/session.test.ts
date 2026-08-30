@@ -1,11 +1,6 @@
 // @vitest-environment node
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  Network as CommonNetwork,
-  Peer,
-  Services,
-} from "@c/backend/network";
 import type { Network } from "@v/backend/network";
 import type { Storage } from "@v/backend/storage";
 import type { Options } from "./options";
@@ -22,40 +17,25 @@ vi.mock("@v/backend/storage", () => ({ createStorage: dependencies.createStorage
 
 import { createSession } from "./session.ts";
 
-let commonNetwork: CommonNetwork;
 let network: Network;
 let options: Options;
 let storage: Storage;
-let serviceSettings: Map<string, boolean>;
+let optionStorage: object;
 
 beforeEach(() => {
-  commonNetwork = { id: "local" } as CommonNetwork;
   network = {
-    id: commonNetwork.id,
-    access: vi.fn(async () => commonNetwork),
-    provide: vi.fn(async () => {}),
-    bootstrapError: vi.fn(),
+    id: "local",
     close: vi.fn(async () => {}),
-  };
-  serviceSettings = new Map();
-  options = {
-    cat: vi.fn((_category: string) => ({
-      obj: (peerId: string) => ({
-        cat: (_nested: string) => ({
-          obj: (serviceName: string) => ({
-            get: (_property: string) => serviceSettings.get(
-              `${peerId}/${serviceName}`,
-            ),
-          }),
-        }),
-      }),
-    })),
-  } as unknown as Options;
-  const service = {};
+  } as unknown as Network;
+  options = {} as Options;
+  optionStorage = {};
   const volatilePeer = { service: vi.fn(() => ({})) };
-  const persistentPeer = { service: vi.fn(() => service) };
+  const persistentPeer = { service: vi.fn(() => ({})) };
   storage = {
-    persistent: { peer: vi.fn(() => persistentPeer) },
+    persistent: {
+      service: vi.fn(() => optionStorage),
+      peer: vi.fn(() => persistentPeer),
+    },
     peer: vi.fn(() => volatilePeer),
     close: vi.fn(async () => {}),
   } as unknown as Storage;
@@ -83,26 +63,39 @@ describe("Session composition", () => {
     expect(dependencies.createNetwork).not.toHaveBeenCalled();
   });
 
-  it("constructs stable account-bound components and delegates Network access", async () => {
+  it("constructs Storage, Options, then Network and exposes stable components", async () => {
     const session = await openSession();
 
     expect(dependencies.createStorage).toHaveBeenCalledWith("alice");
-    expect(dependencies.createNetwork).toHaveBeenCalledWith("AA==");
-    await expect(session.network()).resolves.toBe(commonNetwork);
-    expect(network.access).toHaveBeenCalledOnce();
-    expect(session.bootstrapError()).toBeUndefined();
+    expect(dependencies.createOptions.mock.invocationCallOrder[0])
+      .toBeLessThan(dependencies.createNetwork.mock.invocationCallOrder[0]!);
+    expect(dependencies.createNetwork).toHaveBeenCalledWith(
+      "AA==",
+      "alice",
+      options,
+      session.signals(),
+    );
+    expect(session.network()).toBe(network);
+    expect(session.network()).toBe(network);
+    expect(session.options()).toBe(options);
+    expect(session.options()).toBe(options);
 
-    const storage = session.storage();
+    const volatile = session.storage();
     const persistent = session.storage({ persistent: true });
-    expect(storage).toBe(session.storage());
-    expect(storage).toBe(session.storage({ persistent: false }));
+    expect(volatile).toBe(session.storage({ persistent: false }));
     expect(persistent).toBe(session.storage({ persistent: true }));
-    expect(persistent).not.toBe(storage);
-    expect(storage.peer("remote")).toBe(storage.peer("remote"));
+    expect(volatile.peer("remote")).toBe(volatile.peer("remote"));
     expect(persistent.peer("remote")).toBe(persistent.peer("remote"));
-    expect(session.signals()).toBe(session.signals());
+  });
 
-    await session.close();
+  it("constructs Options in account-level persistent service storage", async () => {
+    const session = await openSession();
+
+    expect(storage.persistent.service).toHaveBeenCalledWith("options");
+    expect(dependencies.createOptions).toHaveBeenCalledWith(
+      optionStorage,
+      session.signals(),
+    );
   });
 
   it("isolates Signals between Sessions", async () => {
@@ -117,65 +110,21 @@ describe("Session composition", () => {
     secondChannel.subscribe(secondListener);
 
     firstChannel.publish("first");
+
     expect(first.signals()).not.toBe(second.signals());
     expect(firstChannel).not.toBe(secondChannel);
     expect(firstListener).toHaveBeenCalledWith("first");
     expect(secondListener).not.toHaveBeenCalled();
-
-    await Promise.all([first.close(), second.close()]);
   });
 
-  it("constructs Options eagerly in the local peer scope", async () => {
-    const session = await openSession();
-    const service = session.storage({ persistent: true })
-      .peer("local")
-      .service("options");
-
-    expect(session.options()).toBe(options);
-    expect(session.options()).toBe(options);
-    expect(dependencies.createOptions).toHaveBeenCalledOnce();
-    expect(dependencies.createOptions).toHaveBeenCalledWith(service, session.signals());
-    await session.close();
-  });
-
-  it("registers Identity after Options with the per-peer predicate", async () => {
-    const session = await openSession();
-    const services = vi.mocked(network.provide).mock.calls[0]?.[0] as Services;
-    const identity = services.identity;
-    const remote = { id: "remote" } as Peer;
-
-    expect(dependencies.createOptions.mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(network.provide).mock.invocationCallOrder[0]!);
-    expect(identity?.enabled?.(remote, commonNetwork)).toBe(true);
-    serviceSettings.set("remote/identity", false);
-    expect(identity?.enabled?.(remote, commonNetwork)).toBe(false);
-    expect((identity?.rpc?.(remote, commonNetwork) as {
-      get(): { name: string };
-    }).get()).toEqual({ name: "alice" });
-
-    await session.close();
-  });
-
-  it("closes initialized dependencies when Options construction fails", async () => {
+  it("closes Storage when Options construction fails", async () => {
     const failure = new Error("Options initialization failed.");
     dependencies.createOptions.mockRejectedValueOnce(failure);
 
     await expect(openSession()).rejects.toBe(failure);
 
-    expect(network.close).toHaveBeenCalledOnce();
     expect(storage.close).toHaveBeenCalledOnce();
-    expect(network.provide).not.toHaveBeenCalled();
-  });
-
-  it("closes initialized dependencies when Identity registration fails", async () => {
-    const failure = new Error("Identity registration failed.");
-    vi.mocked(network.provide).mockRejectedValueOnce(failure);
-
-    await expect(openSession()).rejects.toBe(failure);
-
-    expect(dependencies.createOptions).toHaveBeenCalledOnce();
-    expect(network.close).toHaveBeenCalledOnce();
-    expect(storage.close).toHaveBeenCalledOnce();
+    expect(dependencies.createNetwork).not.toHaveBeenCalled();
   });
 
   it("closes Storage when Network construction fails", async () => {
@@ -184,8 +133,8 @@ describe("Session composition", () => {
 
     await expect(openSession()).rejects.toBe(failure);
 
+    expect(dependencies.createOptions).toHaveBeenCalledOnce();
     expect(storage.close).toHaveBeenCalledOnce();
-    expect(dependencies.createOptions).not.toHaveBeenCalled();
   });
 });
 

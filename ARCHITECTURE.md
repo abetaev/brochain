@@ -14,8 +14,9 @@ structure
 ```text
 Common Network
 ├── Peer × remote identity
-├── Registry
-├── optional hosted services
+│   ├── Registry instance
+│   └── enabled service instances
+├── fixed Network Service Factory catalog
 └── RPC and ByteStream adapters
 
 Vessel
@@ -31,12 +32,12 @@ Vessel
 │       │   └── persistent root
 │       └── Network
 │           ├── Common Network
-│           └── Identity
+│           ├── Identity factory
+│           ├── Messaging factory
+│           └── DataTransfer factory
 └── Frontend
     ├── Roster
     ├── Chat
-    │   ├── Messaging
-    │   └── DataTransfer
     └── Account, Home, and Chat views
 
 Beacon
@@ -55,49 +56,56 @@ Common
 
 ### Network
 
-- **dependencies**: valid libp2p configuration and initial hosted service
-  definitions
-- **structure**: one libp2p node, Peer components, a service catalog, Registry,
-  and RPC and ByteStream adapters
-- **use cases**: read local identity and addresses; observe local addresses and
-  remote Peer connection and address changes; create and list Peers; add hosted
-  services; close Network
+- **dependencies**: valid libp2p configuration, a fixed Network Service Factory
+  catalog, and a per-Peer publication decision
+- **structure**: one libp2p node, Peer components, the fixed factory catalog,
+  the standard Registry factory, and RPC and ByteStream adapters
+- **use cases**: read local identity and addresses; create and list Peers;
+  inspect supported services; publish or remove one service for a connected
+  Peer; observe Peer connection, address, and service-catalog changes; close
+  Network
 - **behavior**: an identified address creates a disconnected Peer; an
   unidentified address is dialed to resolve its identity. Concurrent connection
   and authentication attempts for one identity converge on one active Peer.
-  Losing its final direct connection removes that Peer from Network; a
-  caller-held Peer may reconnect.
-  Address and topology observers are synchronous and non-retained. Registry and
-  incoming service access reflect the authenticated Peer's current permitted
-  service subset. Availability is checked for every Registry request, new RPC
-  call, and new byte stream; accepted work is not interrupted. The local service
-  catalog always contains every supported service.
+  Intermediary relay connections used to establish WebRTC are ignored; only a
+  completed direct connection creates and publishes a Peer.
+  Connection creates the configured service instances for that Peer, then
+  publishes the connected Peer. A later service-catalog refresh makes
+  the first remote Registry request; a missing or invalid Registry terminates
+  the Peer. Losing the final direct connection removes the Peer.
+  Publication changes add or remove one peer-bound instance. New RPC calls and
+  byte streams use the current published set; accepted work retains its instance
+  and finishes. The factory catalog remains fixed for the Network lifetime.
 
 #### Peer
 
 - **dependencies**: an owning Common Network and a resolved remote identity
-- **structure**: a connection observer, remote RPC projections, and a
-  ByteStream factory
-- **use cases**: read addresses and connection state; connect; observe
-  connection changes; access RPC services; open byte streams
+- **structure**: connection state, retained addresses, the current remote
+  service catalog, remote RPC projections, and a ByteStream factory
+- **use cases**: read addresses, connection state, and remote services; connect;
+  refresh remote services; observe connection changes; access RPC services;
+  open byte streams
 - **behavior**: explicit dial targets and Identify results supply retained
   addresses; inbound transport source addresses do not. RPC values may contain
   JSON-compatible data and bytes. ByteStream provides asynchronous reads,
   backpressured writes, half-close, and abort without exposing libp2p streams.
+  RPC and known protocol access reject services absent from the current remote
+  catalog.
 
 #### Registry
 
-- **dependencies**: an owning Common Network service catalog
-- **structure**: one mandatory RPC service
+- **dependencies**: an owning Peer and its current published service instances
+- **structure**: one peer-bound RPC service instance when published
 - **use cases**: list services available to the requesting Peer
-- **behavior**: each response reflects the current permitted service subset;
-  Registry itself is always included
+- **behavior**: each response lists the current instances published to that
+  Peer; Registry uses the same per-Peer publication configuration as every
+  other service and is enabled by default
 
 #### Discovery
 
 - **dependencies**: an owning Common Network
-- **structure**: one optional RPC list and peer-update ByteStream, currently
-  hosted by Beacon
+- **structure**: one optional Network Service Factory which creates a peer-bound RPC
+  list and peer-update ByteStream handler, currently hosted by Beacon
 - **use cases**: list and observe other connected Peers with advertised
   addresses
 - **behavior**: the list initializes consumers; later connection, address, and
@@ -126,13 +134,13 @@ Vessel backend
   and Web Locks
 - **structure**: one instance each of Signals, Storage, Vessel Network, and
   Options
-- **use cases**: access Signals, Storage, Options, and Common Network; inspect
-  Beacon failure; close the authenticated Session
-- **behavior**: construction creates Storage, Network through its first Beacon
-  attempt, Options, then Identity. Failure closes created dependencies. Options
-  and Storage access are synchronous afterward; Common Network access may await
-  a Beacon retry. Closing Session closes Network, Storage, and Account access;
-  consumers then discard the Session and its components.
+- **use cases**: access Signals, Storage, Options, and Vessel Network; close the
+  authenticated Session
+- **behavior**: construction creates Storage, account Options, then Network.
+  Network construction includes its fixed service factories but performs no
+  external connection. Failure closes created dependencies. Component access is
+  synchronous afterward. Closing Session closes Network, Storage, and Account
+  access; consumers then discard the Session and its components.
 
 #### Signals
 
@@ -146,8 +154,7 @@ Vessel backend
 
 #### Options
 
-- **dependencies**: the local Network identity's persistent Storage scope and
-  Session Signals
+- **dependencies**: account-level persistent Storage and Session Signals
 - **structure**: category and object accessors plus one change Channel
 - **use cases**: traverse category and object scopes; get, set, unset, and
   observe properties
@@ -167,9 +174,10 @@ Vessel backend
   Storage quota estimates, and Web Locks
 - **structure**: one volatile root and one persistent root; the volatile root
   contains event, singleton, key/value, and shared file stores; the persistent
-  root contains IndexedDB key/value stores
-- **use cases**: select retention; access peer-, service-, kind-, and name-scoped
-  stores; read and mutate values; create files; close Storage
+  root contains account- and peer-scoped IndexedDB key/value stores
+- **use cases**: select retention; access account- or peer-level service stores,
+  then kind- and name-scoped stores; read and mutate values; create files; close
+  Storage
 - **behavior**: construction opens both roots. Volatile data lasts for the
   Session; unencrypted persistent values survive it. Persistent entry lists are
   immutable and key-ordered. File stores share quota accounting and one
@@ -180,46 +188,51 @@ Vessel backend
 
 #### Network
 
-- **dependencies**: the Session identity, browser origin, Beacon relay
-  configuration, and Common Network factory
-- **structure**: one Common Network with Identity and an optional default-Beacon
-  Peer
-- **use cases**: read local peer ID; provide services; access Common Network;
-  inspect Beacon failure; close Network
-- **behavior**: construction awaits one Beacon attempt. Failure is non-fatal and
-  leaves Common Network available offline; later access retries. Success waits
-  for a relay-backed WebRTC address. Providing a service forwards directly and
-  does not retry Beacon. Local peer ID is synchronous after construction.
+- **dependencies**: the Session identity and account name, Options, Signals,
+  browser networking, and the Common Network factory
+- **structure**: one Common Network; fixed Identity, Messaging, and DataTransfer
+  factories; Network update, Messaging, and DataTransfer Channels
+- **use cases**: read local peer ID and supported services; connect directly;
+  list connected Peers; observe keyed Peer updates; access Messaging and
+  DataTransfer actions; close Network
+- **behavior**: construction creates the Common Network and supplies its fixed
+  factories. It performs no external connection. For each Common Peer,
+  Network reads that peer's service Options centrally and observes those exact
+  properties while connected. Changes publish or remove the corresponding
+  instance. Common connection, address, service-catalog, and disconnection
+  events become one-Peer set or remove updates through Signals.
 
 ##### Identity
 
-- **dependencies**: the Session account name, Options, and Vessel Network
-- **structure**: one local RPC facet and one remote response validator
+- **dependencies**: the Session account name and Vessel Network
+- **structure**: one Network Service Factory, peer-bound RPC instances, and one remote
+  response validator
 - **use cases**: return local `{ name }`; request and validate remote Identity
 - **behavior**: Identity retains no remote data; Roster owns valid observations.
-  Its RPC facet is available only when Options permits it for the requesting Peer
+  Network decides whether to create its RPC instance for each Peer.
 
 ##### Messaging
 
-- **dependencies**: Session Common Network, Options, and Signals
-- **structure**: one RPC service and one peer-tagged event Channel
+- **dependencies**: Vessel Network and Signals
+- **structure**: one Network Service Factory which creates peer-bound RPC instances,
+  plus one peer-tagged event Channel
 - **use cases**: send text; observe sent, received, and failed messages
 - **behavior**: messages require valid opaque IDs and text; Messaging retains no
-  Chat state. Its RPC facet is available only when Options permits it for the
-  requesting Peer
+  Chat state. Network decides whether to create its RPC instance for each Peer.
 
 ##### DataTransfer
 
-- **dependencies**: Session Common Network, Options, and Signals
-- **structure**: one byte-stream protocol and one ordered event Channel
+- **dependencies**: Vessel Network and Signals
+- **structure**: one Network Service Factory which creates a peer-bound byte-stream
+  handler, plus one ordered event Channel
 - **use cases**: offer and send declared-length data; accept with a sink; observe
   progress, completion, and failure
 - **behavior**: metadata and length are validated before bytes. A receiver must
   claim an offer during synchronous publication. Transfers preserve
   backpressure, require final acknowledgement, and allow two streams per
   direction per Peer. Progress is limited to one event per 250 milliseconds plus
-  the final state. New streams are available only when Options permits them for
-  the requesting Peer. Interrupted transfers do not resume.
+  the final state. Network decides whether to create its handler for each Peer.
+  Interrupted transfers do not resume.
 
 Vessel frontend
 ---------------
@@ -232,27 +245,30 @@ Vessel frontend
 - **use cases**: authenticate; sign out; navigate between account, peer list,
   and conversation views
 - **behavior**: after authentication, Application constructs Chat and then
-  Roster before exposing Home. Initialization failure closes the Session.
+  Roster before exposing Home. Both subscribe before Home starts an external
+  connection. Initialization failure closes the Session.
 
 ### Roster
 
-- **dependencies**: Session Common Network, persistent Storage, and Signals
+- **dependencies**: Session Vessel Network, persistent Storage, and Signals
 - **structure**: one persistent Identity store, one current peer projection,
   and a keyed update Channel
 - **use cases**: list or get current peers; refresh remote observations; observe
   one-peer set and remove updates
 - **behavior**: construction combines connected, discovered, and remembered
   Peers. Network and Discovery changes update only the affected projection and
-  publish that patch. Registry controls whether Identity and Discovery are
-  queried; provider failures are isolated. Valid Identity is persisted before
-  its peer update. Display name falls back from cached Identity name to peer ID.
+  publish that patch. A connection patch makes Roster ask the Peer to refresh
+  its service catalog; that catalog controls whether Identity and Discovery are
+  queried.
+  Provider failures are isolated. Valid Identity is persisted before its peer
+  update. Display name falls back from cached Identity name to peer ID.
   Addresses, availability, discovery, and service catalogs remain transient.
 
 ### Chat
 
-- **dependencies**: Session Storage, Common Network, and Signals
-- **structure**: Messaging, DataTransfer, peer-scoped item/order/read/file
-  stores, and update and read Channels
+- **dependencies**: Session Storage, Vessel Network, and Signals
+- **structure**: peer-scoped item/order/read/file stores and update and read
+  Channels
 - **use cases**: inspect history, unread count, and capabilities; mark read; send
   text or files; observe item and read updates
 - **behavior**: Chat retains item state before publishing updates. Incoming files
@@ -272,24 +288,28 @@ Vessel frontend
 ### Home view
 
 - **dependencies**: Session, Roster, and Chat
-- **structure**: one peer-list signal, peer rows, and direct-connection controls
+- **structure**: one peer-list signal, peer rows, direct-connection controls,
+  and view-local action and Beacon errors
 - **use cases**: refresh peers; connect a listed or direct Peer; open Chat; sign
   out
-- **behavior**: Roster patches replace or remove one keyed row. Each connected
-  row resolves its own Chat capabilities. Chat updates maintain unread
-  presentation.
+- **behavior**: after subscriptions exist, Home starts the default Beacon
+  connection in the background. Refresh retries that connection and refreshes
+  Roster. Listed and direct connections call Network directly. Roster patches
+  replace or remove one keyed row; Peer catalogs provide Chat capabilities;
+  Chat updates maintain unread presentation.
 
 ### Chat view
 
 - **dependencies**: Roster and Chat
-- **structure**: Roster-entry and capability resources, Chat-history projection,
-  text and file controls, and file downloads
+- **structure**: one Roster-entry signal, Chat-history projection, text and file
+  controls, and file downloads
 - **use cases**: return Home; read a conversation; send text or files; download
   received files
 - **behavior**: the view initializes from Roster and Chat snapshots, applies
-  updates for its peer, and marks existing and new received items read. It
-  retains only interaction errors and subscription cleanup; Roster owns name
-  and availability while Chat owns conversation data.
+  updates for its peer, derives capabilities from its current Peer catalog, and
+  marks existing and new received items read. It retains only interaction errors
+  and subscription cleanup; Roster owns name and availability while Chat owns
+  conversation data.
 
 Beacon
 ------
@@ -298,8 +318,8 @@ Beacon
 
 - **dependencies**: configured public relay information, a process identity,
   and Common Network factory
-- **structure**: one Common Network with Registry, Discovery, Identify, and
-  Circuit Relay services
+- **structure**: one Common Network with fixed Discovery and Registry factories,
+  Identify, and Circuit Relay
 - **use cases**: accept Vessel bootstrap connections; relay connection
   establishment; advertise connected Peers
 - **behavior**: Beacon retains no application messages and keeps one identity

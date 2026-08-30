@@ -33,6 +33,7 @@ export async function createPersistentRoot(
   databaseName: string,
 ): Promise<PersistentRoot> {
   const database = await openPersistentStorage(databaseName);
+  const services = new Map<string, PersistentServiceStorage>();
   const peers = new Map<string, PersistentPeerStorage>();
   const operations = new Set<Promise<unknown>>();
   let shutdown: Promise<void> | undefined;
@@ -45,6 +46,14 @@ export async function createPersistentRoot(
   }
 
   return {
+    service(serviceName) {
+      let service = services.get(serviceName);
+      if (service === undefined) {
+        service = createPersistentServiceStorage("", serviceName, operate);
+        services.set(serviceName, service);
+      }
+      return service;
+    },
     peer(peerId) {
       let peer = peers.get(peerId);
       if (peer === undefined) {

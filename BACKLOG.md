@@ -11,6 +11,16 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
+network service contract refinement
+-----------------------------------
+we'll need to work on network service architecture before we continue with functional changes
+
+i see there are 3 different types of remote interactions:
+1. RPC -- synchronous invocation of remote methods with possible return value, much like HTTP request (direct call)
+2. pubsub -- event based integrations when remote service produces event which might need appropriate reaction (opposite direction to RPC)
+3. data transfer -- transmission of large volume of data which does not fit into RPC or pubsub boundaries
+we need to plan to make this obvious in service contract, so it is obvious which kinds of interactions each service has and how to integrate with them from frontend consumers
+
 settings frontend and peer view
 -------------------------------
 
@@ -22,9 +32,9 @@ provides the generic settings controls used to configure it. Every Home roster
 row and Chat MUST provide navigation to this view, and leaving it returns to the
 originating view.
 
-Initially, Peer lists the locally supported optional services from Network's
-Services catalog and edits their per-peer enabled Options. Registry is not
-configurable. Saved changes apply immediately, including while connected.
+Initially, Peer lists the locally supported services from Network's Services
+catalog and edits their per-peer enabled Options. Saved changes apply
+immediately, including while connected.
 
 peer display-name customization
 -------------------------------

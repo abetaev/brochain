@@ -7,11 +7,6 @@ import {
   type DiscoveredPeer,
   type Discovery,
 } from "@c/backend/network/services/discovery";
-import {
-  registryServiceName,
-  validateServiceNames,
-  type Registry,
-} from "@c/backend/network/services/registry";
 import type { ByteStream, Peer } from "@c/backend/network";
 import {
   identityServiceName,
@@ -29,6 +24,7 @@ export interface RosterEntry {
   readonly online: boolean;
   readonly identity?: Identity;
   readonly name: string;
+  readonly addresses: readonly string[];
 }
 
 export type RosterUpdate = Readonly<
@@ -48,14 +44,13 @@ const identityPrefix = "peers/";
 const identitySuffix = ".identity";
 
 export async function createRoster(session: Session): Promise<Roster> {
-  const network = await session.network();
+  const network = session.network();
   const persisted = session.storage({ persistent: true })
-    .peer(network.id)
     .service(rosterServiceName)
     .kv<unknown>();
   const identities = new Map<string, Identity>();
   const connected = new Map<string, Peer>();
-  const discovered = new Map<string, Peer>();
+  const discovered = new Map<string, readonly string[]>();
   const discoveryProviders = new Set<string>();
   const entries = new Map<string, RosterEntry>();
   const updates = session.signals().channel<RosterUpdate>({}, "updates");
@@ -79,9 +74,10 @@ export async function createRoster(session: Session): Promise<Roster> {
   }
 
   function publish(peerId: string): void {
-    const peer = connected.get(peerId) ?? discovered.get(peerId);
+    const peer = connected.get(peerId);
+    const addresses = peer?.addresses() ?? discovered.get(peerId);
     const identity = identities.get(peerId);
-    if (peer === undefined && identity === undefined) {
+    if (addresses === undefined && identity === undefined) {
       entries.delete(peerId);
       updates.publish({ type: "remove", peerId });
       return;
@@ -93,19 +89,10 @@ export async function createRoster(session: Session): Promise<Roster> {
       online: connected.has(peerId),
       ...(identity === undefined ? {} : { identity }),
       name: identity?.name ?? peerId,
+      addresses: Object.freeze([...(addresses ?? [])]),
     });
     entries.set(peerId, next);
     updates.publish({ type: "set", entry: next });
-  }
-
-  async function serviceNames(peer: Peer): Promise<readonly string[] | undefined> {
-    try {
-      return validateServiceNames(
-        await peer.service<Registry>(registryServiceName).list(),
-      );
-    } catch {
-      return undefined;
-    }
   }
 
   async function refreshIdentity(
@@ -127,23 +114,16 @@ export async function createRoster(session: Session): Promise<Roster> {
     }
   }
 
-  async function applyDiscovered(candidate: DiscoveredPeer): Promise<void> {
+  function applyDiscovered(candidate: DiscoveredPeer): void {
     if (candidate.peerId === network.id) return;
     const addresses = candidate.addresses.flatMap((address) => {
       const identified = identifyAddress(address);
       return identified?.peerId === candidate.peerId ? [identified.address] : [];
     });
-    const [first, ...alternates] = [...new Set(addresses)];
-    if (first === undefined) return;
-
-    try {
-      const peer = await network.createPeer(first, ...alternates);
-      if (peer.id !== candidate.peerId) return;
-      discovered.set(peer.id, peer);
-      publish(peer.id);
-    } catch {
-      // One unusable advertised peer does not hide other Roster entries.
-    }
+    const available = [...new Set(addresses)];
+    if (available.length === 0) return;
+    discovered.set(candidate.peerId, Object.freeze(available));
+    publish(candidate.peerId);
   }
 
   function removeDiscovered(peerId: string): void {
@@ -151,10 +131,10 @@ export async function createRoster(session: Session): Promise<Roster> {
     publish(peerId);
   }
 
-  async function applyDiscoveryList(value: unknown): Promise<void> {
+  function applyDiscoveryList(value: unknown): void {
     const peers = validateDiscoveredPeers(value);
     const present = new Set(peers.map(({ peerId }) => peerId));
-    await Promise.all(peers.map(applyDiscovered));
+    for (const peer of peers) applyDiscovered(peer);
     for (const peerId of [...discovered.keys()]) {
       if (!present.has(peerId)) removeDiscovered(peerId);
     }
@@ -162,7 +142,7 @@ export async function createRoster(session: Session): Promise<Roster> {
 
   async function refreshDiscovery(peer: Peer): Promise<void> {
     try {
-      await applyDiscoveryList(
+      applyDiscoveryList(
         await peer.service<Discovery>(discoveryServiceName).list(),
       );
     } catch {
@@ -173,7 +153,7 @@ export async function createRoster(session: Session): Promise<Roster> {
   async function applyDiscoveryUpdates(stream: ByteStream): Promise<void> {
     try {
       for await (const update of readDiscoveryUpdates(stream)) {
-        if (update.type === "set") await applyDiscovered(update.peer);
+        if (update.type === "set") applyDiscovered(update.peer);
         else removeDiscovered(update.peerId);
       }
     } catch {
@@ -192,18 +172,28 @@ export async function createRoster(session: Session): Promise<Roster> {
   }
 
   async function attach(peer: Peer): Promise<void> {
-    const services = await serviceNames(peer);
-    if (services === undefined) return;
+    let services: readonly string[];
+    try {
+      services = await peer.refreshServices();
+    } catch {
+      return;
+    }
     await refreshIdentity(peer, services);
-    if (services.includes(discoveryServiceName)) {
+    if (services.includes(discoveryServiceName) && !discoveryProviders.has(peer.id)) {
       discoveryProviders.add(peer.id);
       await attachDiscovery(peer);
+    } else if (!services.includes(discoveryServiceName)) {
+      discoveryProviders.delete(peer.id);
     }
   }
 
   async function refreshPeer(peer: Peer): Promise<void> {
-    const services = await serviceNames(peer);
-    if (services === undefined) return;
+    let services: readonly string[];
+    try {
+      services = await peer.refreshServices();
+    } catch {
+      return;
+    }
     await refreshIdentity(peer, services);
     if (services.includes(discoveryServiceName)) await refreshDiscovery(peer);
   }
@@ -213,20 +203,19 @@ export async function createRoster(session: Session): Promise<Roster> {
     connected.set(peer.id, peer);
     publish(peer.id);
   }
-  network.subscribe((peer, event) => {
-    if (event === "connected") {
+  network.updates.subscribe((update) => {
+    if (update.type === "set") {
+      const { peer } = update;
       connected.set(peer.id, peer);
       publish(peer.id);
-      void attach(peer);
+      if (update.changed === "connection") void attach(peer);
       return;
     }
-    if (event === "disconnected") {
-      connected.delete(peer.id);
-      if (discoveryProviders.delete(peer.id)) {
-        for (const peerId of [...discovered.keys()]) removeDiscovered(peerId);
-      }
+    connected.delete(update.peerId);
+    if (discoveryProviders.delete(update.peerId)) {
+      for (const peerId of [...discovered.keys()]) removeDiscovered(peerId);
     }
-    publish(peer.id);
+    publish(update.peerId);
   });
   await Promise.all(initial.map(attach));
   for (const peerId of identities.keys()) {

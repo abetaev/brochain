@@ -9,11 +9,13 @@ using brochain
 1. Open brochain and create an account, or select an existing account and unlock
    it. Account names use 1–64 lowercase English letters. The password-strength
    indicator is advice and does not prevent account creation. Signing in requires
-   browser support for IndexedDB, private file storage, and Web Locks. If the
-   default Beacon is unavailable, sign-in still succeeds in offline mode and a
-   later network action retries the connection.
+   browser support for IndexedDB, private file storage, and Web Locks. Home
+   starts the default Beacon connection after its services subscribe to network
+   updates. If the Beacon is unavailable, sign-in still succeeds and Home shows
+   the connection failure.
 2. Home updates as people become available through the Beacon or direct
-   connections. Select **Refresh peers** to retry manually. People identified
+   connections. Select **Refresh peers** to retry the Beacon connection and
+   refresh connected peers. People identified
    earlier remain listed for that account after a reload; **Not currently
    available** means they must be found again before connecting.
 3. Select **Connect** beside a peer. If someone gives you a direct address, paste

@@ -1,13 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ByteStream, Network, Peer, Services } from "@c/backend/network";
-import type { Options } from "@v/backend/options";
-import type { Session } from "@v/backend/session";
+import type { ByteStream, Network, Peer } from "@c/backend/network";
 import { createSignals } from "@v/backend/signals";
 import {
   createDataTransfer,
   dataTransferProtocol,
   dataTransferServiceName,
   type DataSink,
+  type DataTransfer,
   type DataTransferEvent,
 } from "./data-transfer.ts";
 
@@ -80,60 +79,22 @@ function fail(pipe: Pipe, reason: Error): void {
 }
 
 function testContext(id: string) {
-  let services: Services = {};
-  const signals = createSignals();
-  const disabled = new Set<string>();
-  const network = {
-    id,
-    provide: vi.fn(async (provided: Services) => {
-      services = { ...services, ...provided };
-    }),
-  } as unknown as Network;
-  const options = {
-    cat: () => ({
-      obj: (peerId: string) => ({
-        cat: () => ({
-          obj: (serviceName: string) => ({
-            get: () => disabled.has(`${peerId}/${serviceName}`)
-              ? false
-              : undefined,
-          }),
-        }),
-      }),
-    }),
-  } as unknown as Options;
-  const session = {
-    username: id,
-    network: vi.fn(async () => network),
-    options: () => options,
-    signals: () => signals,
-    storage: vi.fn(),
-    bootstrapError: () => undefined,
-    close: vi.fn(),
-  } as unknown as Session;
-  return {
-    id,
-    network,
-    session,
-    services: () => services,
-    disable(peerId: string, serviceName: string) {
-      disabled.add(`${peerId}/${serviceName}`);
-    },
-  };
+  return { id, signals: createSignals() };
 }
 
 function connect(
   local: ReturnType<typeof testContext>,
   remote: ReturnType<typeof testContext>,
+  transfer: DataTransfer,
 ): Peer {
   const remoteView = peer(remote.id);
   remoteView.open.mockImplementation(async (protocol: string) => {
     expect(protocol).toBe(dataTransferProtocol);
-    const definition = remote.services()[dataTransferServiceName]?.protocols
-      ?.find(({ id }) => id === protocol);
-    if (definition === undefined) throw new Error("Remote protocol is unavailable.");
+    const service = transfer.factory(peer(local.id), {} as Network);
+    const accept = service.protocols?.[protocol];
+    if (accept === undefined) throw new Error("Remote protocol is unavailable.");
     const [outbound, inbound] = streamPair();
-    void definition.accept(peer(local.id), inbound);
+    void accept(inbound);
     return outbound;
   });
   return remoteView;
@@ -143,8 +104,10 @@ function peer(id: string): Peer & { open: ReturnType<typeof vi.fn> } {
   return {
     id,
     addresses: vi.fn(() => []),
+    services: vi.fn(() => [dataTransferServiceName]),
     isConnected: vi.fn(() => true),
     connect: vi.fn(),
+    refreshServices: vi.fn(),
     subscribe: vi.fn(() => () => {}),
     service: vi.fn(),
     open: vi.fn(),
@@ -166,25 +129,26 @@ async function* bytes(...chunks: readonly number[][]): AsyncIterable<Uint8Array>
 }
 
 describe("DataTransfer", () => {
-  it("attaches the shared per-peer availability predicate", async () => {
+  it("declares its protocol and creates a peer-bound handler", () => {
     const context = testContext("local");
-    await createDataTransfer(context.session);
-    const enabled = context.services()[dataTransferServiceName]?.enabled;
-    const first = peer("first");
-    const second = peer("second");
+    const transfer = createDataTransfer(context.signals);
 
-    expect(enabled?.(first, context.network)).toBe(true);
-    context.disable("first", dataTransferServiceName);
-    expect(enabled?.(first, context.network)).toBe(false);
-    expect(enabled?.(second, context.network)).toBe(true);
+    expect(transfer.factory.protocols).toEqual([{
+      id: dataTransferProtocol,
+      maxInboundStreams: 2,
+      maxOutboundStreams: 2,
+    }]);
+    expect(transfer.factory(peer("first"), {} as Network)).not.toBe(
+      transfer.factory(peer("second"), {} as Network),
+    );
   });
 
   it("streams accepted data with exact metadata, progress, and completion", async () => {
     const localContext = testContext("local");
     const remoteContext = testContext("remote");
     const [local, remote] = await Promise.all([
-      createDataTransfer(localContext.session),
-      createDataTransfer(remoteContext.session),
+      createDataTransfer(localContext.signals),
+      createDataTransfer(remoteContext.signals),
     ]);
     const received: number[] = [];
     const localEvents: DataTransferEvent[] = [];
@@ -195,7 +159,7 @@ describe("DataTransfer", () => {
       if (event.type === "offered") event.accept(Promise.resolve(sink(received)));
     });
 
-    local.send(connect(localContext, remoteContext), {
+    local.send(connect(localContext, remoteContext, remote), {
       id: "transfer-1",
       size: 5,
       metadata: { kind: "test", name: "payload" },
@@ -225,15 +189,15 @@ describe("DataTransfer", () => {
     const localContext = testContext("local");
     const remoteContext = testContext("remote");
     const [local, remote] = await Promise.all([
-      createDataTransfer(localContext.session),
-      createDataTransfer(remoteContext.session),
+      createDataTransfer(localContext.signals),
+      createDataTransfer(remoteContext.signals),
     ]);
     const localEvents: DataTransferEvent[] = [];
     const remoteEvents: DataTransferEvent[] = [];
     local.events.subscribe((event) => localEvents.push(event));
     remote.events.subscribe((event) => remoteEvents.push(event));
 
-    local.send(connect(localContext, remoteContext), {
+    local.send(connect(localContext, remoteContext, remote), {
       id: "unclaimed",
       size: 0,
       metadata: {},
@@ -252,8 +216,8 @@ describe("DataTransfer", () => {
     const localContext = testContext("local");
     const remoteContext = testContext("remote");
     const [local, remote] = await Promise.all([
-      createDataTransfer(localContext.session),
-      createDataTransfer(remoteContext.session),
+      createDataTransfer(localContext.signals),
+      createDataTransfer(remoteContext.signals),
     ]);
     const failure = new Error("Offer consumer failed.");
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -268,7 +232,7 @@ describe("DataTransfer", () => {
         if (event.type === "offered") event.accept(sink([]));
       });
 
-      local.send(connect(localContext, remoteContext), {
+      local.send(connect(localContext, remoteContext, remote), {
         id: "isolated-consumer",
         size: 0,
         metadata: {},
@@ -286,8 +250,8 @@ describe("DataTransfer", () => {
     const localContext = testContext("local");
     const remoteContext = testContext("remote");
     const [local, remote] = await Promise.all([
-      createDataTransfer(localContext.session),
-      createDataTransfer(remoteContext.session),
+      createDataTransfer(localContext.signals),
+      createDataTransfer(remoteContext.signals),
     ]);
     const target = sink([]);
     const localEvents: DataTransferEvent[] = [];
@@ -298,7 +262,7 @@ describe("DataTransfer", () => {
       if (event.type === "offered") event.accept(target);
     });
 
-    local.send(connect(localContext, remoteContext), {
+    local.send(connect(localContext, remoteContext, remote), {
       id: "partial",
       size: 2,
       metadata: {},
@@ -317,7 +281,7 @@ describe("DataTransfer", () => {
 
   it("validates outgoing descriptions and limits concurrent transfers", async () => {
     const context = testContext("local");
-    const transfer = await createDataTransfer(context.session);
+    const transfer = createDataTransfer(context.signals);
     const never = new Promise<ByteStream>(() => {});
     const remote = peer("remote");
     remote.open.mockImplementation(async () => await never);

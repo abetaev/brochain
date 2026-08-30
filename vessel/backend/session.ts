@@ -1,13 +1,7 @@
-import type { Network } from "@c/backend/network";
 import {
   createNetwork,
-  type Network as NetworkComponent,
+  type Network,
 } from "@v/backend/network";
-import { isServiceEnabled } from "@v/backend/options/network-services";
-import {
-  createIdentity,
-  identityServiceName,
-} from "@v/backend/network/services/identity";
 import { createOptions, type Options } from "@v/backend/options";
 import { createSignals, type Signals } from "@v/backend/signals";
 import {
@@ -18,12 +12,11 @@ import {
 
 export interface Session {
   readonly username: string;
-  network(): Promise<Network>;
+  network(): Network;
   options(): Options;
   signals(): Signals;
   storage(options?: { readonly persistent?: false }): VolatileStorage;
   storage(options: { readonly persistent: true }): PersistentStorage;
-  bootstrapError(): string | undefined;
   close(): Promise<void>;
 }
 
@@ -41,32 +34,27 @@ export async function createSession(
 
   const signals = createSignals();
   const storage = await createStorage(identity.username);
-  let network: NetworkComponent;
+  let options: Options;
   try {
-    network = await createNetwork(identity.identitySeed);
+    options = await createOptions(
+      storage.persistent.service("options"),
+      signals,
+    );
   } catch (reason) {
     await storage.close().catch(() => {});
     throw reason;
   }
 
-  let options: Options;
+  let network: Network;
   try {
-    options = await createOptions(
-      storage.persistent.peer(network.id).service("options"),
+    network = await createNetwork(
+      identity.identitySeed,
+      identity.username,
+      options,
       signals,
     );
-    await network.provide({
-      [identityServiceName]: {
-        enabled: (peer) => isServiceEnabled(
-          options,
-          peer.id,
-          identityServiceName,
-        ),
-        rpc: () => createIdentity(identity.username),
-      },
-    });
   } catch (reason) {
-    await Promise.allSettled([network.close(), storage.close()]);
+    await storage.close().catch(() => {});
     throw reason;
   }
 
@@ -83,11 +71,10 @@ export async function createSession(
 
   return {
     username: identity.username,
-    network: network.access,
+    network: () => network,
     options: () => options,
     signals: () => signals,
     storage: accessStorage,
-    bootstrapError: network.bootstrapError,
     async close() {
       if (shutdown === undefined) {
         shutdown = (async () => {

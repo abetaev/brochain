@@ -16,10 +16,10 @@ export function Chat(props: {
     const peer = entry()?.peer;
     return peer?.isConnected() === true ? peer : undefined;
   };
-  const [capabilities] = createResource(
-    connectedPeer,
-    async (peer) => await props.chat.capabilities(peer),
-  );
+  const capabilities = () => {
+    const peer = connectedPeer();
+    return peer === undefined ? undefined : props.chat.capabilities(peer);
+  };
   const name = () => entry()?.name ?? props.peerId;
 
   props.chat.markRead(props.peerId);
@@ -84,8 +84,7 @@ export function Chat(props: {
     if (current === undefined) return "This peer is no longer available.";
     if (current.peer === undefined) return "This peer is not currently available.";
     if (!current.peer.isConnected()) return "This peer is not connected.";
-    if (capabilities.error !== undefined) return errorMessage(capabilities.error);
-    if (!capabilities.loading && capabilities()?.text === false) {
+    if (capabilities()?.text === false) {
       return "This peer does not provide messaging.";
     }
     return undefined;
