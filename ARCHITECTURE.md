@@ -6,6 +6,8 @@ This document describes the implemented technical architecture of brochain.
 brochain consists of the browser application **Vessel**, the reusable
 **Common** backend, and the headless bootstrap and relay peer **Beacon**.
 
+architecture semantics are described in [this document](./docs/ARCHITECTURE.md) and provide guidelines and patterns for project development.
+
 structure
 ---------
 

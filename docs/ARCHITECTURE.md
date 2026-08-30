@@ -14,36 +14,50 @@ brochain
 
 this section describes the project's functionality, structure, and behavior starting from the highest possible level of abstraction.
 
-![use cases](./brochain.uc.png)
+- use cases
 
-structure
----------
+  ![use cases](./brochain.uc.png)
 
-![structure](./brochain.cmp.png)
+- structure
 
-behavior
---------
+  ![structure](./brochain.cmp.png)
 
-![behavior](./brochain.seq.png)
+- behavior
 
-decomposition
--------------
+  * peer perspective 
 
-### vessel
+    ![behavior](./brochain.seq.png)
+
+  * end to end perspective
+
+    ![behavior](./brochain.seq-e2e.png)
+
+vessel
+------
 
 ![structure](./brochain.vessel.cmp.png)
 
-#### frontend
+### frontend
 
 ![structure](./brochain.vessel.frontend.cmp.png)
 
-#### backend
+### backend
 
 ![structure](./brochain.vessel.backend.cmp.png)
 
-##### network
+#### network
 
-![structure](./brochain.vessel.backend.network.png)
+ - structure
+   
+   ![structure](./brochain.vessel.backend.network.cmp.png)
+
+   Network has knowledge of all Network Services supported by current version of Brochain PWA
+
+ - behavior
+   
+   ![behavior](./brochain.vessel.backend.network.seq.png)
+
+   Whenever Peer connection happens Network reads configuration for the connected peer and publishes/exposes only services that are configured to be exposed for that peer (all by default)
 
 appendix
 ========
@@ -68,17 +82,19 @@ some additional information on UML notation:
 naming
 ------------------
 
-format: `{scope}[.{package}][/{modifier}].{type}`
+format: `{scope}[.{package}].{type}[-{modifier}]`
 
  - `scope` - application of the diagram:
    - `architecture` - diagram describes general architecture
    - `project` (or `brochain`) - diagram is related specifically to project
    - `development_process` - diagram describes development process
  - `package` - more fine grained definition of application - one or more stanzas dot separated, e.g. `backend.network.services`, `frontend`, etc...
- - `modifier` - additional modifier stanza to application, e.g. `temporary`, `poc`, `option1`, etc...
  - `type` - main type of the diagram:
    - `model` - entity relationship - structural
-   - `component` - system decomposition - structural
+   - `cmp` - system decomposition - structural
    - `uc` - use cases / functional decomposition - behavioral
    - `seq` - sequence of component interactions - behavioral
    - `flow` - activity / procedure decomposition - behavioral
+ - `modifier` - additional modifier stanza to application, e.g. `temporary`, `poc`, `option1`, `e2e`, `happy_path`, `wrong_usage` etc...
+
+stanza is set of lower case english words (at least one) separated with underscores.
