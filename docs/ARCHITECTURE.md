@@ -5,14 +5,14 @@ intended architecture is described here, while [ARCHITECTURE.md](../ARCHITECTURE
 architecture
 ============
 
-this section contains description of project's architecture without any specifics on its functionality.
+this section describes the project's architecture without specifics of its functionality.
 
 ![architecture model](./architecture.model.png)
 
 brochain
 ========
 
-this section describes project's functionality, structure and behavior starting from the highest possible level of abstraction.
+this section describes the project's functionality, structure, and behavior starting from the highest possible level of abstraction.
 
 ![use cases](./brochain.uc.png)
 
@@ -25,6 +25,25 @@ behavior
 --------
 
 ![behavior](./brochain.seq.png)
+
+decomposition
+-------------
+
+### vessel
+
+![structure](./brochain.vessel.cmp.png)
+
+#### frontend
+
+![structure](./brochain.vessel.frontend.cmp.png)
+
+#### backend
+
+![structure](./brochain.vessel.backend.cmp.png)
+
+##### network
+
+![structure](./brochain.vessel.backend.network.png)
 
 appendix
 ========
@@ -44,6 +63,7 @@ some additional information on UML notation:
  - constraints may be arbitrarily specified to provide additional information, but are mostly avoided as unnecessary complexity
  - intersecting frames represent overlapping but not necessarily dependent scopes; entities inside the intersection belong to both scopes; if a smaller frame is not fully embedded into a bigger one, it should not be considered part of the bigger scope.
  - shapes with dashed border are not yet considered for implementation or may be implemented as external plugins (non-core entities/behaviors)
+ - when component enclosed into frame/package exposes interface that is outside of that frame, that is public interface that is visible to anyone outside of component's package 
 
 naming
 ------------------
