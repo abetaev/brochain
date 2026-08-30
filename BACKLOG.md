@@ -41,7 +41,7 @@ fallbacks.
 The cached remote Identity remains available in Peer for reference and MUST NOT
 be overwritten by local naming. The option remains absent until the user saves
 a display name; it MUST NOT be initialized from Identity. A saved-name change
-publishes Roster's existing invalidation so current views resolve the new name.
+publishes the peer's Roster update so current views use the new name.
 
 message confirmations
 ---------------------

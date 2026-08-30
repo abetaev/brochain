@@ -12,9 +12,10 @@ using brochain
    browser support for IndexedDB, private file storage, and Web Locks. If the
    default Beacon is unavailable, sign-in still succeeds in offline mode and a
    later network action retries the connection.
-2. On Home, select **Refresh peers** to update the list of people you can connect
-   to. People identified earlier remain listed for that account after a reload;
-   **Not currently available** means they must be found again before connecting.
+2. Home updates as people become available through the Beacon or direct
+   connections. Select **Refresh peers** to retry manually. People identified
+   earlier remain listed for that account after a reload; **Not currently
+   available** means they must be found again before connecting.
 3. Select **Connect** beside a peer. If someone gives you a direct address, paste
    it under **Connect directly** instead.
 4. Select **Chat** after connecting. Enter text and select **Send message**. Use

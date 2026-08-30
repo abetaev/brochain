@@ -11,9 +11,7 @@ export function Chat(props: {
 }) {
   const [items, setItems] = createSignal(props.chat.history(props.peerId));
   const [actionError, setActionError] = createSignal<string>();
-  const [entry, { refetch }] = createResource(async () =>
-    await props.roster.get(props.peerId)
-  );
+  const [entry, setEntry] = createSignal(props.roster.get(props.peerId));
   const connectedPeer = (): Peer | undefined => {
     const peer = entry()?.peer;
     return peer?.isConnected() === true ? peer : undefined;
@@ -33,7 +31,13 @@ export function Chat(props: {
     setItems((current) => replaceItem(current, item));
     if (received) props.chat.markRead(item.peerId);
   });
-  const stopRoster = props.roster.invalidations.subscribe(() => void refetch());
+  const stopRoster = props.roster.updates.subscribe((update) => {
+    if (update.type === "set") {
+      if (update.entry.peerId === props.peerId) setEntry(update.entry);
+    } else if (update.peerId === props.peerId) {
+      setEntry(undefined);
+    }
+  });
 
   function attemptSend(operation: () => void): void {
     setActionError(undefined);
@@ -76,8 +80,6 @@ export function Chat(props: {
   }
 
   function availabilityError(): string | undefined {
-    if (entry.error !== undefined) return errorMessage(entry.error);
-    if (entry.loading) return undefined;
     const current = entry();
     if (current === undefined) return "This peer is no longer available.";
     if (current.peer === undefined) return "This peer is not currently available.";

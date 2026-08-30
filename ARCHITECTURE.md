@@ -57,8 +57,9 @@ Common
   definitions
 - **structure**: one libp2p node, Peer components, a service catalog, Registry,
   and RPC and ByteStream adapters
-- **use cases**: read local identity and addresses; observe address and topology
-  changes; create and list Peers; add hosted services; close Network
+- **use cases**: read local identity and addresses; observe local addresses and
+  remote Peer connection and address changes; create and list Peers; add hosted
+  services; close Network
 - **behavior**: an identified address creates a disconnected Peer; an
   unidentified address is dialed to resolve its identity. Concurrent connection
   and authentication attempts for one identity converge on one active Peer.
@@ -93,9 +94,13 @@ Common
 #### Discovery
 
 - **dependencies**: an owning Common Network
-- **structure**: one optional RPC service, currently hosted by Beacon
-- **use cases**: list advertised addresses for other connected Peers
-- **behavior**: only currently advertised addresses are returned
+- **structure**: one optional RPC list and peer-update ByteStream, currently
+  hosted by Beacon
+- **use cases**: list and observe other connected Peers with advertised
+  addresses
+- **behavior**: the list initializes consumers; later connection, address, and
+  disconnection changes are sent as keyed set or remove updates. A requester is
+  excluded from its own list and update stream.
 
 Vessel backend
 --------------
@@ -230,14 +235,15 @@ Vessel frontend
 ### Roster
 
 - **dependencies**: Session Common Network, persistent Storage, and Signals
-- **structure**: one persistent Identity store, peer-discovery resolver, and
-  invalidation Channel
-- **use cases**: list peers; get one Peer; observe topology and name
-  invalidations
-- **behavior**: each query combines connected, discovered, and remembered
-  Peers. Registry controls whether Identity and Discovery are queried; provider
-  failures are isolated. Valid Identity is persisted before its projection and
-  invalidation. Display name falls back from cached Identity name to peer ID.
+- **structure**: one persistent Identity store, one current peer projection,
+  and a keyed update Channel
+- **use cases**: list or get current peers; refresh remote observations; observe
+  one-peer set and remove updates
+- **behavior**: construction combines connected, discovered, and remembered
+  Peers. Network and Discovery changes update only the affected projection and
+  publish that patch. Registry controls whether Identity and Discovery are
+  queried; provider failures are isolated. Valid Identity is persisted before
+  its peer update. Display name falls back from cached Identity name to peer ID.
   Addresses, availability, discovery, and service catalogs remain transient.
 
 ### Chat
@@ -264,11 +270,12 @@ Vessel frontend
 ### Home view
 
 - **dependencies**: Session, Roster, and Chat
-- **structure**: one Roster resource, peer rows, and direct-connection controls
+- **structure**: one peer-list signal, peer rows, and direct-connection controls
 - **use cases**: refresh peers; connect a listed or direct Peer; open Chat; sign
   out
-- **behavior**: Roster and Chat invalidations update peer availability,
-  capabilities, and unread presentation
+- **behavior**: Roster patches replace or remove one keyed row. Each connected
+  row resolves its own Chat capabilities. Chat updates maintain unread
+  presentation.
 
 ### Chat view
 
@@ -277,10 +284,10 @@ Vessel frontend
   text and file controls, and file downloads
 - **use cases**: return Home; read a conversation; send text or files; download
   received files
-- **behavior**: the view initializes from Chat history, follows service
-  invalidations, and marks existing and new received items read. It retains only
-  interaction errors and subscription cleanup; Roster owns name and availability
-  while Chat owns conversation data.
+- **behavior**: the view initializes from Roster and Chat snapshots, applies
+  updates for its peer, and marks existing and new received items read. It
+  retains only interaction errors and subscription cleanup; Roster owns name
+  and availability while Chat owns conversation data.
 
 Beacon
 ------

@@ -14,8 +14,10 @@ import createNetwork, {
 } from "./index.ts";
 import { addressWithPeerId, destinationPeerId } from "./peer.ts";
 import {
-  createDiscovery,
+  createDiscoveryHost,
   discoveryServiceName,
+  discoveryUpdatesProtocol,
+  readDiscoveryUpdates,
   type Discovery,
 } from "./services/discovery.ts";
 import {
@@ -146,7 +148,7 @@ describe("Network and Peer identity", () => {
     expect(local.network.connectedPeers()).toEqual([]);
   });
 
-  it("publishes active topology once for inbound connection and final disconnection", async () => {
+  it("publishes connection and learned-address changes for an active Peer", async () => {
     const remote = await localNetwork();
     const identity = await generateKeyPair("Ed25519");
     const local = await localNetwork({}, true, identity);
@@ -167,26 +169,46 @@ describe("Network and Peer identity", () => {
         .find(({ id }) => id === local.network.id);
       expect(inbound?.addresses()).toContain(local.address);
     });
-    expect(remoteEvents).toEqual([`${local.network.id}:connected`]);
-    expect(removedEvents).toEqual([`${local.network.id}:connected`]);
+    expect(remoteEvents).toEqual([
+      `${local.network.id}:connected`,
+      `${local.network.id}:addresses`,
+    ]);
+    expect(removedEvents).toEqual(remoteEvents);
     expect(localEvents).toEqual([`${remote.network.id}:connected`]);
 
     const duplicatePeer = await duplicate.network.createPeer(remote.address);
     await duplicatePeer.connect();
-    await vi.waitFor(() => expect(remote.network.connectedPeers()).toHaveLength(1));
-    expect(remoteEvents).toEqual([`${local.network.id}:connected`]);
+    await vi.waitFor(() => {
+      const inbound = remote.network.connectedPeers()[0];
+      expect(inbound?.addresses()).toContain(duplicate.address);
+    });
+    expect(remoteEvents).toEqual([
+      `${local.network.id}:connected`,
+      `${local.network.id}:addresses`,
+      `${local.network.id}:addresses`,
+    ]);
 
     await local.network.close();
     await vi.waitFor(() => expect(remote.network.connectedPeers()).toHaveLength(1));
-    expect(remoteEvents).toEqual([`${local.network.id}:connected`]);
+    expect(remoteEvents).toEqual([
+      `${local.network.id}:connected`,
+      `${local.network.id}:addresses`,
+      `${local.network.id}:addresses`,
+    ]);
 
     unsubscribe();
     await duplicate.network.close();
     await vi.waitFor(() => expect(remoteEvents).toEqual([
       `${local.network.id}:connected`,
+      `${local.network.id}:addresses`,
+      `${local.network.id}:addresses`,
       `${local.network.id}:disconnected`,
     ]));
-    expect(removedEvents).toEqual([`${local.network.id}:connected`]);
+    expect(removedEvents).toEqual([
+      `${local.network.id}:connected`,
+      `${local.network.id}:addresses`,
+      `${local.network.id}:addresses`,
+    ]);
     expect(localEvents).toEqual([
       `${remote.network.id}:connected`,
       `${remote.network.id}:disconnected`,
@@ -220,14 +242,14 @@ describe("Network and Peer identity", () => {
   });
 
   it("keeps inbound peers valid but undiscoverable until they advertise an address", async () => {
+    const discovery = createDiscoveryHost();
     const beacon = await localNetwork({
       [discoveryServiceName]: {
-        rpc: (requester, network) => createDiscovery(
-          requester,
-          network.connectedPeers,
-        ),
+        rpc: (peer, network) => discovery.service(peer, network.connectedPeers),
+        protocols: [discovery.updates],
       },
     }, false);
+    beacon.network.subscribe(discovery.peerChanged);
     const first = await localNetwork(undefined, false);
     const second = await localNetwork(undefined, false);
     const firstBeacon = await first.network.createPeer(beacon.address);
@@ -239,6 +261,41 @@ describe("Network and Peer identity", () => {
       peer.isConnected() && peer.addresses().length === 0
     )).toBe(true);
     expect(await firstBeacon.service<Discovery>(discoveryServiceName).list()).toEqual([]);
+  });
+
+  it("delivers Discovery patches without occupying RPC", async () => {
+    const discovery = createDiscoveryHost();
+    const beacon = await localNetwork({
+      [discoveryServiceName]: {
+        rpc: (peer, network) => discovery.service(peer, network.connectedPeers),
+        protocols: [discovery.updates],
+      },
+    });
+    beacon.network.subscribe(discovery.peerChanged);
+    const first = await localNetwork();
+    const second = await localNetwork();
+    const firstBeacon = await first.network.createPeer(beacon.address);
+    const secondBeacon = await second.network.createPeer(beacon.address);
+    await firstBeacon.connect();
+    const stream = await firstBeacon.open(discoveryUpdatesProtocol);
+    const updates = readDiscoveryUpdates(stream);
+
+    expect(await firstBeacon.service<Discovery>(discoveryServiceName).list()).toEqual([]);
+    const next = updates.next();
+    await secondBeacon.connect();
+
+    await expect(next).resolves.toEqual({
+      done: false,
+      value: {
+        type: "set",
+        peer: {
+          peerId: second.network.id,
+          addresses: expect.arrayContaining([second.address]),
+        },
+      },
+    });
+    expect(await firstBeacon.service<Registry>(registryServiceName).list())
+      .toContain(discoveryServiceName);
   });
 });
 

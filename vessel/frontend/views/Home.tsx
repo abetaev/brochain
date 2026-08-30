@@ -1,12 +1,8 @@
-import { For, Show, createMemo, createResource, createSignal, onCleanup } from "solid-js";
+import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
 import type { Session } from "@v/backend/session";
 import type { Chat } from "@v/frontend/services/chat";
-import type { Roster, RosterEntry } from "@v/frontend/services/roster";
-
-interface ListedPeer extends RosterEntry {
-  readonly messaging: boolean;
-}
+import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 
 export function Home(props: {
   session: Session;
@@ -17,6 +13,7 @@ export function Home(props: {
 }) {
   const [actionError, setActionError] = createSignal<string>();
   const [actionBusy, setActionBusy] = createSignal(false);
+  const [peers, setPeers] = createSignal(props.roster.list());
   const receivedByPeer = new Map<string, Set<string>>();
   const [unread, setUnread] = createSignal<ReadonlyMap<string, boolean>>(new Map());
 
@@ -43,25 +40,10 @@ export function Home(props: {
       (receivedIds(peerId).size > props.chat.readCount(peerId));
   }
 
-  async function describe(entry: RosterEntry): Promise<ListedPeer> {
-    let messaging = false;
-
-    if (entry.online && entry.peer !== undefined) {
-      try {
-        messaging = (await props.chat.capabilities(entry.peer)).text;
-      } catch {
-        // The Roster entry remains usable when capability lookup fails.
-      }
-    }
-
-    return { ...entry, messaging };
-  }
-
-  const [roster, { refetch }] = createResource(async () =>
-    Promise.all((await props.roster.list()).map(describe))
-  );
   const stops = [
-    props.roster.invalidations.subscribe(() => void refetch()),
+    props.roster.updates.subscribe((update) => {
+      setPeers((current) => applyRosterUpdate(current, update));
+    }),
     props.chat.updates.subscribe((item) => {
       if (item.direction !== "received") return;
       receivedIds(item.peerId).add(item.id);
@@ -72,10 +54,7 @@ export function Home(props: {
     }),
   ];
   const stopObserving = () => stops.forEach((stop) => stop());
-  const unavailable = () => actionBusy() || roster.loading;
-  const peers = createMemo<readonly ListedPeer[] | undefined>((current) =>
-    roster.error === undefined ? roster() : current,
-  );
+  const unavailable = actionBusy;
 
   async function performAction(operation: () => Promise<void>): Promise<void> {
     setActionError(undefined);
@@ -124,11 +103,8 @@ export function Home(props: {
         <h2 id="home-heading">Home</h2>
         <p>Signed in as {props.session.username}.</p>
       </header>
-      <Show when={peers() !== undefined && props.session.bootstrapError()}>
+      <Show when={props.session.bootstrapError()}>
         {(message) => <p role="alert">Peer networking is unavailable: {message()}</p>}
-      </Show>
-      <Show when={roster.error}>
-        {(reason) => <p role="alert">{errorMessage(reason())}</p>}
       </Show>
       <Show when={actionError()}>{(message) => <p role="alert">{message()}</p>}</Show>
 
@@ -136,41 +112,30 @@ export function Home(props: {
         class="secondary"
         type="button"
         disabled={unavailable()}
-        onClick={() => {
-          setActionError(undefined);
-          void refetch();
-        }}
+        onClick={() => void performAction(() => props.roster.refresh())}
       >
         Refresh peers
       </button>
 
       <section aria-labelledby="peers-heading">
         <h3 id="peers-heading">Peers</h3>
-        <Show
-          when={peers()}
-          fallback={roster.loading
-            ? <p aria-live="polite">Loading peers…</p>
-            : <p>No peers are currently known.</p>}
-        >
-          {(listed) => (
-            <Show when={listed().length > 0} fallback={<p>No peers are currently known.</p>}>
-              <ul>
-                <For each={listed()}>
-                  {(peer) => (
-                    <PeerRow
-                      listed={peer}
-                      unread={hasUnread(peer.peerId)}
-                      busy={unavailable()}
-                      onConnect={(selected) => void performAction(
-                        () => connectAndOpen(selected),
-                      )}
-                      onOpenChat={props.onOpenChat}
-                    />
+        <Show when={peers().length > 0} fallback={<p>No peers are currently known.</p>}>
+          <ul>
+            <For each={peers()}>
+              {(peer) => (
+                <PeerRow
+                  listed={peer}
+                  chat={props.chat}
+                  unread={hasUnread(peer.peerId)}
+                  busy={unavailable()}
+                  onConnect={(selected) => void performAction(
+                    () => connectAndOpen(selected),
                   )}
-                </For>
-              </ul>
-            </Show>
-          )}
+                  onOpenChat={props.onOpenChat}
+                />
+              )}
+            </For>
+          </ul>
         </Show>
       </section>
 
@@ -203,12 +168,19 @@ export function Home(props: {
 }
 
 function PeerRow(props: {
-  listed: ListedPeer;
+  listed: RosterEntry;
+  chat: Chat;
   unread: boolean;
   busy: boolean;
   onConnect(peer: Peer): void;
   onOpenChat(peerId: string): void;
 }) {
+  const connectedPeer = () => props.listed.online ? props.listed.peer : undefined;
+  const [capabilities] = createResource(
+    connectedPeer,
+    async (peer) => await props.chat.capabilities(peer),
+  );
+
   return (
     <li>
       <span
@@ -240,7 +212,7 @@ function PeerRow(props: {
           </Show>
         }
       >
-        <Show when={props.listed.messaging} fallback={<small>Connected</small>}>
+        <Show when={capabilities()?.text} fallback={<small>Connected</small>}>
           <button
             type="button"
             onClick={() => props.onOpenChat(props.listed.peerId)}
@@ -251,6 +223,18 @@ function PeerRow(props: {
       </Show>
     </li>
   );
+}
+
+function applyRosterUpdate(
+  entries: readonly RosterEntry[],
+  update: RosterUpdate,
+): readonly RosterEntry[] {
+  if (update.type === "remove") {
+    return entries.filter(({ peerId }) => peerId !== update.peerId);
+  }
+  const index = entries.findIndex(({ peerId }) => peerId === update.entry.peerId);
+  if (index < 0) return [...entries, update.entry];
+  return entries.map((entry, position) => position === index ? update.entry : entry);
 }
 
 function errorMessage(reason: unknown): string {

@@ -15,7 +15,7 @@ export interface Peer {
 
 export interface ManagedPeer {
   readonly peer: Peer;
-  addAddress(address: string): string;
+  addAddress(address: string): boolean;
   connectionOpened(): void;
   connectionClosed(): void;
 }
@@ -72,8 +72,9 @@ export function createPeer(
     peer,
     addAddress(address) {
       const normalized = addressWithPeerId(address, id);
+      const changed = !addresses.has(normalized);
       addresses.add(normalized);
-      return normalized;
+      return changed;
     },
     connectionOpened() {
       setConnected(true);

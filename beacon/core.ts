@@ -6,7 +6,7 @@ import { webSockets } from "@libp2p/websockets";
 import type { ServerOptions } from "node:https";
 import createNetwork from "../common/backend/network/index.ts";
 import {
-  createDiscovery,
+  createDiscoveryHost,
   discoveryServiceName,
 } from "../common/backend/network/services/discovery.ts";
 
@@ -20,7 +20,8 @@ interface BeaconConfiguration {
 export async function createBeacon(configuration: BeaconConfiguration) {
   const announcePort = configuration.announcePort ?? configuration.relayPort;
   const tlsAddress = configuration.tls === undefined ? "" : "/tls";
-  return await createNetwork({
+  const discovery = createDiscoveryHost();
+  const network = await createNetwork({
     addresses: {
       listen: [`/ip4/0.0.0.0/tcp/${configuration.relayPort}/ws`],
       announce: [`/dns4/${configuration.host}/tcp/${announcePort}${tlsAddress}/ws`],
@@ -42,10 +43,10 @@ export async function createBeacon(configuration: BeaconConfiguration) {
     },
   }, {
     [discoveryServiceName]: {
-      rpc: (peer, network) => createDiscovery(
-        peer,
-        () => network.connectedPeers(),
-      ),
+      rpc: (peer, network) => discovery.service(peer, network.connectedPeers),
+      protocols: [discovery.updates],
     },
   });
+  network.subscribe(discovery.peerChanged);
+  return network;
 }

@@ -16,6 +16,8 @@ export type { Peer } from "./peer.ts";
 export type { PromisedMethods } from "./rpc.ts";
 export type { ByteStream } from "./byte-stream.ts";
 
+export type PeerEvent = "connected" | "disconnected" | "addresses";
+
 export interface Protocol {
   readonly id: string;
   readonly maxInboundStreams?: number;
@@ -41,7 +43,7 @@ export interface Network {
   provide(services: Services): Promise<void>;
   services(): Services;
   subscribe(
-    listener: (peer: Peer, event: "connected" | "disconnected") => void,
+    listener: (peer: Peer, event: PeerEvent) => void,
   ): () => void;
   close(): Promise<void>;
 }
@@ -60,10 +62,7 @@ export default async function createNetwork(
   const activePeers = new Map<string, ManagedPeer>();
   const pendingConnections = new Map<string, PendingConnection>();
   const pendingAuthentications = new Map<string, Promise<Peer>>();
-  const topologyListeners = new Set<(
-    peer: Peer,
-    event: "connected" | "disconnected",
-  ) => void>();
+  const peerListeners = new Set<(peer: Peer, event: PeerEvent) => void>();
   const addressListeners = new Set<() => void>();
   const lifetime = new AbortController();
   const serviceDefinitions = new Map<string, Service>();
@@ -75,11 +74,18 @@ export default async function createNetwork(
   let provisioning = Promise.resolve();
   let shutdown: Promise<void> | undefined;
 
-  function notifyTopology(
+  function notifyPeer(
     peer: Peer,
-    event: "connected" | "disconnected",
+    event: PeerEvent,
   ): void {
-    for (const listener of topologyListeners) listener(peer, event);
+    for (const listener of peerListeners) listener(peer, event);
+  }
+
+  function updateAddresses(
+    peer: ManagedPeer,
+    addresses: readonly string[],
+  ): void {
+    if (addAddresses(peer, addresses)) notifyPeer(peer.peer, "addresses");
   }
 
   function constructPeer(id: string): ManagedPeer {
@@ -212,7 +218,7 @@ export default async function createNetwork(
       : constructPeer(id);
     activePeers.set(id, managed);
     managed.connectionOpened();
-    notifyTopology(managed.peer, "connected");
+    notifyPeer(managed.peer, "connected");
     return managed;
   }
 
@@ -220,7 +226,7 @@ export default async function createNetwork(
     if (activePeers.get(id) !== active) return;
     activePeers.delete(id);
     active.connectionClosed();
-    notifyTopology(active.peer, "disconnected");
+    notifyPeer(active.peer, "disconnected");
   }
 
   function disconnectPeer(id: string): void {
@@ -233,7 +239,7 @@ export default async function createNetwork(
     const id = candidate.peer.id;
     const connected = activePeer(id);
     if (connected !== undefined) {
-      addAddresses(connected, candidate.peer.addresses());
+      updateAddresses(connected, candidate.peer.addresses());
       return connected.peer;
     }
 
@@ -285,7 +291,7 @@ export default async function createNetwork(
       await connection.close();
       throw new Error("A direct connection to this peer could not be established.");
     }
-    addAddresses(active, candidate.peer.addresses());
+    updateAddresses(active, candidate.peer.addresses());
     return active.peer;
   }
 
@@ -307,7 +313,7 @@ export default async function createNetwork(
       await connection.close();
       throw new Error("A direct connection to this peer could not be established.");
     }
-    addAddresses(active, addresses);
+    updateAddresses(active, addresses);
     return active.peer;
   }
 
@@ -330,7 +336,7 @@ export default async function createNetwork(
         }
         const active = activePeer(knownId);
         if (active !== undefined) {
-          addAddresses(active, addresses);
+          updateAddresses(active, addresses);
           return active.peer;
         }
 
@@ -365,8 +371,8 @@ export default async function createNetwork(
       return Object.freeze(Object.fromEntries(serviceDefinitions));
     },
     subscribe(listener) {
-      topologyListeners.add(listener);
-      return () => topologyListeners.delete(listener);
+      peerListeners.add(listener);
+      return () => peerListeners.delete(listener);
     },
     async close() {
       shutdown ??= stopNetwork();
@@ -382,7 +388,7 @@ export default async function createNetwork(
       for (const [id, peer] of activePeers) {
         deactivatePeer(id, peer);
       }
-      topologyListeners.clear();
+      peerListeners.clear();
       addressListeners.clear();
     }
   }
@@ -401,13 +407,15 @@ export default async function createNetwork(
     const active = activePeer(id) ??
       (connection === undefined ? undefined : activateConnection(connection));
     if (active === undefined) return;
+    let changed = false;
     for (const address of event.detail.listenAddrs) {
       try {
-        active.addAddress(address.toString());
+        changed = active.addAddress(address.toString()) || changed;
       } catch {
         // A peer may only advertise addresses that identify its authenticated identity.
       }
     }
+    if (changed) notifyPeer(active.peer, "addresses");
   }, { signal: lifetime.signal });
   node.addEventListener("self:peer:update", () => {
     for (const listener of addressListeners) listener();
@@ -447,8 +455,10 @@ export default async function createNetwork(
   return network;
 }
 
-function addAddresses(peer: ManagedPeer, addresses: readonly string[]): void {
-  for (const address of addresses) peer.addAddress(address);
+function addAddresses(peer: ManagedPeer, addresses: readonly string[]): boolean {
+  let changed = false;
+  for (const address of addresses) changed = peer.addAddress(address) || changed;
+  return changed;
 }
 
 function isDefined<Value>(value: Value | undefined): value is Value {
