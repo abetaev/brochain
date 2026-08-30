@@ -6,8 +6,10 @@ import { remoteService, rpcProtocol, type PromisedMethods } from "./rpc.ts";
 export interface Peer {
   readonly id: string;
   addresses(): readonly string[];
+  services(): readonly string[];
   isConnected(): boolean;
   connect(): Promise<Peer>;
+  refreshServices(): Promise<readonly string[]>;
   subscribe(listener: (event: "connected" | "disconnected") => void): () => void;
   service<Service extends object>(name: string): PromisedMethods<Service>;
   open(protocol: string, options?: { readonly signal?: AbortSignal }): Promise<ByteStream>;
@@ -16,6 +18,7 @@ export interface Peer {
 export interface ManagedPeer {
   readonly peer: Peer;
   addAddress(address: string): boolean;
+  setServices(names: readonly string[]): boolean;
   connectionOpened(): void;
   connectionClosed(): void;
 }
@@ -24,8 +27,11 @@ export function createPeer(
   node: Libp2p,
   id: string,
   connect: (peer: ManagedPeer) => Promise<Peer>,
+  refreshServices: (peer: ManagedPeer) => Promise<readonly string[]>,
+  serviceForProtocol: (protocol: string) => string | undefined,
 ): ManagedPeer {
   const addresses = new Set<string>();
+  let services: readonly string[] = [];
   const listeners = new Set<(event: "connected" | "disconnected") => void>();
   let connected = false;
   let managed: ManagedPeer;
@@ -40,9 +46,13 @@ export function createPeer(
   const peer: Peer = {
     id,
     addresses: () => [...addresses],
+    services: () => services,
     isConnected: () => connected,
     async connect() {
       return await connect(managed);
+    },
+    async refreshServices() {
+      return await refreshServices(managed);
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -52,6 +62,9 @@ export function createPeer(
       validateServiceName(name);
       return remoteService<Service>(name, async (signal) => {
         if (!connected) throw new Error("This peer is not connected.");
+        if (!services.includes(name)) {
+          throw new Error(`This peer does not provide the "${name}" service.`);
+        }
         const connection = usableConnection(node, id);
         if (connection === undefined) throw new Error("This peer is not connected.");
         return await connection.newStream(rpcProtocol, { signal });
@@ -60,6 +73,10 @@ export function createPeer(
     async open(protocol, options) {
       validateProtocol(protocol);
       if (!connected) throw new Error("This peer is not connected.");
+      const service = serviceForProtocol(protocol);
+      if (service !== undefined && !services.includes(service)) {
+        throw new Error(`This peer does not provide the "${service}" service.`);
+      }
       const connection = usableConnection(node, id);
       if (connection === undefined) throw new Error("This peer is not connected.");
       return createByteStream(await connection.newStream(protocol, {
@@ -75,6 +92,14 @@ export function createPeer(
       const changed = !addresses.has(normalized);
       addresses.add(normalized);
       return changed;
+    },
+    setServices(names) {
+      if (
+        services.length === names.length &&
+        services.every((name, index) => name === names[index])
+      ) return false;
+      services = Object.freeze([...names]);
+      return true;
     },
     connectionOpened() {
       setConnected(true);

@@ -7,7 +7,10 @@ import type {
   PersistentKeyValueStorage,
   PersistentServiceStorage,
 } from "@v/backend/storage";
-import { isServiceEnabled } from "./network-services";
+import {
+  isServiceEnabled,
+  observeServiceEnabled,
+} from "./network-services";
 
 async function testOptions() {
   const values = new Map<string, unknown>();
@@ -43,5 +46,28 @@ describe("network service Options", () => {
 
     await configured.set("enabled", true);
     expect(isServiceEnabled(options, "peer-one", "messaging")).toBe(true);
+  });
+
+  it("observes only the selected peer and service", async () => {
+    const { options } = await testOptions();
+    const observed: boolean[] = [];
+    const stop = observeServiceEnabled(
+      options,
+      "peer-one",
+      "messaging",
+      (enabled) => observed.push(enabled),
+    );
+
+    await options.cat("peers").obj("peer-one")
+      .cat("services").obj("identity").set("enabled", false);
+    await options.cat("peers").obj("peer-two")
+      .cat("services").obj("messaging").set("enabled", false);
+    await options.cat("peers").obj("peer-one")
+      .cat("services").obj("messaging").set("enabled", false);
+    await options.cat("peers").obj("peer-one")
+      .cat("services").obj("messaging").unset("enabled");
+    stop();
+
+    expect(observed).toEqual([false, true]);
   });
 });

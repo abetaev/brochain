@@ -24,7 +24,10 @@ interface DiscoveryHost {
     readonly id: string;
     accept(peer: Peer, stream: ByteStream): Promise<void>;
   };
-  peerChanged(peer: Peer, event: "connected" | "disconnected" | "addresses"): void;
+  peerChanged(
+    peer: Peer,
+    event: "connected" | "disconnected" | "addresses" | "services",
+  ): void;
 }
 
 export const discoveryServiceName = "discovery";
@@ -57,6 +60,7 @@ export function createDiscoveryHost(): DiscoveryHost {
       },
     },
     peerChanged(peer, event) {
+      if (event === "services") return;
       if (event !== "disconnected" && peer.addresses().length === 0) return;
       const update: DiscoveryUpdate = event === "disconnected"
         ? { type: "remove", peerId: peer.id }

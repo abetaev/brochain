@@ -28,7 +28,7 @@ function Vessel() {
         import("./services/chat"),
         import("./services/roster"),
       ]);
-      const chat = await createChat(session);
+      const chat = createChat(session);
       const roster = await createRoster(session);
       setLocation({
         view: "home",

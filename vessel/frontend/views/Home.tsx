@@ -1,6 +1,6 @@
-import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
-import type { Peer } from "@c/backend/network";
+import { For, Show, createSignal, onCleanup } from "solid-js";
 import type { Session } from "@v/backend/session";
+import { defaultBeaconAddress } from "@v/backend/network";
 import type { Chat } from "@v/frontend/services/chat";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 
@@ -12,6 +12,7 @@ export function Home(props: {
   onSignedOut(): void;
 }) {
   const [actionError, setActionError] = createSignal<string>();
+  const [beaconError, setBeaconError] = createSignal<string>();
   const [actionBusy, setActionBusy] = createSignal(false);
   const [peers, setPeers] = createSignal(props.roster.list());
   const receivedByPeer = new Map<string, Set<string>>();
@@ -55,6 +56,18 @@ export function Home(props: {
   ];
   const stopObserving = () => stops.forEach((stop) => stop());
   const unavailable = actionBusy;
+  const network = props.session.network();
+
+  async function connectBeacon(): Promise<void> {
+    try {
+      await network.connect(defaultBeaconAddress());
+      setBeaconError(undefined);
+    } catch (reason) {
+      const message = errorMessage(reason);
+      setBeaconError(message);
+      throw reason;
+    }
+  }
 
   async function performAction(operation: () => Promise<void>): Promise<void> {
     setActionError(undefined);
@@ -68,9 +81,12 @@ export function Home(props: {
     }
   }
 
-  async function connectAndOpen(peer: Peer): Promise<void> {
-    const connected = await peer.connect();
-    if (!(await props.chat.capabilities(connected)).text) {
+  async function connectAndOpen(addresses: readonly string[]): Promise<void> {
+    const [address, ...alternates] = addresses;
+    if (address === undefined) throw new Error("This peer has no known address.");
+    const connected = await network.connect(address, ...alternates);
+    await connected.refreshServices();
+    if (!props.chat.capabilities(connected).text) {
       throw new Error("This peer does not provide messaging.");
     }
     props.onOpenChat(connected.id);
@@ -83,8 +99,7 @@ export function Home(props: {
     const form = event.currentTarget;
     const address = String(new FormData(form).get("direct-address") ?? "").trim();
     await performAction(async () => {
-      const network = await props.session.network();
-      await connectAndOpen(await network.createPeer(address));
+      await connectAndOpen([address]);
       form.reset();
     });
   }
@@ -96,6 +111,7 @@ export function Home(props: {
   }
 
   onCleanup(stopObserving);
+  void connectBeacon().catch(() => {});
 
   return (
     <section aria-labelledby="home-heading">
@@ -103,7 +119,7 @@ export function Home(props: {
         <h2 id="home-heading">Home</h2>
         <p>Signed in as {props.session.username}.</p>
       </header>
-      <Show when={props.session.bootstrapError()}>
+      <Show when={beaconError()}>
         {(message) => <p role="alert">Peer networking is unavailable: {message()}</p>}
       </Show>
       <Show when={actionError()}>{(message) => <p role="alert">{message()}</p>}</Show>
@@ -112,7 +128,10 @@ export function Home(props: {
         class="secondary"
         type="button"
         disabled={unavailable()}
-        onClick={() => void performAction(() => props.roster.refresh())}
+        onClick={() => void performAction(async () => {
+          await connectBeacon();
+          await props.roster.refresh();
+        })}
       >
         Refresh peers
       </button>
@@ -129,7 +148,7 @@ export function Home(props: {
                   unread={hasUnread(peer.peerId)}
                   busy={unavailable()}
                   onConnect={(selected) => void performAction(
-                    () => connectAndOpen(selected),
+                    () => connectAndOpen(selected.addresses),
                   )}
                   onOpenChat={props.onOpenChat}
                 />
@@ -172,14 +191,12 @@ function PeerRow(props: {
   chat: Chat;
   unread: boolean;
   busy: boolean;
-  onConnect(peer: Peer): void;
+  onConnect(peer: RosterEntry): void;
   onOpenChat(peerId: string): void;
 }) {
-  const connectedPeer = () => props.listed.online ? props.listed.peer : undefined;
-  const [capabilities] = createResource(
-    connectedPeer,
-    async (peer) => await props.chat.capabilities(peer),
-  );
+  const capabilities = () => props.listed.peer === undefined
+    ? undefined
+    : props.chat.capabilities(props.listed.peer);
 
   return (
     <li>
@@ -197,18 +214,16 @@ function PeerRow(props: {
         when={props.listed.online}
         fallback={
           <Show
-            when={props.listed.peer}
+            when={props.listed.addresses.length > 0}
             fallback={<small>Not currently available</small>}
           >
-            {(peer) => (
-              <button
-                type="button"
-                disabled={props.busy}
-                onClick={() => props.onConnect(peer())}
-              >
-                Connect
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={props.busy}
+              onClick={() => props.onConnect(props.listed)}
+            >
+              Connect
+            </button>
           </Show>
         }
       >

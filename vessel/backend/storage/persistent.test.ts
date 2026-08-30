@@ -29,6 +29,7 @@ async function storage(username: string): Promise<PersistentRoot> {
 describe("persistent Storage", () => {
   it("returns stable stores and keeps every hierarchy dimension independent", async () => {
     const root = await storage("ada");
+    const accountValues = root.service("options").kv<string>();
     const service = root.peer("peer").service("options");
     const values = service.kv<string>();
 
@@ -36,13 +37,16 @@ describe("persistent Storage", () => {
     expect(service).toBe(root.peer("peer").service("options"));
     expect(values).toBe(service.kv<string>());
     expect(service.kv<string>("")).not.toBe(values);
+    expect(root.service("options")).toBe(root.service("options"));
 
+    await accountValues.put("key", "account");
     await values.put("key", "default");
     await service.kv<string>("").put("key", "empty-name");
     await root.peer("peer").service("other").kv<string>().put("key", "other-service");
     await root.peer("other-peer").service("options").kv<string>().put("key", "other-peer");
 
     await expect(values.get("key")).resolves.toBe("default");
+    await expect(accountValues.get("key")).resolves.toBe("account");
     await expect(service.kv<string>("").get("key")).resolves.toBe("empty-name");
     await expect(root.peer("peer").service("other").kv<string>().get("key"))
       .resolves.toBe("other-service");

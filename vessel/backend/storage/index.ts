@@ -67,6 +67,7 @@ export interface PersistentPeerStorage {
 }
 
 export interface PersistentStorage {
+  service(name: string): PersistentServiceStorage;
   peer(peerId: string): PersistentPeerStorage;
 }
 

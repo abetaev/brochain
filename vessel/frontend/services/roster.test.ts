@@ -1,7 +1,8 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ByteStream, Network, Peer, PeerEvent } from "@c/backend/network";
+import type { ByteStream, Peer } from "@c/backend/network";
 import type { DiscoveryUpdate } from "@c/backend/network/services/discovery";
+import type { Network, NetworkUpdate } from "@v/backend/network";
 import type { Session } from "@v/backend/session";
 import { createSignals } from "@v/backend/signals";
 import type {
@@ -34,13 +35,13 @@ describe("Roster state", () => {
   it("initializes connected, discovered, and cached peers once", async () => {
     const first = provider(
       firstId,
-      async () => ["registry", "identity"],
+      () => ["registry", "identity"],
       undefined,
       async () => ({ name: "ada" }),
     );
     const beacon = provider(
       "beacon",
-      async () => ["registry", "discovery"],
+      () => ["registry", "discovery"],
       async () => [
         { peerId: secondId, addresses: [secondAddress, firstAlternate, secondAddress] },
         { peerId: thirdId, addresses: [thirdAddress] },
@@ -68,6 +69,7 @@ describe("Roster state", () => {
       online: true,
       identity: { name: "ada" },
       name: "ada",
+      addresses: [],
     });
     expect(roster.get(secondId)).toMatchObject({
       peerId: secondId,
@@ -79,12 +81,13 @@ describe("Roster state", () => {
       online: false,
       identity: { name: "cy" },
       name: "cy",
+      addresses: [],
     });
     expect(Object.isFrozen(entries)).toBe(true);
     expect(entries.every(Object.isFrozen)).toBe(true);
-    expect(context.network.createPeer).toHaveBeenCalledWith(secondAddress);
-    expect(context.network.createPeer).toHaveBeenCalledWith(thirdAddress);
-    expect(context.network.createPeer).not.toHaveBeenCalledWith(localAddress);
+    expect(roster.get(secondId)?.addresses).toEqual([secondAddress]);
+    expect(roster.get(thirdId)?.addresses).toEqual([thirdAddress]);
+    expect(roster.get(localId)).toBeUndefined();
   });
 
   it("publishes keyed connection patches without rebuilding the list", async () => {
@@ -92,13 +95,15 @@ describe("Roster state", () => {
     const roster = await createRoster(context.session);
     const updates = vi.fn();
     roster.updates.subscribe(updates);
-    const remote = provider(firstId, async () => ["registry"]);
+    const remote = provider(firstId, () => ["registry"]);
 
     context.peerChanged(remote, "connected");
     context.peerChanged(remote, "addresses");
+    context.peerChanged(remote, "services");
     context.peerChanged(remote, "disconnected");
 
     expect(updates.mock.calls.map(([update]) => update.type)).toEqual([
+      "set",
       "set",
       "set",
       "remove",
@@ -107,7 +112,7 @@ describe("Roster state", () => {
       peerId: firstId,
       online: true,
     });
-    expect(updates.mock.calls[2]?.[0]).toEqual({ type: "remove", peerId: firstId });
+    expect(updates.mock.calls[3]?.[0]).toEqual({ type: "remove", peerId: firstId });
     expect(roster.list()).toEqual([]);
   });
 
@@ -116,7 +121,7 @@ describe("Roster state", () => {
     const discovery = vi.fn(async () => []);
     const beacon = provider(
       "beacon",
-      async () => ["registry", "discovery"],
+      () => ["registry", "discovery"],
       discovery,
       undefined,
       stream.stream,
@@ -135,7 +140,7 @@ describe("Roster state", () => {
       online: false,
     }));
     expect(discovery).toHaveBeenCalledOnce();
-    expect(context.network.createPeer).toHaveBeenCalledWith(firstAddress, firstAlternate);
+    expect(roster.get(firstId)?.addresses).toEqual([firstAddress, firstAlternate]);
     expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ type: "set" }));
 
     stream.publish({ type: "remove", peerId: firstId });
@@ -151,7 +156,7 @@ describe("Roster state", () => {
     let name = "ada";
     const remote = provider(
       firstId,
-      async () => ["registry", "identity"],
+      () => ["registry", "identity"],
       undefined,
       async () => ({ name }),
     );
@@ -180,7 +185,7 @@ describe("Roster state", () => {
   it("keeps the fallback entry when remote data is unavailable", async () => {
     const failed = provider(
       firstId,
-      async () => ["registry", "identity"],
+      () => ["registry", "identity"],
       undefined,
       async () => {
         throw new Error("Unavailable.");
@@ -199,6 +204,7 @@ describe("Roster state", () => {
       online: true,
       identity: { name: "ada" },
       name: "ada",
+      addresses: [],
     });
   });
 
@@ -222,6 +228,7 @@ describe("Roster state", () => {
       online: false,
       identity: { name: "bea" },
       name: "bea",
+      addresses: [],
     }]);
   });
 
@@ -241,7 +248,7 @@ describe("Roster persistence", () => {
     databases.add(databaseName);
     const remote = provider(
       firstId,
-      async () => ["registry", "identity"],
+      () => ["registry", "identity"],
       undefined,
       async () => ({ name: "ada" }),
     );
@@ -263,6 +270,7 @@ describe("Roster persistence", () => {
       online: false,
       identity: { name: "ada" },
       name: "ada",
+      addresses: [],
     }]);
     await nextStorage.close();
   });
@@ -270,7 +278,7 @@ describe("Roster persistence", () => {
 
 function provider(
   id: string,
-  services: () => Promise<unknown>,
+  services: () => readonly string[],
   discovery: () => Promise<unknown> = async () => [],
   identity: () => Promise<unknown> = async () => ({ name: "peer" }),
   stream: ByteStream = idleStream(),
@@ -278,22 +286,15 @@ function provider(
   return {
     id,
     addresses: () => [],
+    services,
     isConnected: () => true,
+    refreshServices: async () => services(),
     service: (name: string) => {
       if (name === "registry") return { list: services };
       if (name === "discovery") return { list: discovery };
       return { get: identity };
     },
     open: vi.fn(async () => stream),
-  } as unknown as Peer;
-}
-
-function disconnectedPeer(id: string): Peer {
-  return {
-    id,
-    addresses: () => [],
-    isConnected: () => false,
-    connect: vi.fn(),
   } as unknown as Peer;
 }
 
@@ -322,29 +323,18 @@ function testContext(
   initialPeers: () => readonly Peer[],
   initialIdentities: readonly (readonly [string, unknown])[] = [],
 ) {
-  const listeners = new Set<(peer: Peer, event: PeerEvent) => void>();
   const identities = persistentValues(initialIdentities);
+  const updates = createSignals().channel<NetworkUpdate>({}, "network");
   const network = {
     id: localId,
     connectedPeers: vi.fn(initialPeers),
-    createPeer: vi.fn(async (address: string) => {
-      const id = [firstId, secondId, thirdId, localId]
-        .find((candidate) => address.endsWith(candidate));
-      if (id === undefined) throw new Error("Missing peer identity.");
-      return disconnectedPeer(id);
-    }),
-    subscribe: vi.fn((listener: (peer: Peer, event: PeerEvent) => void) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    }),
+    updates,
   } as unknown as Network;
   const persistent = {
-    peer: vi.fn(() => ({
-      service: vi.fn(() => ({ kv: vi.fn(() => identities) })),
-    })),
+    service: vi.fn(() => ({ kv: vi.fn(() => identities) })),
   } as unknown as PersistentStorage;
   const session = {
-    network: vi.fn(async () => network),
+    network: vi.fn(() => network),
     signals: createSignals,
     storage: (selection?: { readonly persistent?: boolean }) => {
       if (selection?.persistent === true) return persistent;
@@ -356,8 +346,14 @@ function testContext(
     network,
     session,
     identities,
-    peerChanged(peer: Peer, event: PeerEvent) {
-      for (const listener of listeners) listener(peer, event);
+    peerChanged(peer: Peer, event: "connected" | "disconnected" | "addresses" | "services") {
+      updates.publish(event === "disconnected"
+        ? { type: "remove", peerId: peer.id }
+        : {
+          type: "set",
+          peer,
+          changed: event === "connected" ? "connection" : event,
+        });
     },
   };
 }
@@ -403,8 +399,7 @@ function networkWith(connected: () => readonly Peer[]): Network {
   return {
     id: localId,
     connectedPeers: connected,
-    createPeer: vi.fn(),
-    subscribe: vi.fn(() => () => {}),
+    updates: createSignals().channel({}, "updates"),
   } as unknown as Network;
 }
 
@@ -413,7 +408,7 @@ async function persistentSession(
   storage: PersistentRoot,
 ): Promise<Session> {
   return {
-    network: async () => network,
+    network: () => network,
     signals: createSignals,
     storage: () => storage,
   } as unknown as Session;

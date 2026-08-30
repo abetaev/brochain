@@ -9,7 +9,7 @@ vi.mock("libp2p", () => ({ createLibp2p: dependency.createLibp2p }));
 import createNetwork, { type NetworkConfiguration } from "./index.ts";
 
 let addresses: string[];
-let listeners: Map<string, Set<() => void>>;
+let listeners: Map<string, Set<(event: unknown) => void>>;
 let node: {
   readonly peerId: { toString(): string };
   readonly getMultiaddrs: ReturnType<typeof vi.fn>;
@@ -31,7 +31,7 @@ beforeEach(() => {
       toString: () => address,
     }))),
     getConnections: vi.fn(() => []),
-    addEventListener: vi.fn((event: string, listener: () => void) => {
+    addEventListener: vi.fn((event: string, listener: (event: unknown) => void) => {
       let registered = listeners.get(event);
       if (registered === undefined) {
         registered = new Set();
@@ -74,20 +74,24 @@ describe("Network-owned libp2p runtime", () => {
     await network.close();
   });
 
-  it("publishes ordered address invalidations without replay", async () => {
+  it("ignores intermediary connection events used to establish a direct connection", async () => {
     const network = await createNetwork({});
-    const events: string[] = [];
-    const unsubscribe = network.subscribeAddresses(() => events.push("first"));
-    network.subscribeAddresses(() => events.push("second"));
+    const intermediary = {
+      status: "open",
+      direct: false,
+      limits: undefined,
+      remotePeer: { toString: () => "remote" },
+      close: vi.fn(async () => {}),
+    };
+    node.getConnections.mockReturnValue([intermediary]);
 
-    expect(events).toEqual([]);
-    for (const listener of listeners.get("self:peer:update") ?? []) listener();
-    expect(events).toEqual(["first", "second"]);
+    for (const listener of listeners.get("connection:open") ?? []) {
+      listener({ detail: intermediary });
+    }
+    await Promise.resolve();
 
-    unsubscribe();
-    unsubscribe();
-    for (const listener of listeners.get("self:peer:update") ?? []) listener();
-    expect(events).toEqual(["first", "second", "second"]);
+    expect(intermediary.close).not.toHaveBeenCalled();
     await network.close();
   });
+
 });

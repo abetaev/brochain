@@ -1,7 +1,8 @@
 // @vitest-environment node
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Peer } from "@c/backend/network";
+import type { NetworkServiceFactory, Peer } from "@c/backend/network";
+import type { Network } from "@v/backend/network";
 import type {
   DataTransfer,
   DataTransferEvent,
@@ -19,20 +20,6 @@ import {
   type Storage,
   type StoredFile,
 } from "@v/backend/storage";
-
-const dependencies = vi.hoisted(() => ({
-  createMessaging: vi.fn(),
-  createDataTransfer: vi.fn(),
-}));
-
-vi.mock("@v/backend/network/services/messaging", () => ({
-  createMessaging: dependencies.createMessaging,
-  messagingServiceName: "messaging",
-}));
-vi.mock("@v/backend/network/services/data-transfer", () => ({
-  createDataTransfer: dependencies.createDataTransfer,
-  dataTransferServiceName: "data-transfer",
-}));
 
 import { createChat, type ChatItem } from "./chat.ts";
 
@@ -83,17 +70,16 @@ beforeEach(() => {
   transferEvents = transportSignals.channel({}, "data");
   messaging = {
     events: messagingEvents,
+    factory: vi.fn() as unknown as NetworkServiceFactory,
     send: vi.fn((peer: Peer, message: TextMessage) => {
       messagingEvents.publish({ peerId: peer.id, type: "sent", message });
     }),
   };
   dataTransfer = {
     events: transferEvents,
+    factory: vi.fn() as unknown as NetworkServiceFactory,
     send: vi.fn<(peer: Peer, transfer: OutgoingTransfer) => void>(),
   };
-  dependencies.createMessaging.mockReset().mockResolvedValue(messaging);
-  dependencies.createDataTransfer.mockReset().mockResolvedValue(dataTransfer);
-
   const stored: StoredFile = {
     blob: vi.fn(async () => new Blob(["received"])),
     remove: vi.fn(async () => {}),
@@ -109,10 +95,12 @@ beforeEach(() => {
   const storage = createStorage(createFile);
   session = {
     username: "alice",
-    network: vi.fn(),
+    network: vi.fn(() => ({
+      messaging: () => messaging,
+      dataTransfer: () => dataTransfer,
+    } as unknown as Network)),
     signals: () => signals,
     storage: () => storage,
-    bootstrapError: () => undefined,
     close: vi.fn(),
   } as unknown as Session;
 });
@@ -121,8 +109,10 @@ function remotePeer(services = ["registry", "messaging", "data-transfer"]): Peer
   return {
     id: "remote",
     addresses: vi.fn(() => []),
+    services: vi.fn(() => services),
     isConnected: vi.fn(() => true),
     connect: vi.fn(),
+    refreshServices: vi.fn(async () => services),
     subscribe: vi.fn(() => () => {}),
     service: vi.fn(() => ({ list: async () => services })),
     open: vi.fn(),
@@ -130,24 +120,13 @@ function remotePeer(services = ["registry", "messaging", "data-transfer"]): Peer
 }
 
 describe("Chat service", () => {
-  it("wires Messaging before waiting for DataTransfer construction", async () => {
-    let finishDataTransfer: ((service: DataTransfer) => void) | undefined;
-    dependencies.createDataTransfer.mockImplementationOnce(async () =>
-      await new Promise<DataTransfer>((resolve) => {
-        finishDataTransfer = resolve;
-      })
-    );
-
-    const construction = createChat(session);
-    await vi.waitFor(() => expect(dependencies.createDataTransfer).toHaveBeenCalledOnce());
+  it("subscribes to Network-owned transports during construction", () => {
+    const chat = createChat(session);
     messagingEvents.publish({
       peerId: "remote",
       type: "received",
       message: { id: "during-construction", text: "hello" },
     });
-    finishDataTransfer?.(dataTransfer);
-
-    const chat = await construction;
     expect(chat.history("remote")).toEqual([
       expect.objectContaining({ id: "during-construction", text: "hello" }),
     ]);
@@ -312,13 +291,13 @@ describe("Chat service", () => {
   it("reports independent text and data-transfer capabilities", async () => {
     const chat = await createChat(session);
 
-    await expect(chat.capabilities(remotePeer())).resolves.toEqual({
+    expect(chat.capabilities(remotePeer())).toEqual({
       text: true,
       files: true,
     });
-    await expect(chat.capabilities(remotePeer(["registry", "messaging"]))).resolves
+    expect(chat.capabilities(remotePeer(["registry", "messaging"])))
       .toEqual({ text: true, files: false });
-    await expect(chat.capabilities(remotePeer(["registry", "data-transfer"]))).resolves
+    expect(chat.capabilities(remotePeer(["registry", "data-transfer"])))
       .toEqual({ text: false, files: true });
   });
 });

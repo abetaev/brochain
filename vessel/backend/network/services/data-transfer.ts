@@ -1,7 +1,10 @@
-import type { ByteStream, Peer } from "@c/backend/network";
-import type { Session } from "@v/backend/session";
-import type { Channel } from "@v/backend/signals";
-import { isServiceEnabled } from "@v/backend/options/network-services";
+import type {
+  ByteStream,
+  NetworkService,
+  NetworkServiceFactory,
+  Peer,
+} from "@c/backend/network";
+import type { Channel, Signals } from "@v/backend/signals";
 
 export const dataTransferServiceName = "data-transfer";
 export const dataTransferProtocol = "/brochain/data-transfer/1.0.0";
@@ -47,6 +50,7 @@ export type DataTransferEvent = Readonly<
 
 export interface DataTransfer {
   readonly events: Channel<DataTransferEvent>;
+  readonly factory: NetworkServiceFactory;
   send(peer: Peer, transfer: OutgoingTransfer): void;
 }
 
@@ -61,36 +65,11 @@ const progressInterval = 250;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export async function createDataTransfer(session: Session): Promise<DataTransfer> {
-  const events = session.signals().channel<DataTransferEvent>({}, "events");
-  const inbound = new Map<string, number>();
+export function createDataTransfer(signals: Signals): DataTransfer {
+  const events = signals.channel<DataTransferEvent>({}, "events");
   const outbound = new Map<string, number>();
-  const options = session.options();
-  const network = await session.network();
-
-  await network.provide({
-    [dataTransferServiceName]: {
-      enabled: (peer) => isServiceEnabled(
-        options,
-        peer.id,
-        dataTransferServiceName,
-      ),
-      protocols: [{
-        id: dataTransferProtocol,
-        maxInboundStreams: 2,
-        maxOutboundStreams: 2,
-        accept: receive,
-      }],
-    },
-  });
 
   async function receive(peer: Peer, stream: ByteStream): Promise<void> {
-    const release = occupy(inbound, peer.id);
-    if (release === undefined) {
-      stream.abort(new Error("This peer has too many incoming data transfers."));
-      return;
-    }
-
     const reader = createFrameReader(stream);
     let header: Header | undefined;
     let sink: DataSink | undefined;
@@ -164,13 +143,25 @@ export async function createDataTransfer(session: Session): Promise<DataTransfer
         });
       }
       abort(stream, failure);
-    } finally {
-      release();
     }
   }
 
+  function factory(peer: Peer): NetworkService {
+    return {
+      protocols: {
+        [dataTransferProtocol]: async (stream) => await receive(peer, stream),
+      },
+    };
+  }
+  factory.protocols = [{
+    id: dataTransferProtocol,
+    maxInboundStreams: 2,
+    maxOutboundStreams: 2,
+  }];
+
   return {
     events,
+    factory,
     send(peer, value) {
       const transfer = validateOutgoing(value);
       const release = occupy(outbound, peer.id);
