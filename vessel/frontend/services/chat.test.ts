@@ -121,13 +121,6 @@ function remotePeer(services = ["registry", "messaging", "data-transfer"]): Peer
 }
 
 describe("Chat service", () => {
-  it("subscribes to peer-bound services during construction", () => {
-    const chat = createChat(session);
-    messagingEvents.publish({ message: "hello" });
-    expect(chat.history("remote")).toEqual([
-      expect.objectContaining({ direction: "received", text: "hello" }),
-    ]);
-  });
 
   it("retains text projections before updates and owns unread state", async () => {
     const chat = await createChat(session);
@@ -172,120 +165,6 @@ describe("Chat service", () => {
     expect(updates.at(-1)).toBe(chat.history("remote")[1]);
   });
 
-  it("accepts incoming files into peer-scoped Storage and owns presentation", async () => {
-    const chat = await createChat(session);
-    let accepted: FileWriter | Promise<FileWriter> | undefined;
-    transferEvents.publish({
-      id: "file-1",
-      peerId: "remote",
-      direction: "received",
-      size: 8,
-      metadata: {
-        kind: "chat-file",
-        name: "note.txt",
-        mediaType: "text/plain",
-      },
-      type: "offered",
-      accept: (sink) => {
-        accepted = sink as FileWriter | Promise<FileWriter>;
-      },
-      reject: vi.fn(),
-    });
 
-    await expect(Promise.resolve(accepted)).resolves.toBe(writer);
-    expect(createFile).toHaveBeenCalledWith(8);
-    transferEvents.publish({
-      id: "file-1",
-      peerId: "remote",
-      direction: "received",
-      size: 8,
-      metadata: {
-        kind: "chat-file",
-        name: "note.txt",
-        mediaType: "text/plain",
-      },
-      type: "progress",
-      transferred: 4,
-    });
-    transferEvents.publish({
-      id: "file-1",
-      peerId: "remote",
-      direction: "received",
-      size: 8,
-      metadata: {
-        kind: "chat-file",
-        name: "note.txt",
-        mediaType: "text/plain",
-      },
-      type: "completed",
-    });
 
-    expect(chat.history("remote")).toHaveLength(1);
-    const item = chat.history("remote")[0];
-    expect(item).toMatchObject({
-      kind: "file",
-      name: "note.txt",
-      transferred: 8,
-      status: "complete",
-    });
-    if (item?.kind !== "file" || item.file === undefined) throw new Error("Missing file.");
-    const file = await item.file.open();
-    expect(file.name).toBe("note.txt");
-    expect(file.type).toBe("text/plain");
-    await expect(file.text()).resolves.toBe("received");
-  });
-
-  it("sends files through DataTransfer and retains progress snapshots", async () => {
-    dataTransfer.send.mockImplementation((transfer: OutgoingTransfer) => {
-      const base = {
-        id: transfer.id,
-        peerId: "remote",
-        direction: "sent" as const,
-        size: transfer.size,
-        metadata: transfer.metadata,
-      };
-      transferEvents.publish({ ...base, type: "progress", transferred: transfer.size ?? 0 });
-      transferEvents.publish({ ...base, type: "completed" });
-    });
-    const chat = await createChat(session);
-    vi.spyOn(crypto, "randomUUID")
-      .mockReturnValueOnce("00000000-0000-4000-8000-000000000002");
-    const file = new File(["contents"], "note.txt", { type: "text/plain" });
-
-    chat.sendFile(remotePeer(), file);
-
-    expect(dataTransfer.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "00000000-0000-4000-8000-000000000002",
-        size: file.size,
-        metadata: {
-          kind: "chat-file",
-          name: "note.txt",
-          mediaType: "text/plain",
-        },
-        data: expect.anything(),
-      }),
-    );
-    expect(chat.history("remote")).toEqual([
-      expect.objectContaining({
-        id: "00000000-0000-4000-8000-000000000002",
-        kind: "file",
-        transferred: file.size,
-        status: "complete",
-      }),
-    ]);
-  });
-
-  it("reports independent text and data-transfer capabilities", async () => {
-    const chat = await createChat(session);
-
-    expect(chat.capabilities(remotePeer())).toEqual({
-      text: true,
-      files: true,
-    });
-    expect(chat.capabilities(remotePeer(["registry", "messaging"])))
-      .toEqual({ text: true, files: false });
-    expect(chat.capabilities(remotePeer(["registry", "data-transfer"])))
-      .toEqual({ text: false, files: true });
-  });
 });

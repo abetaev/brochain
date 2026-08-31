@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { followSystemTheme } from "./coverage.ts";
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const initializationMarker = ".i";
@@ -119,6 +120,7 @@ async function runProjectCommand(command: string): Promise<void> {
 
   if (command === "test") {
     await runCommand(installedCommand("vitest"), ["run"], projectDirectory);
+    await followSystemTheme(join(projectDirectory, "coverage/unit/base.css"));
     await runCommand(installedCommand("playwright"), ["test"], projectDirectory);
     return;
   }

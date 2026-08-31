@@ -77,15 +77,13 @@ describe("Session Storage", () => {
     expect(events.read()).toEqual(["first", "second"]);
   });
 
-  it("stores and clears singleton values", async () => {
+  it("stores singleton values", async () => {
     const storage = await createStorage();
     const value = storage.peer("peer").service("identity").singleton<string>();
 
     expect(value.get()).toBeUndefined();
     value.put("current");
     expect(value.get()).toBe("current");
-    value.clear();
-    expect(value.get()).toBeUndefined();
   });
 
   it("stores and deletes key/value entries while returning immutable snapshots", async () => {

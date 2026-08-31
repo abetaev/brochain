@@ -16,8 +16,6 @@ import type { FileWriter, StoredFile } from "@v/backend/storage";
 
 export interface ChatFile {
   readonly name: string;
-  readonly mediaType: string;
-  readonly size: number;
   open(): Promise<File>;
 }
 
@@ -211,7 +209,7 @@ export function createChat(session: Session): Chat {
         ...item,
         transferred: item.size,
         status: "complete",
-        file: storedFile(writer.file, item.name, item.mediaType, item.size),
+        file: storedFile(writer.file, item.name, item.mediaType),
       });
       return;
     }
@@ -320,24 +318,12 @@ function validateFileMetadata(
 }
 
 function browserFile(file: File): ChatFile {
-  return {
-    name: file.name,
-    mediaType: file.type || "application/octet-stream",
-    size: file.size,
-    open: async () => file,
-  };
+  return { name: file.name, open: async () => file };
 }
 
-function storedFile(
-  file: StoredFile,
-  name: string,
-  mediaType: string,
-  size: number,
-): ChatFile {
+function storedFile(file: StoredFile, name: string, mediaType: string): ChatFile {
   return {
     name,
-    mediaType,
-    size,
     open: async () => new File([await file.blob()], name, { type: mediaType }),
   };
 }

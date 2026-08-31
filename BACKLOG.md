@@ -11,6 +11,21 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
+settings frontend and peer view
+-------------------------------
+
+type: feature
+scope: frontend services, views, components, options, network
+
+Add a `Peer` view which displays information about an identified peer and
+provides the generic settings controls used to configure it. Every Home roster
+row and Chat MUST provide navigation to this view, and leaving it returns to the
+originating view.
+
+Initially, Peer lists the locally supported services from Network's Services
+catalog and edits their per-peer enabled Options. Saved changes apply
+immediately, including while connected.
+
 runtime service catalog updates
 -------------------------------
 
@@ -29,53 +44,6 @@ other catalog refresh.
 Per-peer service Options cannot be edited while connected until the settings
 frontend and peer view exists, so this correction MUST land no later than that
 task and is not reachable before it.
-
-browser workflows
------------------
-
-type: infrastructure
-scope: project commands, tests, frontend
-
-Add Playwright workflows which demonstrate complete user interactions, so
-reported coverage reflects real use rather than mocked structure.
-
-- `npm run test` MUST run the workflows together with the remaining lower-level
-  tests.
-- Workflows MUST report their coverage separately from lower-level test coverage,
-  so the reach of each set is visible on its own.
-- Workflows drive the development server, which already starts a Beacon beside
-  Vessel and serves unminified sources for coverage mapping. Driving a production
-  build is a later addition.
-- Beacon runs in Node beside the served Vessel, so browser coverage cannot see it
-  and the Common code it alone exercises reads as unreached. Collect the Beacon
-  process coverage and merge it into the workflow report.
-
-The first workflow covers the riskiest path — two browser contexts sign in as
-separate accounts, connect through the Beacon over WebRTC, and exchange text —
-and headless WebRTC proved reliable. Still to cover: file transfer, direct
-connection by address, reconnection after a peer disappears, unread state, and
-account export and deletion.
-
-Remove the lower-level tests each workflow replaces as it lands. Lower-level
-tests remain only for behavior a workflow cannot prove: transport contracts,
-protocol edge cases, remote-input validators, and browser-storage guarantees. The
-frontend service tests and the mocked Vessel Network test are the known
-candidates for removal.
-
-settings frontend and peer view
--------------------------------
-
-type: feature
-scope: frontend services, views, components, options, network
-
-Add a `Peer` view which displays information about an identified peer and
-provides the generic settings controls used to configure it. Every Home roster
-row and Chat MUST provide navigation to this view, and leaving it returns to the
-originating view.
-
-Initially, Peer lists the locally supported services from Network's Services
-catalog and edits their per-peer enabled Options. Saved changes apply
-immediately, including while connected.
 
 peer display-name customization
 -------------------------------
@@ -140,6 +108,50 @@ another tab or window of the same browser. Ownership MUST be released after
 explicit Session shutdown and execution-context termination. Refine whether a
 SharedWorker, Web Locks, or another browser-wide coordination mechanism owns
 the lock before implementation.
+
+standalone Beacon process
+-------------------------
+
+type: infrastructure
+scope: beacon, project commands, tests
+
+Beacon has no entry point of its own. The development server imports its plugin
+from the Vite configuration, so the configuration loader bundles `beacon/core.ts`
+and the whole of `common/backend/network` into one temporary module whose scripts
+carry no attributable file names. Nothing can measure what Beacon exercises, and
+no workflow can start or stop one.
+
+Give Beacon its own entry point and start it as a process:
+
+- Workflows start Beacons directly, so one Vessel development server serves every
+  workflow instead of the second one which exists today only to announce a relay
+  port where nothing listens.
+- A workflow MAY then stop and restart a Beacon, which reconnection behaviour
+  needs.
+- Collect the process coverage through `NODE_V8_COVERAGE` and merge it into the
+  workflow report. Node strips types in place, so recorded lines already match the
+  source and no source map is required.
+
+account service coverage
+------------------------
+
+type: infrastructure
+scope: tests, project commands
+
+Account runs its service in a Worker, and Playwright collects coverage only for a
+page: a Worker cannot be reached through `newCDPSession`, and a CDP session
+carries no target to route a profiler to. Every workflow creates, unlocks and
+exports an account, yet the account service and the halves of `base64` it alone
+uses read as unreached.
+
+`page.workers()` does return the Worker and evaluating inside it works, so
+instrument the sources instead and read the accumulated counters from the page
+and from each Worker. Reporting then covers both, and the mapping which rebuilds
+file names from the development server's paths is no longer needed because
+instrumented sources carry their own.
+
+This measures what the workflows already exercise; it adds no safety, so it
+ranks below work which does.
 
 thoughts
 ========
