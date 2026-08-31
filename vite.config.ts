@@ -11,10 +11,9 @@ const vesselDirectory = resolve(projectDirectory, "vessel");
 const frontendDirectory = resolve(vesselDirectory, "frontend");
 const iconPath = resolve(frontendDirectory, "icon.svg");
 
-export default defineConfig(({ command, mode }) => {
-  const configuredRelayPort = command === "serve"
-    ? process.env.BEACON_RELAY_PORT ?? "9090"
-    : process.env.BEACON_PUBLIC_RELAY_PORT ?? process.env.BEACON_RELAY_PORT ?? "9090";
+export default defineConfig(({ mode }) => {
+  const configuredRelayPort = process.env.BEACON_PUBLIC_RELAY_PORT ??
+    process.env.BEACON_RELAY_PORT ?? "9090";
   const relayPort = Number(configuredRelayPort);
   if (!Number.isInteger(relayPort) || relayPort < 1 || relayPort > 65_535) {
     throw new Error("Beacon relay port must be a valid port number.");

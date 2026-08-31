@@ -297,11 +297,13 @@ Vessel frontend
 - **dependencies**: Session, Roster, and Chat
 - **structure**: one peer-list signal, peer rows, direct-connection controls, and
   view-local action and Beacon errors
-- **use cases**: refresh peers; connect a listed or direct Peer; open Chat; sign
-  out
+- **use cases**: refresh peers; connect a listed Peer or a direct address; open
+  Chat; sign out
 - **behavior**: once subscriptions exist, Home starts the default Beacon
   connection in the background, and Refresh retries it and refreshes Roster.
-  Listed and direct connections call Network directly. Roster patches replace or
+  Selecting a listed Peer connects and opens its conversation. A direct address
+  completes only the connection procedure, so a peer offering no conversation is
+  still reached; it accepts a URL or a multiaddress. Roster patches replace or
   remove one keyed row, Peer catalogs provide Chat capabilities, and Chat updates
   maintain unread presentation.
 

@@ -1,0 +1,34 @@
+import type { Page } from "@playwright/test";
+import {
+  alternativeBeaconAddress,
+  alternativeBeaconUrl,
+  unreachableDefaultAddress,
+} from "../playwright.config.ts";
+import { expect, peerOffering, test } from "./vessel.ts";
+
+async function connectDirectly(page: Page, address: string): Promise<void> {
+  await expect(page.getByRole("alert")).toContainText("Peer networking is unavailable");
+  await expect(page.getByText("No peers are currently known.")).toBeVisible();
+
+  await page.locator("summary").filter({ hasText: "Connect directly" }).click();
+  await page.getByLabel("Peer address or URL").fill(address);
+  await page.getByRole("button", { name: "Connect directly" }).click();
+
+  // The Beacon offers no conversation, so it is listed as a plain connected peer.
+  await expect(page.getByRole("listitem").filter({ hasText: "Connected" })).toBeVisible();
+}
+
+test("people whose default Beacon is unreachable reach another and meet there", async ({
+  openVessel,
+}) => {
+  const alice = await openVessel("alice", unreachableDefaultAddress);
+  await connectDirectly(alice, alternativeBeaconUrl);
+
+  const bob = await openVessel("bob", unreachableDefaultAddress);
+  await connectDirectly(bob, alternativeBeaconAddress);
+
+  await expect(async () => {
+    await alice.getByRole("button", { name: "Refresh peers" }).click();
+    await expect(peerOffering(alice, "Connect")).toBeVisible({ timeout: 5_000 });
+  }).toPass();
+});

@@ -1,6 +1,5 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import type { Session } from "@v/backend/session";
-import { defaultBeaconAddress } from "@v/frontend/beacon";
 import type { Chat } from "@v/frontend/services/chat";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 
@@ -92,14 +91,16 @@ export function Home(props: {
     props.onOpenChat(connected.id);
   }
 
+  // A direct connection only completes the connection procedure; the peer then
+  // appears in the list like any other, whatever services it turns out to offer.
   async function connectDirect(
     event: SubmitEvent & { currentTarget: HTMLFormElement },
   ): Promise<void> {
     event.preventDefault();
     const form = event.currentTarget;
-    const address = String(new FormData(form).get("direct-address") ?? "").trim();
+    const entered = String(new FormData(form).get("direct-address") ?? "");
     await performAction(async () => {
-      await connectAndOpen([address]);
+      await network.connect(peerAddress(entered));
       form.reset();
     });
   }
@@ -162,12 +163,12 @@ export function Home(props: {
         <summary>Connect directly</summary>
         <form onSubmit={connectDirect}>
           <label for="direct-address">
-            Peer multiaddress
+            Peer address or URL
             <input
               id="direct-address"
               name="direct-address"
               required
-              placeholder="/dns4/example.com/tcp/9090/ws/p2p/..."
+              placeholder="https://example.com:9090 or /dns4/example.com/tcp/9090/ws"
             />
           </label>
           <button type="submit" disabled={unavailable()}>Connect directly</button>
@@ -250,6 +251,37 @@ function applyRosterUpdate(
   const index = entries.findIndex(({ peerId }) => peerId === update.entry.peerId);
   if (index < 0) return [...entries, update.entry];
   return entries.map((entry, position) => position === index ? update.entry : entry);
+}
+
+// People are given peer locations as URLs far more often than as multiaddresses,
+// so both are accepted and a URL is translated to the address libp2p dials.
+function peerAddress(entered: string): string {
+  const value = entered.trim();
+  if (value.startsWith("/")) return value;
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Enter a peer multiaddress or an http or https URL.");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Enter a peer multiaddress or an http or https URL.");
+  }
+
+  const secure = url.protocol === "https:";
+  const port = url.port === "" ? (secure ? 443 : 80) : Number(url.port);
+  return `${hostAddress(url.hostname)}/tcp/${port}${secure ? "/tls" : ""}/ws`;
+}
+
+function defaultBeaconAddress(): string {
+  const { hostname, protocol } = window.location;
+  return peerAddress(`${protocol}//${hostname}:${import.meta.env.BEACON_RELAY_PORT}`);
+}
+
+function hostAddress(hostname: string): string {
+  if (hostname.startsWith("[")) return `/ip6/${hostname.slice(1, -1)}`;
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname) ? `/ip4/${hostname}` : `/dns4/${hostname}`;
 }
 
 function errorMessage(reason: unknown): string {

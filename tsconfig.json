@@ -27,6 +27,7 @@
     "vessel",
     "workflows",
     "main.ts",
+    "coverage.ts",
     "main.test.ts",
     "vite.config.ts",
     "playwright.config.ts"

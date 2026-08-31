@@ -9,7 +9,6 @@ interface EventStorage<T> {
 interface SingletonStorage<T> {
   get(): T | undefined;
   put(value: T): void;
-  clear(): void;
 }
 
 interface KeyValueStorage<T> {
@@ -195,9 +194,6 @@ function createSingletonStorage<T>(): SingletonStorage<T> {
     get: () => current,
     put(value) {
       current = value;
-    },
-    clear() {
-      current = undefined;
     },
   };
 }

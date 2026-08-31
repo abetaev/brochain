@@ -9,6 +9,19 @@ const vesselPort = "5273";
 const beaconRelayPort = "9190";
 const address = `http://localhost:${vesselPort}`;
 
+// A second Vessel is told about a relay port where nothing listens, so a workflow
+// can meet an unreachable default Beacon and reach the running one by address.
+export const unreachableDefault = {
+  vesselPort: "5373",
+  beaconRelayPort: "9291",
+  announcedRelayPort: "9290",
+};
+export const unreachableDefaultAddress = `http://localhost:${unreachableDefault.vesselPort}`;
+export const alternativeBeaconUrl =
+  `http://localhost:${unreachableDefault.beaconRelayPort}`;
+export const alternativeBeaconAddress =
+  `/dns4/localhost/tcp/${unreachableDefault.beaconRelayPort}/ws`;
+
 export default defineConfig({
   testDir: resolve(projectDirectory, "workflows"),
   testMatch: "**/*.test.ts",
@@ -19,11 +32,24 @@ export default defineConfig({
   reporter: [["list"]],
   globalSetup: resolve(projectDirectory, "workflows/coverage.ts"),
   use: { baseURL: address, browserName: "chromium", trace: "retain-on-failure" },
-  webServer: {
-    command: "node main.ts dev",
-    env: { VESSEL_PORT: vesselPort, BEACON_RELAY_PORT: beaconRelayPort },
-    url: address,
-    reuseExistingServer: false,
-    timeout: 180_000,
-  },
+  webServer: [
+    {
+      command: "node main.ts dev",
+      env: { VESSEL_PORT: vesselPort, BEACON_RELAY_PORT: beaconRelayPort },
+      url: address,
+      reuseExistingServer: false,
+      timeout: 180_000,
+    },
+    {
+      command: "node main.ts dev",
+      env: {
+        VESSEL_PORT: unreachableDefault.vesselPort,
+        BEACON_RELAY_PORT: unreachableDefault.beaconRelayPort,
+        BEACON_PUBLIC_RELAY_PORT: unreachableDefault.announcedRelayPort,
+      },
+      url: unreachableDefaultAddress,
+      reuseExistingServer: false,
+      timeout: 180_000,
+    },
+  ],
 });

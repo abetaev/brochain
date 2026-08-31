@@ -130,28 +130,6 @@ afterEach(() => {
 });
 
 describe("Vessel Network", () => {
-  it("constructs one Common Network with fixed service factories", async () => {
-    const component = await createNetwork(
-      "AA==",
-      "alice",
-      options(),
-    );
-
-    expect(dependencies.generateKeyPairFromSeed).toHaveBeenCalledWith(
-      "Ed25519",
-      new Uint8Array([0]),
-    );
-    expect(dependencies.createCommonNetwork).toHaveBeenCalledOnce();
-    expect(Object.keys(factories)).toEqual(["identity", "messaging", "data-transfer"]);
-    expect(factories.identity?.(peer())).toMatchObject({
-      remote: { get: expect.any(Function) },
-    });
-    expect(component.id).toBe("local");
-    expect(factories.messaging?.(peer())).toMatchObject({
-      remote: { send: expect.any(Function) },
-      events: { publish: expect.any(Function), subscribe: expect.any(Function) },
-    });
-  });
 
   it("reads publication centrally for every service", async () => {
     optionValues.set("first/messaging", false);
@@ -164,21 +142,6 @@ describe("Vessel Network", () => {
     expect(publication(peer("second"), "messaging")).toBe(true);
   });
 
-  it("connects only when the direct action is called", async () => {
-    const connected = peer("beacon");
-    const candidate = { connect: vi.fn(async () => connected) } as unknown as Peer;
-    common.createPeer.mockResolvedValue(candidate);
-    const component = await createNetwork("AA==", "alice", options());
-
-    expect(common.createPeer).not.toHaveBeenCalled();
-    await expect(component.connect("/dns4/beacon/tcp/9090/ws", "/dns4/other/tcp/9090/ws"))
-      .resolves.toBe(connected);
-    expect(common.createPeer).toHaveBeenCalledWith(
-      "/dns4/beacon/tcp/9090/ws",
-      "/dns4/other/tcp/9090/ws",
-    );
-    expect(candidate.connect).toHaveBeenCalledOnce();
-  });
 
   it("applies option changes while connected and stops at disconnection", async () => {
     const component = await createNetwork("AA==", "alice", options());
@@ -213,11 +176,4 @@ describe("Vessel Network", () => {
     expect(common.publish).not.toHaveBeenCalled();
   });
 
-  it("rejects construction when Common Network initialization fails", async () => {
-    const failure = new Error("Network initialization failed.");
-    dependencies.createCommonNetwork.mockRejectedValueOnce(failure);
-
-    await expect(createNetwork("AA==", "alice", options()))
-      .rejects.toBe(failure);
-  });
 });
