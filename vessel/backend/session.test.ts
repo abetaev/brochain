@@ -69,12 +69,7 @@ describe("Session composition", () => {
     expect(dependencies.createStorage).toHaveBeenCalledWith("alice");
     expect(dependencies.createOptions.mock.invocationCallOrder[0])
       .toBeLessThan(dependencies.createNetwork.mock.invocationCallOrder[0]!);
-    expect(dependencies.createNetwork).toHaveBeenCalledWith(
-      "AA==",
-      "alice",
-      options,
-      session.signals(),
-    );
+    expect(dependencies.createNetwork).toHaveBeenCalledWith("AA==", "alice", options);
     expect(session.network()).toBe(network);
     expect(session.network()).toBe(network);
     expect(session.options()).toBe(options);
@@ -89,32 +84,10 @@ describe("Session composition", () => {
   });
 
   it("constructs Options in account-level persistent service storage", async () => {
-    const session = await openSession();
+    await openSession();
 
     expect(storage.persistent.service).toHaveBeenCalledWith("options");
-    expect(dependencies.createOptions).toHaveBeenCalledWith(
-      optionStorage,
-      session.signals(),
-    );
-  });
-
-  it("isolates Signals between Sessions", async () => {
-    const first = await openSession();
-    const second = await openSession();
-    const owner = {};
-    const firstChannel = first.signals().channel<string>(owner, "events");
-    const secondChannel = second.signals().channel<string>(owner, "events");
-    const firstListener = vi.fn();
-    const secondListener = vi.fn();
-    firstChannel.subscribe(firstListener);
-    secondChannel.subscribe(secondListener);
-
-    firstChannel.publish("first");
-
-    expect(first.signals()).not.toBe(second.signals());
-    expect(firstChannel).not.toBe(secondChannel);
-    expect(firstListener).toHaveBeenCalledWith("first");
-    expect(secondListener).not.toHaveBeenCalled();
+    expect(dependencies.createOptions).toHaveBeenCalledWith(optionStorage);
   });
 
   it("closes Storage when Options construction fails", async () => {

@@ -19,7 +19,10 @@ The three project commands install or refresh dependencies automatically when ne
 
 - `npm run dev` starts Vessel and its local default Beacon. Open the Vessel address printed by the command; Beacon listens on port `9090` by default.
 - `npm run prod` validates and builds Vessel, then serves it with the production Beacon.
-- `npm run test` runs the complete project test suite.
+- `npm run test` runs the complete project test suite: the lower-level tests
+  first, then the browser workflows, which start their own Vessel and Beacon on
+  dedicated ports. Each set reports its coverage separately, under
+  `coverage/unit` and `coverage/workflows`.
 
 production configuration
 ------------------------

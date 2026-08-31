@@ -8,13 +8,10 @@ import type {
   DataTransferEvent,
   OutgoingTransfer,
 } from "@v/backend/network/services/data-transfer";
-import type {
-  MessagingEvent,
-  TextMessage,
-} from "@v/backend/network/services/messaging";
+import type { ReceivedMessage } from "@v/backend/network/services/messaging";
 import { messagingServiceName } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
-import { createSignals, type Channel } from "@v/backend/signals";
+import signals, { type Channel } from "@c/backend/signals";
 import {
   type FileWriter,
   type Storage,
@@ -23,14 +20,14 @@ import {
 
 import { createChat, type ChatItem } from "./chat.ts";
 
-let messagingEvents: Channel<MessagingEvent>;
+let messagingEvents: Channel<ReceivedMessage>;
 let transferEvents: Channel<DataTransferEvent>;
 let messaging: {
-  readonly updates: Channel<MessagingEvent>;
-  send: ReturnType<typeof vi.fn>;
+  readonly events: Channel<ReceivedMessage>;
+  readonly remote: { send: ReturnType<typeof vi.fn> };
 };
 let dataTransfer: {
-  readonly updates: Channel<DataTransferEvent>;
+  readonly events: Channel<DataTransferEvent>;
   send: ReturnType<typeof vi.fn>;
 };
 let writer: FileWriter;
@@ -71,17 +68,14 @@ function createStorage(createFile: ReturnType<typeof vi.fn>): Storage {
 }
 
 beforeEach(() => {
-  const transportSignals = createSignals();
-  messagingEvents = transportSignals.channel({}, "messaging");
-  transferEvents = transportSignals.channel({}, "data");
+  messagingEvents = signals.channel();
+  transferEvents = signals.channel();
   messaging = {
-    updates: messagingEvents,
-    send: vi.fn((message: TextMessage) => {
-      messagingEvents.publish({ peerId: "remote", type: "sent", message });
-    }),
+    events: messagingEvents,
+    remote: { send: vi.fn(async () => {}) },
   };
   dataTransfer = {
-    updates: transferEvents,
+    events: transferEvents,
     send: vi.fn<(transfer: OutgoingTransfer) => void>(),
   };
   const stored: StoredFile = {
@@ -94,14 +88,13 @@ beforeEach(() => {
     close: vi.fn(async () => {}),
     abort: vi.fn(async () => {}),
   };
-  const signals = createSignals();
-  createFile = vi.fn(async () => writer);
+    createFile = vi.fn(async () => writer);
   const storage = createStorage(createFile);
   session = {
     username: "alice",
     network: vi.fn(() => ({
       connectedPeers: () => [remotePeer()],
-      updates: signals.channel({}, "network"),
+      updates: signals.channel(),
     } as unknown as Network)),
     signals: () => signals,
     storage: () => storage,
@@ -118,25 +111,21 @@ function remotePeer(services = ["registry", "messaging", "data-transfer"]): Peer
     connect: vi.fn(),
     refreshServices: vi.fn(async () => services),
     subscribe: vi.fn(() => () => {}),
+    hosts: vi.fn((name: string) => services.includes(name)),
     service: vi.fn((name: string) => {
       if (name === messagingServiceName) return messaging;
       if (name === dataTransferServiceName) return dataTransfer;
       return undefined;
     }),
-    remote: vi.fn(),
   } as unknown as Peer;
 }
 
 describe("Chat service", () => {
   it("subscribes to peer-bound services during construction", () => {
     const chat = createChat(session);
-    messagingEvents.publish({
-      peerId: "remote",
-      type: "received",
-      message: { id: "during-construction", text: "hello" },
-    });
+    messagingEvents.publish({ message: "hello" });
     expect(chat.history("remote")).toEqual([
-      expect.objectContaining({ id: "during-construction", text: "hello" }),
+      expect.objectContaining({ direction: "received", text: "hello" }),
     ]);
   });
 
@@ -148,13 +137,11 @@ describe("Chat service", () => {
       updates.push(item);
     });
 
-    messagingEvents.publish({
-      peerId: "remote",
-      type: "received",
-      message: { id: "received", text: "hello" },
-    });
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000000");
+    messagingEvents.publish({ message: "hello" });
     expect(chat.history("remote")).toEqual([{
-      id: "received",
+      id: "00000000-0000-4000-8000-000000000000",
       peerId: "remote",
       direction: "received",
       kind: "text",
@@ -171,23 +158,17 @@ describe("Chat service", () => {
 
     vi.spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000001");
+    messaging.remote.send.mockRejectedValueOnce(new Error("disconnected"));
     chat.sendText(remotePeer(), "preserved text");
-    messagingEvents.publish({
-      peerId: "remote",
-      type: "failed",
-      message: {
+    await vi.waitFor(() =>
+      expect(chat.history("remote")[1]).toMatchObject({
         id: "00000000-0000-4000-8000-000000000001",
         text: "preserved text",
-      },
-      error: "disconnected",
-    });
-
+        status: "failed",
+        error: "disconnected",
+      })
+    );
     expect(chat.history("remote")).toHaveLength(2);
-    expect(chat.history("remote")[1]).toMatchObject({
-      id: "00000000-0000-4000-8000-000000000001",
-      status: "failed",
-      error: "disconnected",
-    });
     expect(updates.at(-1)).toBe(chat.history("remote")[1]);
   });
 
@@ -263,7 +244,7 @@ describe("Chat service", () => {
         size: transfer.size,
         metadata: transfer.metadata,
       };
-      transferEvents.publish({ ...base, type: "progress", transferred: transfer.size });
+      transferEvents.publish({ ...base, type: "progress", transferred: transfer.size ?? 0 });
       transferEvents.publish({ ...base, type: "completed" });
     });
     const chat = await createChat(session);

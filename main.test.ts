@@ -13,7 +13,7 @@ async function createProject() {
   await writeFile(join(project, "package-lock.json"), '{"lockfileVersion":3}\n');
   await mkdir(join(project, "node_modules", ".bin"), { recursive: true });
 
-  for (const executable of ["tsc", "vite", "vitest"]) {
+  for (const executable of ["tsc", "vite", "vitest", "playwright"]) {
     await writeFile(join(project, "node_modules", ".bin", executable), "");
   }
 

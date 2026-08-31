@@ -1,9 +1,20 @@
-export interface Channel<Event> {
-  publish(event: Event): void;
+// What a channel's owner hands to its consumers: they observe, only the owner publishes.
+export interface Subscription<Event> {
   subscribe(listener: (event: Event) => unknown): () => void;
 }
 
-export function createChannel<Event>(): Channel<Event> {
+export interface Channel<Event> extends Subscription<Event> {
+  publish(event: Event): void;
+}
+
+// The event bus. Every component which integrates through publish and subscribe
+// takes its channels from here rather than building its own. It belongs to no
+// owner: channels are independent, so one bus serves the whole application.
+export interface Signals {
+  channel<Event>(): Channel<Event>;
+}
+
+function createChannel<Event>(): Channel<Event> {
   const subscriptions: Array<{ readonly listener: (event: Event) => unknown }> = [];
 
   return Object.freeze({
@@ -38,3 +49,7 @@ function reportSubscriberFailure(): void {
     // Diagnostics must not allow one integration to affect another.
   }
 }
+
+const signals: Signals = { channel: createChannel };
+
+export default signals;

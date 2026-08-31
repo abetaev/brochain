@@ -1,4 +1,4 @@
-import type { Signals } from "./signals";
+import signals from "@c/backend/signals";
 import type { PersistentServiceStorage } from "./storage";
 
 export type OptionValue = string | number | boolean | null;
@@ -90,7 +90,6 @@ interface RuntimeObject {
 
 export async function createOptions<Schema = EffectiveSchema>(
   storage: PersistentServiceStorage,
-  signals: Signals,
 ): Promise<Options<Schema>> {
   const persisted = storage.kv<unknown>();
   const values = new Map<string, OptionValue>();
@@ -100,7 +99,7 @@ export async function createOptions<Schema = EffectiveSchema>(
     else await persisted.delete(key);
   }
 
-  const changes = signals.channel<OptionChange>({}, "changes");
+  const changes = signals.channel<OptionChange>();
 
   function category(path: string): RuntimeCategory {
     return {

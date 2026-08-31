@@ -1,7 +1,6 @@
 // @vitest-environment node
 
 import { describe, expect, it, vi } from "vitest";
-import { createSignals } from "./signals";
 import type {
   PersistentKeyValueStorage,
   PersistentServiceStorage,
@@ -63,7 +62,7 @@ function deferred() {
 async function testOptions(
   storage = createPersistentStorage(),
 ): Promise<Options<TestSchema>> {
-  return await createOptions<TestSchema>(storage.service, createSignals());
+  return await createOptions<TestSchema>(storage.service);
 }
 
 describe("Options", () => {
@@ -239,7 +238,7 @@ describe("Options", () => {
     const failure = new Error("Cleanup failed.");
     storage.store.delete.mockRejectedValueOnce(failure);
 
-    await expect(createOptions<TestSchema>(storage.service, createSignals()))
+    await expect(createOptions<TestSchema>(storage.service))
       .rejects.toBe(failure);
     const options = await testOptions(storage);
 

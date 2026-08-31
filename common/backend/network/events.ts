@@ -1,6 +1,6 @@
-import { createChannel, type Channel } from "../channel.ts";
+import signals from "../signals.ts";
+import type { Channel } from "../signals.ts";
 import type { ByteStream } from "./byte-stream.ts";
-import { encodeLine, readLines, splitLine } from "./framing.ts";
 import { decodeRpcValue, encodeRpcValue } from "./rpc.ts";
 
 export const eventsProtocol = "/brochain/events/1.0.0";
@@ -8,13 +8,14 @@ export const eventsProtocol = "/brochain/events/1.0.0";
 export interface RemoteEvents<Event> {
   readonly channel: Channel<Event>;
   available(value: boolean): void;
+  retry(): void;
 }
 
 export function createRemoteEvents<Event>(
   serviceName: string,
   open: (signal: AbortSignal) => Promise<ByteStream>,
 ): RemoteEvents<Event> {
-  const received = createChannel<Event>();
+  const received = signals.channel<Event>();
   let subscriptions = 0;
   let enabled = false;
   let connection: AbortController | undefined;
@@ -33,8 +34,8 @@ export function createRemoteEvents<Event>(
     try {
       stream = await open(active.signal);
       active.signal.throwIfAborted();
-      await stream.write(encodeLine({ service: serviceName }), { signal: active.signal });
-      for await (const line of readLines(stream)) {
+      await stream.writeLine({ service: serviceName }, { signal: active.signal });
+      for await (const line of stream.readLines()) {
         active.signal.throwIfAborted();
         received.publish(decodeRpcValue(JSON.parse(line)) as Event);
       }
@@ -69,6 +70,9 @@ export function createRemoteEvents<Event>(
 
   return {
     channel,
+    // A closed feed reopens when the peer's catalog changes, because the service
+    // it needs may have returned.
+    retry: start,
     available(value) {
       if (enabled === value) return;
       enabled = value;
@@ -87,12 +91,11 @@ export async function answerEvents(
   let unsubscribe = () => {};
   let untrack = () => {};
   try {
-    const request = await splitLine(stream);
-    const name = serviceName(JSON.parse(request.line));
+    const name = serviceName(JSON.parse(await stream.readLine()));
     const events = service(name);
     if (events === undefined) throw new Error("This event service is not available to the peer.");
 
-    const messages: Uint8Array[] = [];
+    const messages: unknown[] = [];
     let wake: (() => void) | undefined;
     let closed = false;
     let failure: Error | undefined;
@@ -106,21 +109,20 @@ export async function answerEvents(
     untrack = opened(name, close);
     unsubscribe = events.subscribe((event) => {
       try {
-        messages.push(encodeLine(encodeRpcValue(event)));
+        messages.push(encodeRpcValue(event));
         wake?.();
       } catch (reason) {
         close(asError(reason));
       }
     });
 
-    void drain(request.remaining).then(
+    void drain(stream).then(
       () => close(),
       (reason) => close(asError(reason)),
     );
     while (!closed) {
-      const message = messages.shift();
-      if (message !== undefined) {
-        await stream.write(message);
+      if (messages.length > 0) {
+        await stream.writeLine(messages.shift());
         continue;
       }
       await new Promise<void>((resolve) => {

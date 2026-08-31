@@ -3,7 +3,6 @@ import {
   type Network,
 } from "@v/backend/network";
 import { createOptions, type Options } from "@v/backend/options";
-import { createSignals, type Signals } from "@v/backend/signals";
 import {
   createStorage,
   type PersistentStorage,
@@ -14,7 +13,6 @@ export interface Session {
   readonly username: string;
   network(): Network;
   options(): Options;
-  signals(): Signals;
   storage(options?: { readonly persistent?: false }): VolatileStorage;
   storage(options: { readonly persistent: true }): PersistentStorage;
   close(): Promise<void>;
@@ -32,14 +30,10 @@ export async function createSession(
   const identity = await activeIdentity();
   if (identity === undefined) throw new Error("The account is not unlocked.");
 
-  const signals = createSignals();
   const storage = await createStorage(identity.username);
   let options: Options;
   try {
-    options = await createOptions(
-      storage.persistent.service("options"),
-      signals,
-    );
+    options = await createOptions(storage.persistent.service("options"));
   } catch (reason) {
     await storage.close().catch(() => {});
     throw reason;
@@ -51,7 +45,6 @@ export async function createSession(
       identity.identitySeed,
       identity.username,
       options,
-      signals,
     );
   } catch (reason) {
     await storage.close().catch(() => {});
@@ -73,7 +66,6 @@ export async function createSession(
     username: identity.username,
     network: () => network,
     options: () => options,
-    signals: () => signals,
     storage: accessStorage,
     async close() {
       if (shutdown === undefined) {

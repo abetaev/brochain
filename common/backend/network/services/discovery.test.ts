@@ -26,10 +26,10 @@ describe("Discovery", () => {
     const addressless = peer("addressless", []);
     const disconnected = peer("disconnected", ["disconnected-address"], false);
     const host = createDiscoveryHost();
-    host.peerChanged(requester, "connected");
-    host.peerChanged(addressed, "connected");
-    host.peerChanged(addressless, "connected");
-    host.peerChanged(disconnected, "disconnected");
+    host.peerChanged({ type: "connected", peer: requester });
+    host.peerChanged({ type: "connected", peer: addressed });
+    host.peerChanged({ type: "connected", peer: addressless });
+    host.peerChanged({ type: "disconnected", peerId: disconnected.id });
 
     expect(host.service(requester).remote.list()).toEqual([{
       peerId: "addressed",
@@ -46,9 +46,9 @@ describe("Discovery", () => {
     requester.events.subscribe((update) => requesterUpdates.push(update));
     other.events.subscribe((update) => otherUpdates.push(update));
 
-    host.peerChanged(peer("requester", ["requester-address"]), "addresses");
-    host.peerChanged(peer("changed", ["changed-address"]), "connected");
-    host.peerChanged(peer("changed", []), "disconnected");
+    host.peerChanged({ type: "addresses", peer: peer("requester", ["requester-address"]) });
+    host.peerChanged({ type: "connected", peer: peer("changed", ["changed-address"]) });
+    host.peerChanged({ type: "disconnected", peerId: peer("changed", []).id });
 
     expect(requesterUpdates).toEqual([
       {

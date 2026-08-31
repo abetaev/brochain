@@ -1,22 +1,9 @@
-import { createChannel, type Channel } from "@c/backend/channel";
 import { createStream } from "@c/backend/network";
-import type {
-  Stream,
-  DataSource,
-  Peer,
-  RPC,
-} from "@c/backend/network";
+import type { DataSource, Peer, RPC, Stream, Transfer } from "@c/backend/network";
+import signals from "@c/backend/signals";
+import type { Subscription } from "@c/backend/signals";
 
 export const dataTransferServiceName = "data-transfer";
-
-export type DataTransferService = {
-  readonly remote: RPC<Remote>;
-  readonly events: Channel<DataTransferEvent>;
-  readonly data: Stream;
-  // Present only while this peer hosts the service, because offering a transfer
-  // needs the local instance which tracks it.
-  send?(transfer: OutgoingTransfer): void;
-};
 
 type JsonValue = null | boolean | number | string | JsonValue[] | {
   readonly [key: string]: JsonValue;
@@ -32,7 +19,7 @@ export interface DataSink {
 
 export interface OutgoingTransfer {
   readonly id: string;
-  readonly size: number;
+  readonly size?: number;
   readonly metadata: TransferMetadata;
   readonly data: DataSource;
 }
@@ -41,7 +28,7 @@ interface TransferEventBase {
   readonly id: string;
   readonly peerId: string;
   readonly direction: "sent" | "received";
-  readonly size: number;
+  readonly size?: number;
   readonly metadata: TransferMetadata;
 }
 
@@ -59,7 +46,7 @@ export type DataTransferEvent = Readonly<
 
 interface Header {
   readonly id: string;
-  readonly size: number;
+  readonly size?: number;
   readonly metadata: TransferMetadata;
 }
 
@@ -68,318 +55,150 @@ type Acceptance = Readonly<
   | { accepted: false; error: string }
 >;
 
-type Completion = Readonly<
-  | { complete: true }
-  | { complete: false; error: string }
->;
-
-interface Remote {
+type Remote = {
   offer(header: Header): Promise<Acceptance>;
-  complete(id: string): Promise<Completion>;
-  cancel(id: string, error: string): void;
-}
+};
 
-interface IncomingTransfer {
-  readonly header: Header;
-  readonly sink: DataSink;
-  readonly completion: Promise<Completion>;
-  finish(result: Completion): boolean;
-  release(): void;
-}
-
-const maximumFrameSize = 16 * 1024;
-const progressInterval = 250;
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+export type DataTransferService = {
+  readonly remote: RPC<Remote>;
+  readonly events: Subscription<DataTransferEvent>;
+  readonly data: Stream;
+  // Present only while this peer hosts the service, because offering a transfer
+  // needs the local instance which tracks it.
+  send?(transfer: OutgoingTransfer): void;
+};
 
 export function createDataTransfer(peer: Peer) {
   const data = createStream();
-  const incoming = new Map<string, IncomingTransfer>();
-  let inbound = 0;
-  let outbound = 0;
-  let receiving = true;
-  const events = createChannel<DataTransferEvent>();
+  const events = signals.channel<DataTransferEvent>();
+  const offered = new Map<string, { readonly header: Header; readonly sink: Promise<DataSink> }>();
 
   const service = {
     data,
     events,
     remote: {
-      async offer(value: Header) {
+      async offer(value: Header): Promise<Acceptance> {
         const header = validateHeader(value);
-        if (!receiving) {
-          return { accepted: false, error: "Data transfer is unavailable." };
-        }
-        if (inbound >= 2) {
-          return {
-            accepted: false,
-            error: "This peer already has two incoming data transfers.",
-          };
-        }
-        if (incoming.has(header.id)) {
-          return {
-            accepted: false,
-            error: "A peer reused an active data transfer identifier.",
-          };
+        if (offered.has(header.id)) {
+          return { accepted: false, error: "A peer reused an active data transfer identifier." };
         }
 
-        let accepted: Promise<DataSink> | undefined;
-        let rejected: string | undefined;
-        let claimed = false;
-        const base = transferBase(peer.id, "received", header);
+        let sink: DataSink | Promise<DataSink> | undefined;
+        let refusal: string | undefined;
         events.publish({
-          ...base,
+          ...eventBase(peer.id, "received", header),
+          direction: "received",
           type: "offered",
-          accept(candidate) {
-            if (claimed) throw new Error("This incoming data transfer is already claimed.");
-            claimed = true;
-            accepted = Promise.resolve(candidate);
+          accept(claimed) {
+            sink = claimed;
           },
-          reject(reason = "The incoming data transfer was rejected.") {
-            if (claimed) throw new Error("This incoming data transfer is already claimed.");
-            claimed = true;
-            rejected = reason;
+          reject(reason) {
+            refusal = reason ?? "The data transfer was rejected.";
           },
         });
-
-        if (accepted === undefined) {
-          const error = rejected ?? "No consumer accepted the incoming data transfer.";
-          events.publish({ ...base, type: "failed", error });
-          return { accepted: false, error };
+        if (sink === undefined) {
+          return { accepted: false, error: refusal ?? "No receiver accepted the data transfer." };
         }
 
-        let sink: DataSink;
-        try {
-          sink = validateSink(await accepted);
-        } catch (reason) {
-          const error = errorMessage(
-            reason,
-            "The incoming data transfer could not be stored.",
-          );
-          events.publish({ ...base, type: "failed", error });
-          return { accepted: false, error };
-        }
-
-        inbound += 1;
-        let finished = false;
-        let complete!: (result: Completion) => void;
-        const completion = new Promise<Completion>((resolve) => {
-          complete = resolve;
-        });
-        incoming.set(header.id, {
-          header,
-          sink,
-          completion,
-          finish(result) {
-            if (finished) return false;
-            finished = true;
-            complete(result);
-            return true;
-          },
-          release() {
-            inbound -= 1;
-          },
-        });
+        offered.set(header.id, { header, sink: Promise.resolve(sink) });
         return { accepted: true };
       },
-      async complete(id: string) {
-        const transfer = incomingTransfer(incoming, id);
-        const completion = await transfer.completion;
-        incoming.delete(id);
-        transfer.release();
-        return completion;
-      },
-      cancel(id: string, error: string) {
-        const transfer = incoming.get(id);
-        if (transfer === undefined) return;
-        const failure = new Error(validError(error));
-        if (finish(transfer, { complete: false, error: failure.message })) {
-          void transfer.sink.abort(failure).catch(() => {});
-        }
-        incoming.delete(id);
-        transfer.release();
-      },
     },
-    send(value: OutgoingTransfer) {
-      const transfer = validateOutgoing(value);
-      if (outbound >= 2) {
-        throw new Error("This peer already has two outgoing data transfers.");
-      }
-      outbound += 1;
-      void sendTransfer(transfer).finally(() => {
-        outbound -= 1;
-      }).catch(() => {});
+    send(outgoing: OutgoingTransfer) {
+      void sendTransfer(outgoing);
     },
   };
-  void receiveTransfers().catch((reason) => {
-    receiving = false;
-    const failure = asError(reason, "Incoming data transfers stopped.");
-    for (const transfer of incoming.values()) {
-      if (finish(transfer, { complete: false, error: failure.message })) {
-        void transfer.sink.abort(failure).catch(() => {});
-      }
-    }
-  });
+
+  void receiveTransfers();
   return service;
 
-  async function sendTransfer(transfer: OutgoingTransfer): Promise<void> {
-    const base = transferBase(peer.id, "sent", transfer);
-    const transfers = peer.service<DataTransferService>(dataTransferServiceName);
+  async function sendTransfer(outgoing: OutgoingTransfer): Promise<void> {
+    const remote = peer.service<DataTransferService>(dataTransferServiceName);
+    const base = eventBase(peer.id, "sent", outgoing);
     try {
-      const acceptance = validateAcceptance(await transfers.remote.offer({
-        id: transfer.id,
-        size: transfer.size,
-        metadata: transfer.metadata,
+      const acceptance = validateAcceptance(await remote.remote.offer({
+        id: outgoing.id,
+        size: outgoing.size,
+        metadata: outgoing.metadata,
       }));
       if (!acceptance.accepted) throw new Error(acceptance.error);
 
-      const progress = createProgress(events, base);
-      progress(0);
-      await transfers.data.send(outgoingData(transfer, progress));
-      const completion = validateCompletion(await transfers.remote.complete(transfer.id));
-      if (!completion.complete) throw new Error(completion.error);
+      const transfer = remote.data.send(outgoing.data, {
+        id: outgoing.id,
+        size: outgoing.size,
+      });
+      await report(base, transfer, async () => await transfer.completion);
       events.publish({ ...base, type: "completed" });
     } catch (reason) {
-      const failure = asError(reason, "The outgoing data transfer failed.");
-      void transfers.remote.cancel(transfer.id, failure.message).catch(() => {});
-      events.publish({ ...base, type: "failed", error: failure.message });
+      events.publish({ ...base, type: "failed", error: errorMessage(reason) });
     }
   }
 
   async function receiveTransfers(): Promise<void> {
-    while (true) {
-      const source = await data.accept();
-      void receive(source).catch(() => {});
+    try {
+      while (true) void receive(await data.accept());
+    } catch {
+      // The service was removed or the peer disconnected; pending offers expire with it.
     }
   }
 
-  async function receive(source: DataSource): Promise<void> {
-    const reader = createFrameReader(source);
-    let transfer: IncomingTransfer | undefined;
+  async function receive(transfer: Transfer): Promise<void> {
+    const offer = offered.get(transfer.id);
+    offered.delete(transfer.id);
+    if (offer === undefined) {
+      transfer.cancel(new Error("A peer sent data which was never offered."));
+      return;
+    }
+
+    const base = eventBase(peer.id, "received", offer.header);
+    let sink: DataSink | undefined;
     try {
-      const header = validateHeader(await reader.read());
-      transfer = incomingTransfer(incoming, header.id);
-      if (!sameHeader(header, transfer.header)) {
+      if (transfer.size !== offer.header.size) {
         throw new Error("Peer sent data which does not match its accepted offer.");
       }
-
-      const progress = createProgress(
-        events,
-        transferBase(peer.id, "received", transfer.header),
-      );
-      progress(0);
-      let transferred = 0;
-      for await (const data of reader.remaining()) {
-        if (transferred + data.byteLength > transfer.header.size) {
-          throw new Error("The peer sent more data than it declared.");
-        }
-        await transfer.sink.write(data);
-        transferred += data.byteLength;
-        progress(transferred);
-      }
-      if (transferred !== transfer.header.size) {
-        throw new Error("The peer sent less data than it declared.");
-      }
-
-      await transfer.sink.close();
-      finish(transfer, { complete: true });
+      sink = await offer.sink;
+      const receiving = sink;
+      await report(base, transfer, async () => {
+        for await (const chunk of transfer.data()) await receiving.write(chunk);
+        await receiving.close();
+      });
+      events.publish({ ...base, type: "completed" });
     } catch (reason) {
-      const failure = asError(reason, "The incoming data transfer failed.");
-      if (
-        transfer !== undefined &&
-        finish(transfer, { complete: false, error: failure.message })
-      ) {
-        await transfer.sink.abort(failure).catch(() => {});
-      }
-      throw failure;
+      const failure = asError(reason);
+      transfer.cancel(failure);
+      await sink?.abort(failure).catch(() => {});
+      events.publish({ ...base, type: "failed", error: failure.message });
     }
   }
 
-  function finish(transfer: IncomingTransfer, result: Completion): boolean {
-    if (!transfer.finish(result)) return false;
-    const base = transferBase(peer.id, "received", transfer.header);
-    events.publish(result.complete
-      ? { ...base, type: "completed" }
-      : { ...base, type: "failed", error: result.error });
-    return true;
-  }
-}
-
-async function* outgoingData(
-  transfer: OutgoingTransfer,
-  progress: (transferred: number) => void,
-): AsyncGenerator<Uint8Array> {
-  yield framed({
-    id: transfer.id,
-    size: transfer.size,
-    metadata: transfer.metadata,
-  });
-  let transferred = 0;
-  for await (const data of transfer.data) {
-    if (!(data instanceof Uint8Array)) {
-      throw new Error("A data transfer source produced a non-byte value.");
+  async function report(
+    base: TransferEventBase,
+    transfer: Transfer,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    const stop = transfer.progress.subscribe((transferred) => {
+      events.publish({ ...base, type: "progress", transferred });
+    });
+    try {
+      await work();
+    } finally {
+      stop();
     }
-    if (transferred + data.byteLength > transfer.size) {
-      throw new Error("The data transfer source exceeded its declared size.");
-    }
-    transferred += data.byteLength;
-    progress(transferred);
-    yield data;
-  }
-  if (transferred !== transfer.size) {
-    throw new Error("The data transfer source did not reach its declared size.");
   }
 }
 
-function incomingTransfer(
-  incoming: Map<string, IncomingTransfer>,
-  id: unknown,
-): IncomingTransfer {
-  if (typeof id !== "string") throw new Error("Peer sent an invalid data transfer ID.");
-  const transfer = incoming.get(id);
-  if (transfer === undefined) throw new Error("Peer sent an unaccepted data transfer.");
-  return transfer;
-}
-
-function transferBase<Direction extends "sent" | "received">(
+function eventBase(
   peerId: string,
-  direction: Direction,
-  transfer: Header,
-): TransferEventBase & { readonly direction: Direction } {
+  direction: "sent" | "received",
+  header: Header,
+): TransferEventBase {
   return {
-    id: transfer.id,
+    id: header.id,
     peerId,
     direction,
-    size: transfer.size,
-    metadata: transfer.metadata,
+    ...(header.size === undefined ? {} : { size: header.size }),
+    metadata: header.metadata,
   };
-}
-
-function createProgress(
-  events: Channel<DataTransferEvent>,
-  base: TransferEventBase,
-): (transferred: number) => void {
-  let last = Number.NEGATIVE_INFINITY;
-  return (transferred) => {
-    const now = Date.now();
-    if (transferred !== 0 && transferred !== base.size && now - last < progressInterval) return;
-    last = now;
-    events.publish({ ...base, type: "progress", transferred });
-  };
-}
-
-function validateOutgoing(value: OutgoingTransfer): OutgoingTransfer {
-  const header = validateHeader(value);
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("data" in value) ||
-    typeof value.data !== "object" ||
-    value.data === null ||
-    !(Symbol.asyncIterator in value.data)
-  ) {
-    throw new Error("A data transfer requires an asynchronous byte source.");
-  }
-  return { ...header, data: value.data };
 }
 
 function validateHeader(value: unknown): Header {
@@ -390,203 +209,77 @@ function validateHeader(value: unknown): Header {
     typeof value.id !== "string" ||
     value.id.length === 0 ||
     value.id.length > 128 ||
-    !("size" in value) ||
-    !Number.isSafeInteger(value.size) ||
-    (value.size as number) < 0 ||
     !("metadata" in value)
   ) {
-    throw new Error("Peer sent an invalid data transfer header.");
+    throw new Error("Peer sent an invalid data transfer offer.");
   }
-
-  const metadata = cloneMetadata(value.metadata);
-  const header = { id: value.id, size: value.size as number, metadata };
-  if (encodedFrame(header).byteLength > maximumFrameSize) {
-    throw new Error("The data transfer metadata is too large.");
-  }
-  return header;
-}
-
-function cloneMetadata(value: unknown): TransferMetadata {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("Data transfer metadata must be an object.");
-  }
-  if (!isJsonObject(value)) {
-    throw new Error("Data transfer metadata must contain JSON-compatible values.");
-  }
-  try {
-    const encoded = JSON.stringify(value);
-    const clone: unknown = JSON.parse(encoded);
-    if (typeof clone !== "object" || clone === null || Array.isArray(clone)) throw new Error();
-    return clone as TransferMetadata;
-  } catch {
-    throw new Error("Data transfer metadata must contain JSON-compatible values.");
-  }
-}
-
-function isJsonObject(value: object, seen = new WeakSet<object>()): boolean {
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) return false;
-  if (seen.has(value)) return false;
-  seen.add(value);
-  const valid = Object.values(value).every((entry) => isJsonValue(entry, seen));
-  seen.delete(value);
-  return valid;
-}
-
-function isJsonValue(value: unknown, seen: WeakSet<object>): value is JsonValue {
-  if (value === null || typeof value === "boolean" || typeof value === "string") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) {
-    if (seen.has(value)) return false;
-    seen.add(value);
-    const valid = value.every((entry) => isJsonValue(entry, seen));
-    seen.delete(value);
-    return valid;
-  }
-  return typeof value === "object" && value !== null && isJsonObject(value, seen);
-}
-
-function validateAcceptance(value: unknown): Acceptance {
-  if (typeof value !== "object" || value === null || !("accepted" in value)) {
-    throw new Error("Peer returned an invalid data transfer response.");
-  }
-  if (value.accepted === true) return { accepted: true };
+  const size = "size" in value ? value.size : undefined;
   if (
-    value.accepted === false &&
-    "error" in value &&
-    typeof value.error === "string" &&
-    value.error.length > 0
+    size !== undefined &&
+    (typeof size !== "number" || !Number.isInteger(size) || size < 0)
   ) {
-    return { accepted: false, error: value.error };
+    throw new Error("Peer sent an invalid data transfer offer.");
   }
-  throw new Error("Peer returned an invalid data transfer response.");
-}
-
-function validateCompletion(value: unknown): Completion {
-  if (typeof value !== "object" || value === null || !("complete" in value)) {
-    throw new Error("Peer returned an invalid data transfer completion.");
-  }
-  if (value.complete === true) return { complete: true };
-  if (
-    value.complete === false &&
-    "error" in value &&
-    typeof value.error === "string" &&
-    value.error.length > 0
-  ) {
-    return { complete: false, error: value.error };
-  }
-  throw new Error("Peer returned an invalid data transfer completion.");
-}
-
-function validateSink(value: unknown): DataSink {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("write" in value) ||
-    typeof value.write !== "function" ||
-    !("close" in value) ||
-    typeof value.close !== "function" ||
-    !("abort" in value) ||
-    typeof value.abort !== "function"
-  ) {
-    throw new Error("An incoming data transfer requires a writable data sink.");
-  }
-  return value as DataSink;
-}
-
-function createFrameReader(source: DataSource): {
-  read(): Promise<unknown>;
-  remaining(): DataSource;
-} {
-  const iterator = source[Symbol.asyncIterator]();
-  let buffered = new Uint8Array();
-
   return {
-    async read() {
-      while (true) {
-        const newline = buffered.indexOf(10);
-        if (newline >= 0) {
-          if (newline > maximumFrameSize) {
-            throw new Error("Peer sent an oversized data transfer frame.");
-          }
-          const frame = buffered.slice(0, newline);
-          buffered = buffered.slice(newline + 1);
-          return JSON.parse(decoder.decode(frame));
-        }
-        if (buffered.byteLength > maximumFrameSize) {
-          throw new Error("Peer sent an oversized data transfer frame.");
-        }
-        const next = await iterator.next();
-        if (next.done === true) throw new Error("Peer closed an incomplete data transfer frame.");
-        if (!(next.value instanceof Uint8Array)) {
-          throw new Error("A data transfer source produced a non-byte value.");
-        }
-        buffered = concatenate(buffered, next.value);
-      }
-    },
-    async *remaining() {
-      if (buffered.byteLength > 0) {
-        yield buffered;
-        buffered = new Uint8Array();
-      }
-      while (true) {
-        const next = await iterator.next();
-        if (next.done === true) return;
-        if (!(next.value instanceof Uint8Array)) {
-          throw new Error("A data transfer source produced a non-byte value.");
-        }
-        yield next.value;
-      }
-    },
+    id: value.id,
+    ...(size === undefined ? {} : { size }),
+    metadata: validateMetadata(value.metadata),
   };
 }
 
-function framed(value: unknown): Uint8Array {
-  const encoded = encodedFrame(value);
-  if (encoded.byteLength > maximumFrameSize) {
-    throw new Error("The data transfer frame is too large.");
+function validateMetadata(value: unknown): TransferMetadata {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Data transfer metadata must be an object.");
   }
-  const frame = new Uint8Array(encoded.byteLength + 1);
-  frame.set(encoded);
-  frame[encoded.byteLength] = 10;
-  return frame;
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, validateJson(entry)]),
+    ),
+  );
 }
 
-function encodedFrame(value: unknown): Uint8Array {
-  return encoder.encode(JSON.stringify(value));
-}
-
-function concatenate(
-  first: Uint8Array<ArrayBufferLike>,
-  second: Uint8Array<ArrayBufferLike>,
-): Uint8Array<ArrayBuffer> {
-  const combined = new Uint8Array(first.byteLength + second.byteLength);
-  combined.set(first);
-  combined.set(second, first.byteLength);
-  return combined;
-}
-
-function sameHeader(first: Header, second: Header): boolean {
-  return first.id === second.id &&
-    first.size === second.size &&
-    JSON.stringify(first.metadata) === JSON.stringify(second.metadata);
-}
-
-function validError(value: unknown): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new Error("Peer sent an invalid data transfer failure.");
+function validateJson(value: unknown): JsonValue {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "string" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return value;
   }
-  return value;
+  if (Array.isArray(value)) return value.map(validateJson);
+  if (typeof value === "object") {
+    return Object.freeze(
+      Object.fromEntries(
+        Object.entries(value).map(([key, entry]) => [key, validateJson(entry)]),
+      ),
+    );
+  }
+  throw new Error("Data transfer metadata must contain JSON-compatible values.");
 }
 
-function asError(reason: unknown, fallback: string): Error {
-  return reason instanceof Error && reason.message.length > 0
-    ? reason
-    : new Error(errorMessage(reason, fallback));
+function validateAcceptance(value: unknown): Acceptance {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("accepted" in value) ||
+    typeof value.accepted !== "boolean"
+  ) {
+    throw new Error("Peer returned an invalid data transfer response.");
+  }
+  if (value.accepted) return { accepted: true };
+  if (!("error" in value) || typeof value.error !== "string" || value.error.length === 0) {
+    throw new Error("Peer returned an invalid data transfer rejection.");
+  }
+  return { accepted: false, error: value.error };
 }
 
-function errorMessage(reason: unknown, fallback: string): string {
-  if (reason instanceof Error && reason.message.length > 0) return reason.message;
-  if (typeof reason === "string" && reason.length > 0) return reason;
-  return fallback;
+function errorMessage(reason: unknown): string {
+  return asError(reason).message;
+}
+
+function asError(reason: unknown): Error {
+  if (reason instanceof Error && reason.message.length > 0) return reason;
+  if (typeof reason === "string" && reason.length > 0) return new Error(reason);
+  return new Error("The data transfer failed.");
 }

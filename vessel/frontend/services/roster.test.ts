@@ -4,7 +4,7 @@ import type { Peer } from "@c/backend/network";
 import type { DiscoveryUpdate } from "@c/backend/network/services/discovery";
 import type { Network, NetworkUpdate } from "@v/backend/network";
 import type { Session } from "@v/backend/session";
-import { createSignals } from "@v/backend/signals";
+import signals from "@c/backend/signals";
 import type {
   PersistentKeyValueStorage,
   PersistentStorage,
@@ -117,7 +117,7 @@ describe("Roster state", () => {
   });
 
   it("applies Discovery set and remove patches without reloading its snapshot", async () => {
-    const discoveryUpdates = createSignals().channel<DiscoveryUpdate>({}, "discovery");
+    const discoveryUpdates = signals.channel<DiscoveryUpdate>();
     const discovery = vi.fn(async () => []);
     const beacon = provider(
       "beacon",
@@ -281,7 +281,7 @@ function provider(
   services: () => readonly string[],
   discovery: () => Promise<unknown> = async () => [],
   identity: () => Promise<unknown> = async () => ({ name: "peer" }),
-  discoveryUpdates = createSignals().channel<DiscoveryUpdate>({}, "discovery"),
+  discoveryUpdates = signals.channel<DiscoveryUpdate>(),
 ): Peer {
   return {
     id,
@@ -289,8 +289,8 @@ function provider(
     services,
     isConnected: () => true,
     refreshServices: async () => services(),
-    service: () => undefined,
-    remote: (name: string) => {
+    hosts: () => false,
+    service: (name: string) => {
       if (name === "registry") return { remote: { list: services } };
       if (name === "discovery") {
         return { remote: { list: discovery }, events: discoveryUpdates };
@@ -326,7 +326,7 @@ function testContext(
   initialIdentities: readonly (readonly [string, unknown])[] = [],
 ) {
   const identities = persistentValues(initialIdentities);
-  const updates = createSignals().channel<NetworkUpdate>({}, "network");
+  const updates = signals.channel<NetworkUpdate>();
   const network = {
     id: localId,
     connectedPeers: vi.fn(initialPeers),
@@ -337,7 +337,6 @@ function testContext(
   } as unknown as PersistentStorage;
   const session = {
     network: vi.fn(() => network),
-    signals: createSignals,
     storage: (selection?: { readonly persistent?: boolean }) => {
       if (selection?.persistent === true) return persistent;
       throw new Error("Roster requested volatile Storage.");
@@ -348,14 +347,10 @@ function testContext(
     network,
     session,
     identities,
-    peerChanged(peer: Peer, event: "connected" | "disconnected" | "addresses" | "services") {
-      updates.publish(event === "disconnected"
-        ? { type: "remove", peerId: peer.id }
-        : {
-          type: "set",
-          peer,
-          changed: event === "connected" ? "connection" : event,
-        });
+    peerChanged(peer: Peer, type: "connected" | "disconnected" | "addresses" | "services") {
+      updates.publish(type === "disconnected"
+        ? { type, peerId: peer.id }
+        : { type, peer });
     },
   };
 }
@@ -364,7 +359,7 @@ function networkWith(connected: () => readonly Peer[]): Network {
   return {
     id: localId,
     connectedPeers: connected,
-    updates: createSignals().channel({}, "updates"),
+    updates: signals.channel(),
   } as unknown as Network;
 }
 
@@ -374,7 +369,6 @@ async function persistentSession(
 ): Promise<Session> {
   return {
     network: () => network,
-    signals: createSignals,
     storage: () => storage,
   } as unknown as Session;
 }

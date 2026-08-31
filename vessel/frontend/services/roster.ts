@@ -15,7 +15,8 @@ import {
   type IdentityService,
 } from "@v/backend/network/services/identity";
 import type { Session } from "@v/backend/session";
-import type { Channel } from "@v/backend/signals";
+import signals from "@c/backend/signals";
+import type { Subscription } from "@c/backend/signals";
 
 export interface RosterEntry {
   readonly peerId: string;
@@ -32,7 +33,7 @@ export type RosterUpdate = Readonly<
 >;
 
 export interface Roster {
-  readonly updates: Channel<RosterUpdate>;
+  readonly updates: Subscription<RosterUpdate>;
   list(): readonly RosterEntry[];
   get(peerId: string): RosterEntry | undefined;
   refresh(): Promise<void>;
@@ -52,7 +53,7 @@ export async function createRoster(session: Session): Promise<Roster> {
   const discovered = new Map<string, readonly string[]>();
   const discoveryProviders = new Map<string, () => void>();
   const entries = new Map<string, RosterEntry>();
-  const updates = session.signals().channel<RosterUpdate>({}, "updates");
+  const updates = signals.channel<RosterUpdate>();
 
   for (const [key, value] of await persisted.entries()) {
     const peerId = identityPeerId(key);
@@ -159,20 +160,21 @@ export async function createRoster(session: Session): Promise<Roster> {
     }
   }
 
-  async function attachDiscovery(peer: Peer): Promise<void> {
-    const service = peer.service<DiscoveryService>(discoveryServiceName);
-    discoveryProviders.set(peer.id, service.events.subscribe(applyDiscoveryUpdate));
-    await refreshDiscovery(peer);
-  }
-
   async function applyServices(peer: Peer, services: readonly string[]): Promise<void> {
     await refreshIdentity(peer, services);
-    if (services.includes(discoveryServiceName) && !discoveryProviders.has(peer.id)) {
-      await attachDiscovery(peer);
-    } else if (!services.includes(discoveryServiceName)) {
+    if (!services.includes(discoveryServiceName)) {
       discoveryProviders.get(peer.id)?.();
       discoveryProviders.delete(peer.id);
+      return;
     }
+    if (!discoveryProviders.has(peer.id)) {
+      discoveryProviders.set(
+        peer.id,
+        peer.service<DiscoveryService>(discoveryServiceName)
+          .events.subscribe(applyDiscoveryUpdate),
+      );
+    }
+    await refreshDiscovery(peer);
   }
 
   async function attach(peer: Peer): Promise<void> {
@@ -183,39 +185,28 @@ export async function createRoster(session: Session): Promise<Roster> {
     }
   }
 
-  async function refreshPeer(peer: Peer): Promise<void> {
-    let services: readonly string[];
-    try {
-      services = await peer.refreshServices();
-    } catch {
-      return;
-    }
-    await refreshIdentity(peer, services);
-    if (services.includes(discoveryServiceName)) await refreshDiscovery(peer);
-  }
-
   const initial = network.connectedPeers();
   for (const peer of initial) {
     connected.set(peer.id, peer);
     publish(peer.id);
   }
   network.updates.subscribe((update) => {
-    if (update.type === "set") {
-      const { peer } = update;
-      connected.set(peer.id, peer);
-      publish(peer.id);
-      if (update.changed === "connection") void attach(peer);
-      else if (update.changed === "services") void applyServices(peer, peer.services());
+    if (update.type === "disconnected") {
+      connected.delete(update.peerId);
+      const stopDiscovery = discoveryProviders.get(update.peerId);
+      discoveryProviders.delete(update.peerId);
+      stopDiscovery?.();
+      if (stopDiscovery !== undefined) {
+        for (const peerId of [...discovered.keys()]) removeDiscovered(peerId);
+      }
+      publish(update.peerId);
       return;
     }
-    connected.delete(update.peerId);
-    const stopDiscovery = discoveryProviders.get(update.peerId);
-    discoveryProviders.delete(update.peerId);
-    stopDiscovery?.();
-    if (stopDiscovery !== undefined) {
-      for (const peerId of [...discovered.keys()]) removeDiscovered(peerId);
-    }
-    publish(update.peerId);
+    const { peer } = update;
+    connected.set(peer.id, peer);
+    publish(peer.id);
+    if (update.type === "connected") void attach(peer);
+    else if (update.type === "services") void applyServices(peer, peer.services());
   });
   await Promise.all(initial.map(attach));
   for (const peerId of identities.keys()) {
@@ -227,7 +218,7 @@ export async function createRoster(session: Session): Promise<Roster> {
     list: () => Object.freeze([...entries.values()]),
     get: (peerId) => entries.get(peerId),
     async refresh() {
-      await Promise.all(network.connectedPeers().map(refreshPeer));
+      await Promise.all(network.connectedPeers().map(attach));
     },
   };
 }

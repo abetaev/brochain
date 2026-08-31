@@ -1,25 +1,23 @@
 architecture
 ============
 
-This document describes the implemented technical architecture of brochain.
+The implemented technical architecture. Architectural direction and diagram
+semantics are in [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md).
 
-brochain consists of the browser application **Vessel**, the reusable
-**Common** backend, and the headless bootstrap and relay peer **Beacon**.
-
-architecture semantics are described in [this document](./docs/ARCHITECTURE.md) and provide guidelines and patterns for project development.
+brochain is the browser application **Vessel**, the reusable **Common** backend,
+and the headless bootstrap and relay peer **Beacon**.
 
 structure
 ---------
 
 ```text
 Common
-├── Network
-│   ├── Peer × remote identity
-│   │   ├── Registry instance
-│   │   └── enabled service instances
-│   ├── fixed Network Service Factory catalog
-│   └── RPC, event, and data transports
-└── Channel
+├── Signals
+└── Network
+    ├── Peer × remote identity
+    │   └── published Network Service instances
+    ├── fixed Network Service Factory catalog
+    └── RPC, event, and data transports
 
 Vessel
 ├── Backend
@@ -27,16 +25,13 @@ Vessel
 │   │   ├── Window facade
 │   │   └── Worker account service
 │   └── Session
-│       ├── Signals
 │       ├── Options
 │       ├── Storage
 │       │   ├── volatile root
 │       │   └── persistent root
 │       └── Network
 │           ├── Common Network
-│           ├── Identity factory
-│           ├── Messaging factory
-│           └── DataTransfer factory
+│           └── Identity, Messaging, and DataTransfer factories
 └── Frontend
     ├── Roster
     ├── Chat
@@ -44,85 +39,104 @@ Vessel
 
 Beacon
 └── Common Network
-    ├── Registry
-    ├── Discovery
+    ├── Discovery factory
     └── Circuit Relay
 ```
 
-Backend and frontend are dependency layers, not separate deployments. Both
-Vessel layers run in the browser; Account operations run in a Worker. Vessel
-and Beacon use the same Common Network implementation.
+Backend and frontend are dependency layers, not deployments; both Vessel layers
+run in the browser and Account operations run in a Worker. Signals belongs to no
+component. Vessel and Beacon share one Common Network implementation.
 
 Common
 ------
 
-### Channel
+### Signals
 
 - **dependencies**: none
-- **structure**: an ordered collection of subscriptions
-- **use cases**: publish; subscribe; unsubscribe
+- **structure**: the application event bus; a factory of independent Channels
+- **use cases**: obtain a typed Channel
 - **behavior**: publication is synchronous, ordered, non-retained, and
-  non-replaying. Subscriber failures do not affect the publisher or later
-  subscribers.
+  non-replaying; a subscriber failure affects neither the publisher nor later
+  subscribers. A Channel's owner publishes, and consumers receive a Subscription
+  which only subscribes.
 
 ### Network
 
 - **dependencies**: valid libp2p configuration, a fixed Network Service Factory
   catalog, and a per-Peer publication decision
-- **structure**: one libp2p node, Peer components, the fixed factory catalog,
-  the standard Registry factory, and shared RPC, event, and data transports
+- **structure**: one libp2p node, Peers, the factory catalog including the
+  standard Registry factory, and the RPC, event, and data transports
 - **use cases**: read local identity and addresses; create and list Peers;
-  inspect supported services; publish or remove one service for a connected
-  Peer; observe Peer connection, address, and service-catalog changes; close
-  Network
+  inspect supported services; publish or remove one service for a Peer; observe
+  Peer updates; close Network
 - **behavior**: an identified address creates a disconnected Peer; an
-  unidentified address is dialed to resolve its identity. Concurrent connection
-  and authentication attempts for one identity converge on one active Peer.
-  Intermediary relay connections used to establish WebRTC are ignored; only a
-  completed direct connection creates and publishes a Peer.
-  Connection creates the configured service instances for that Peer, then
-  publishes the connected Peer. A later service-catalog refresh makes
-  the first remote Registry request; a missing or invalid Registry terminates
-  the Peer. Losing the final direct connection removes the Peer.
-  Publication changes add or remove one peer-bound instance. New RPC, event,
-  and data interactions use the current published set. Accepted RPC and data
-  work retains its instance and finishes; removing an instance closes its event
-  feeds. The factory catalog remains fixed for the Network lifetime.
+  unidentified address is dialed to resolve its identity, and concurrent attempts
+  for one identity converge on one Peer. Intermediary relay connections used to
+  establish WebRTC are ignored; only a completed direct connection creates a
+  Peer. Connection creates that Peer's published instances and then publishes
+  `connected`; losing the final direct connection publishes `disconnected` and
+  removes the Peer. A publication change adds or removes one instance and
+  publishes that change. Accepted RPC and data work finishes on its instance,
+  while removing an instance closes its event feeds. The catalog is fixed for the
+  Network lifetime.
+
+#### Network Service
+
+- **dependencies**: an owning Peer
+- **structure**: a factory `(peer) => service` and up to three declared facets —
+  `remote` methods, an `events` Channel, and `data`
+- **use cases**: answer a peer's calls; publish events to it; exchange bytes
+- **behavior**: a host writes plain `remote` methods and publishes to `events`;
+  the same contract reaches its peer as promised methods, a Subscription, and a
+  Stream. A service declares only the facets it uses, and each instance is bound
+  to one Peer.
 
 #### Peer
 
-- **dependencies**: an owning Common Network and a resolved remote identity
-- **structure**: connection state, retained addresses, the current remote
-  service catalog, enabled peer-bound Network Services, and remote transport
-  projections
-- **use cases**: read addresses, connection state, and remote services; connect;
-  refresh remote services; observe connection changes; host and access
-  peer-bound services; access remote RPC, event, and streamed-data facets
-- **behavior**: explicit dial targets and Identify results supply retained
-  addresses; inbound transport source addresses do not. A service projection
-  exposes the facets declared by its typed contract: promised remote methods, a
-  local Channel receiving ordered non-replayed events, and Data for asynchronous
-  byte sources. New interactions reject services absent from the current remote
-  catalog. Transport protocols and libp2p streams remain private to Network.
+- **dependencies**: an owning Network and a resolved remote identity
+- **structure**: retained addresses, the last remote service catalog, published
+  service instances, and one remote projection per service
+- **use cases**: read addresses, connection state, remote services, and whether a
+  service is published; connect; refresh remote services; access a service
+- **behavior**: connection state derives from the live libp2p connections.
+  Explicit dial targets and Identify results supply retained addresses; inbound
+  source addresses do not. Accessing a service returns the published instance
+  with its methods aimed at the peer, or a pure remote projection when nothing is
+  published. Peer never checks whether a peer provides a service: an interaction
+  is attempted and the peer's refusal is reported. A catalog change makes closed
+  event feeds retry. Disconnection releases the Peer's instances, event feeds,
+  and transfers. Transport protocols and libp2p streams stay private to Network.
+
+#### Stream
+
+- **dependencies**: an owning Network Service
+- **structure**: tracked transfers, each with an identifier, an optional declared
+  size, progress, and completion
+- **use cases**: send a byte source; accept the next incoming transfer; abort
+- **behavior**: an absent size means the length is not known in advance, as for a
+  live capture; progress is the transferred count, and only a declared size makes
+  a proportion meaningful. Progress publishes at most every 250 milliseconds plus
+  the final count. Two transfers per direction are active at once and further
+  sends fail. Transfers preserve backpressure, complete on the receiver's
+  acknowledgement, and do not resume.
 
 #### Registry
 
-- **dependencies**: an owning Peer and its current published service instances
-- **structure**: one peer-bound RPC service instance when published
-- **use cases**: list services available to the requesting Peer
-- **behavior**: each response lists the current instances published to that
-  Peer; Registry uses the same per-Peer publication configuration as every
-  other service and is enabled by default
+- **dependencies**: an owning Peer and its published instances
+- **use cases**: list the services published to the requesting Peer
+- **behavior**: Registry follows the same per-Peer publication as every other
+  service and is enabled by default. Refusing it to a peer leaves that peer no
+  way to learn what is supported and so bars it. Catalog reads are lazy: a Peer
+  whose Registry cannot be listed is terminated when a consumer asks.
 
 #### Discovery
 
-- **dependencies**: an owning Common Network
-- **structure**: one optional Network Service Factory which creates a peer-bound
-  remote list and peer-update event Channel, currently hosted by Beacon
-- **use cases**: list and observe other connected Peers with advertised
-  addresses
+- **dependencies**: an owning Network
+- **structure**: one optional factory creating a peer-bound remote list and
+  peer-update Channel, currently hosted by Beacon
+- **use cases**: list and observe other connected Peers with advertised addresses
 - **behavior**: the list initializes consumers; later connection, address, and
-  disconnection changes are sent as keyed set or remove updates. A requester is
+  disconnection changes arrive as keyed set or remove updates. A requester is
   excluded from its own list and update stream.
 
 Vessel backend
@@ -135,49 +149,39 @@ Vessel backend
 - **structure**: a Window facade, Worker account service, and private
   Session-access channel
 - **use cases**: list, create, unlock, export, and delete local accounts
-- **behavior**: account records contain only versioned encrypted data;
-  passwords, decrypted secrets, and the peer identity seed remain in the
-  Worker. Creation and unlock create a Session. Deletion password-confirms and
-  removes `brochain/<username>` before its account record. Window authentication
-  calls execute directly and have no concurrent ordering contract.
+- **behavior**: account records contain only versioned encrypted data; passwords,
+  decrypted secrets, and the peer identity seed remain in the Worker. Creation
+  and unlock create a Session. Deletion password-confirms and removes
+  `brochain/<username>` before its account record. Window authentication calls
+  execute directly and have no concurrent ordering contract.
 
 ### Session
 
 - **dependencies**: an unlocked Account identity and available IndexedDB, OPFS,
   and Web Locks
-- **structure**: one instance each of Signals, Storage, Vessel Network, and
-  Options
-- **use cases**: access Signals, Storage, Options, and Vessel Network; close the
-  authenticated Session
-- **behavior**: construction creates Storage, account Options, then Network.
-  Network construction includes its fixed service factories but performs no
-  external connection. Failure closes created dependencies. Component access is
-  synchronous afterward. Closing Session closes Network, Storage, and Account
-  access; consumers then discard the Session and its components.
-
-#### Signals
-
-- **dependencies**: its owning Session
-- **structure**: Common Channels keyed by owner and local name
-- **use cases**: obtain a stable typed Channel for an owner and name
-- **behavior**: owner and name isolate Channel namespaces. Platform events,
-  request/response flows, and local reactivity remain outside Signals.
+- **structure**: one instance each of Storage, Options, and Vessel Network
+- **use cases**: access Storage, Options, and Network; close the authenticated
+  Session
+- **behavior**: construction creates Storage, account Options, then Network,
+  which performs no external connection; failure closes what was created.
+  Component access is synchronous afterwards. Closing closes Network, Storage,
+  and Account access; consumers then discard the Session and its components.
 
 #### Options
 
-- **dependencies**: account-level persistent Storage and Session Signals
+- **dependencies**: account-level persistent Storage and Signals
 - **structure**: category and object accessors plus one change Channel
 - **use cases**: traverse category and object scopes; get, set, unset, and
   observe properties
 - **behavior**: construction loads scalar values and removes persisted
   non-scalars. Mutations persist before updating the projection and publishing;
-  failure changes neither. Concurrent mutations have no ordering contract.
-  Values are strings, numbers, booleans, or `null`; `undefined` means absent.
-  The TypeScript schema does not validate exact persisted scalar types. Dynamic
+  failure changes neither. Concurrent mutations have no ordering contract. Values
+  are strings, numbers, booleans, or `null`; `undefined` means absent. The
+  TypeScript schema does not validate exact persisted scalar types. Dynamic
   object identifiers are percent-encoded. A missing or true
-  `peers/${peerId}/services/${serviceName}.enabled` permits that hosted service;
-  false denies it. Observation is synchronous, ordered, non-retained, and
-  property-specific.
+  `peers/${peerId}/services/${serviceName}.enabled` publishes that service to
+  that peer; false withholds it. Observation is synchronous, ordered,
+  non-retained, and property-specific.
 
 #### Storage
 
@@ -193,60 +197,48 @@ Vessel backend
   Session; unencrypted persistent values survive it. Persistent entry lists are
   immutable and key-ordered. File stores share quota accounting and one
   Web-Lock-protected Session OPFS directory; writers declare exact sizes and
-  expose completed Blobs while reserving ten percent of quota. Close finishes
-  or aborts accepted work before releasing resources. Storage publishes no
-  mutations itself.
+  expose completed Blobs while reserving ten percent of quota. Close finishes or
+  aborts accepted work before releasing resources. Storage publishes no mutations
+  itself.
 
 #### Network
 
-- **dependencies**: the Session identity and account name, Options, Signals,
-  browser networking, and the Common Network factory
-- **structure**: one Common Network; fixed Identity, Messaging, and DataTransfer
-  factories; and one Network update Channel
-- **use cases**: read local peer ID and supported services; connect directly;
-  list connected Peers; observe keyed Peer updates; close Network
-- **behavior**: construction creates the Common Network and supplies its fixed
-  factories. It performs no external connection. For each Common Peer,
-  Network reads that peer's service Options centrally and observes those exact
-  properties while connected. Changes publish or remove the corresponding
-  instance and emit that service's publication patch. Common connection,
-  address, service-catalog, and disconnection events become one-Peer set or
-  remove updates through Signals.
+- **dependencies**: the Session identity and account name, Options, browser
+  networking, and Common Network
+- **structure**: one Common Network supplied with the fixed Identity, Messaging,
+  and DataTransfer factories
+- **use cases**: everything Common Network provides, plus connect by address
+- **behavior**: Vessel adds one thing to the Common Network — the account's
+  Options decide which services each peer may reach. They are read when a peer
+  connects and the same properties are observed while it stays connected, so a
+  change publishes or removes that instance immediately.
 
 ##### Identity
 
-- **dependencies**: the Session account name and Vessel Network
-- **structure**: one Network Service Factory, peer-bound remote-method facets,
-  and one remote response validator
-- **use cases**: return local `{ name }`; request and validate remote Identity
+- **dependencies**: the Session account name
+- **use cases**: return the local `{ name }`; read and validate a peer's Identity
 - **behavior**: Identity retains no remote data; Roster owns valid observations.
-  Network decides whether to create its service instance for each Peer.
 
 ##### Messaging
 
-- **dependencies**: Vessel Network and Signals
-- **structure**: one Network Service Factory which creates peer-bound
-  services containing remote methods, send, and a Signals Channel
-- **use cases**: send text; observe sent, received, and failed messages
-- **behavior**: messages require valid opaque IDs and text; Messaging retains no
-  Chat state. Network decides whether to create its service instance for each
-  Peer.
+- **dependencies**: Signals
+- **structure**: `remote.send` and an `events` Channel of received text
+- **use cases**: send text to a peer; observe text received from it
+- **behavior**: arriving text is validated and published. Messaging retains no
+  Chat state and no message identity; delivery is the resolution of the remote
+  call.
 
 ##### DataTransfer
 
-- **dependencies**: Vessel Network and Signals
-- **structure**: one Network Service Factory which creates peer-bound remote
-  services containing remote negotiation methods, streamed Data, send, and a
-  Signals Channel
-- **use cases**: offer and send declared-length data; accept with a sink; observe
+- **dependencies**: Signals
+- **structure**: `remote.offer`, an `events` Channel, `data`, and a local send
+  action available while the service is published
+- **use cases**: offer and send data; accept an offer with a sink; observe
   progress, completion, and failure
-- **behavior**: remote methods negotiate metadata, acceptance, completion, and
-  cancellation; Data carries accepted content. Metadata and length are validated
-  before bytes. A receiver must claim an offer during synchronous publication.
-  Transfers preserve backpressure, require final acknowledgement, and allow two
-  streams per direction per Peer. Progress is limited to one event per 250
-  milliseconds plus the final state. Network decides whether to create its
-  service for each Peer. Interrupted transfers do not resume.
+- **behavior**: metadata is validated before its offer is published, and a
+  receiver MUST claim that offer during the synchronous publication. Accepted
+  content travels on the Stream, which owns identity, size, progress, and
+  completion. Content which was never offered is refused.
 
 Vessel frontend
 ---------------
@@ -256,40 +248,40 @@ Vessel frontend
 - **dependencies**: Account and, after authentication, an active Session
 - **structure**: Roster and Chat services plus one active Account, Home, or Chat
   view
-- **use cases**: authenticate; sign out; navigate between account, peer list,
-  and conversation views
-- **behavior**: after authentication, Application constructs Chat and then
-  Roster before exposing Home. Both subscribe before Home starts an external
+- **use cases**: authenticate; sign out; navigate between account, peer list, and
+  conversation views
+- **behavior**: after authentication, Application constructs Chat and then Roster
+  before exposing Home, so both subscribe before Home starts an external
   connection. Initialization failure closes the Session.
 
 ### Roster
 
-- **dependencies**: Session Vessel Network, persistent Storage, and Signals
-- **structure**: one persistent Identity store, one current peer projection,
-  and a keyed update Channel
+- **dependencies**: Session Network, persistent Storage, and Signals
+- **structure**: one persistent Identity store, one current peer projection, and
+  a keyed update Channel
 - **use cases**: list or get current peers; refresh remote observations; observe
   one-peer set and remove updates
 - **behavior**: construction combines connected, discovered, and remembered
   Peers. Network and Discovery changes update only the affected projection and
-  publish that patch. A connection patch makes Roster ask the Peer to refresh
-  its service catalog; that catalog controls whether Identity and Discovery are
-  queried.
+  publish that patch. A connection update makes Roster refresh that Peer's
+  catalog, and the catalog decides whether Identity and Discovery are queried.
   Provider failures are isolated. Valid Identity is persisted before its peer
-  update. Display name falls back from cached Identity name to peer ID.
+  update, and the display name falls back from cached Identity name to peer ID.
   Addresses, availability, discovery, and service catalogs remain transient.
 
 ### Chat
 
-- **dependencies**: Session Storage, Vessel Network, and Signals
-- **structure**: peer-scoped item/order/read/file stores and update and read
-  Channels, plus subscriptions to each connected Peer's Messaging and
-  DataTransfer services
+- **dependencies**: Session Storage, Network, and Signals
+- **structure**: peer-scoped item, order, read, and file stores, item and read
+  Channels, and subscriptions to each Peer's published Messaging and DataTransfer
 - **use cases**: inspect history, unread count, and capabilities; mark read; send
   text or files; observe item and read updates
-- **behavior**: Chat retains item state before publishing updates. Incoming files
-  stream into Chat's file store. Messaging capability gates text and
-  DataTransfer capability gates files. Conversation state survives view
-  navigation and lasts for the Session.
+- **behavior**: Chat owns conversation identity — it assigns every item's
+  identifier and derives sent and failed state from its own remote call. It
+  subscribes to the instances a Peer publishes, which exist before that peer's
+  catalog is known, while the catalog gates the text and file controls. Incoming
+  files stream into Chat's file store and an offer without a declared size is
+  refused. Conversation state survives view navigation and lasts for the Session.
 
 ### Account view
 
@@ -298,20 +290,20 @@ Vessel frontend
   controls
 - **use cases**: create, unlock, export, and delete accounts
 - **behavior**: one busy state prevents concurrent mutations; successful
-  authentication hands Session to Application
+  authentication hands the Session to Application.
 
 ### Home view
 
 - **dependencies**: Session, Roster, and Chat
-- **structure**: one peer-list signal, peer rows, direct-connection controls,
-  and view-local action and Beacon errors
+- **structure**: one peer-list signal, peer rows, direct-connection controls, and
+  view-local action and Beacon errors
 - **use cases**: refresh peers; connect a listed or direct Peer; open Chat; sign
   out
-- **behavior**: after subscriptions exist, Home starts the default Beacon
-  connection in the background. Refresh retries that connection and refreshes
-  Roster. Listed and direct connections call Network directly. Roster patches
-  replace or remove one keyed row; Peer catalogs provide Chat capabilities;
-  Chat updates maintain unread presentation.
+- **behavior**: once subscriptions exist, Home starts the default Beacon
+  connection in the background, and Refresh retries it and refreshes Roster.
+  Listed and direct connections call Network directly. Roster patches replace or
+  remove one keyed row, Peer catalogs provide Chat capabilities, and Chat updates
+  maintain unread presentation.
 
 ### Chat view
 
@@ -331,15 +323,15 @@ Beacon
 
 ### Network
 
-- **dependencies**: configured public relay information, a process identity,
-  and Common Network factory
-- **structure**: one Common Network with fixed Discovery and Registry factories,
-  Identify, and Circuit Relay
+- **dependencies**: configured public relay information, a process identity, and
+  Common Network
+- **structure**: one Common Network with the Discovery factory, Identify, and
+  Circuit Relay
 - **use cases**: accept Vessel bootstrap connections; relay connection
   establishment; advertise connected Peers
-- **behavior**: Beacon retains no application messages and keeps one identity
-  for its process lifetime. Development starts it beside Vessel; production runs
-  it beside the built Vessel in one process. Restart creates a new identity.
+- **behavior**: Beacon retains no application messages and keeps one identity for
+  its process lifetime. Development starts it beside Vessel; production runs it
+  beside the built Vessel in one process. Restart creates a new identity.
 
 runtime and technologies
 ------------------------

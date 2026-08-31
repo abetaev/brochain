@@ -1,4 +1,6 @@
-import { createChannel, type Channel } from "../../channel.ts";
+import signals from "../../signals.ts";
+import type { Channel, Subscription } from "../../signals.ts";
+import type { NetworkUpdate } from "../index.ts";
 import type { Peer } from "../peer.ts";
 import type { RPC } from "../service.ts";
 
@@ -12,23 +14,20 @@ export type DiscoveryUpdate = Readonly<
   | { type: "remove"; peerId: string }
 >;
 
-export type DiscoveryMethods = {
+type DiscoveryMethods = {
   list(): readonly DiscoveredPeer[];
 };
 
 interface DiscoveryHost {
   service(requester: Peer): HostedDiscovery;
-  peerChanged(
-    peer: Peer,
-    event: "connected" | "disconnected" | "addresses" | "services",
-  ): void;
+  peerChanged(update: NetworkUpdate): void;
 }
 
 export const discoveryServiceName = "discovery";
 
 export type DiscoveryService = {
   readonly remote: RPC<DiscoveryMethods>;
-  readonly events: Channel<DiscoveryUpdate>;
+  readonly events: Subscription<DiscoveryUpdate>;
 };
 
 type HostedDiscovery = {
@@ -42,7 +41,7 @@ export function createDiscoveryHost(): DiscoveryHost {
 
   return {
     service(requester) {
-      const events = createChannel<DiscoveryUpdate>();
+      const events = signals.channel<DiscoveryUpdate>();
       updates.set(requester.id, events);
       return {
         remote: {
@@ -54,21 +53,25 @@ export function createDiscoveryHost(): DiscoveryHost {
         events,
       };
     },
-    peerChanged(peer, event) {
-      if (event === "services") return;
-      if (event === "disconnected") {
-        peers.delete(peer.id);
-        updates.delete(peer.id);
+    peerChanged(change) {
+      if (change.type === "services" || change.type === "publication") return;
+
+      let announced: DiscoveryUpdate;
+      let subject: string;
+      if (change.type === "disconnected") {
+        subject = change.peerId;
+        peers.delete(subject);
+        updates.delete(subject);
+        announced = { type: "remove", peerId: subject };
       } else {
-        if (peer.addresses().length === 0) return;
-        peers.set(peer.id, peer);
+        if (change.peer.addresses().length === 0) return;
+        subject = change.peer.id;
+        peers.set(subject, change.peer);
+        announced = { type: "set", peer: discoveredPeer(change.peer) };
       }
-      const update: DiscoveryUpdate = event === "disconnected"
-        ? { type: "remove", peerId: peer.id }
-        : { type: "set", peer: discoveredPeer(peer) };
 
       for (const [requesterId, events] of updates) {
-        if (requesterId !== peer.id) events.publish(update);
+        if (requesterId !== subject) events.publish(announced);
       }
     },
   };

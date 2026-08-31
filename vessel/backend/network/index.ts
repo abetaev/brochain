@@ -7,6 +7,7 @@ import { webRTC } from "@libp2p/webrtc";
 import { webSockets } from "@libp2p/websockets";
 import { base64ToBytes } from "@c/base64";
 import createCommonNetwork, {
+  type Network as CommonNetwork,
   type NetworkServiceFactories,
   type Peer,
 } from "@c/backend/network";
@@ -27,40 +28,21 @@ import {
   observeServiceEnabled,
 } from "@v/backend/options/network-services";
 import type { Options } from "@v/backend/options";
-import type { Channel, Signals } from "@v/backend/signals";
 
-export type NetworkUpdate = Readonly<
-  | {
-    type: "set";
-    peer: Peer;
-    changed: "connection" | "addresses" | "services";
-  }
-  | {
-    type: "set";
-    peer: Peer;
-    changed: "publication";
-    serviceName: string;
-    enabled: boolean;
-  }
-  | { type: "remove"; peerId: string }
->;
+export type { NetworkUpdate } from "@c/backend/network";
 
-export interface Network {
-  readonly id: string;
-  readonly updates: Channel<NetworkUpdate>;
+export type Network = Omit<CommonNetwork, "createPeer"> & {
   connect(address: string, ...alternates: readonly string[]): Promise<Peer>;
-  connectedPeers(): readonly Peer[];
-  services(): readonly string[];
-  close(): Promise<void>;
-}
+};
 
 const relayReservationTimeout = 5_000;
 
+// Vessel adds one thing to the Common Network: the account's Options decide which
+// services each peer may reach, while connected as well as at connection time.
 export async function createNetwork(
   identitySeed: string,
   username: string,
   options: Options,
-  signals: Signals,
 ): Promise<Network> {
   const privateKey = await generateKeyPairFromSeed(
     "Ed25519",
@@ -89,56 +71,36 @@ export async function createNetwork(
   }, serviceFactories, (peer, serviceName) =>
     isServiceEnabled(options, peer.id, serviceName)
   );
-  const updates = signals.channel<NetworkUpdate>({}, "updates");
   const optionObservers = new Map<string, readonly (() => void)[]>();
   let shutdown: Promise<void> | undefined;
 
-  const stopNetworkUpdates = common.subscribe((peer, event) => {
-    if (event === "connected") {
-      optionObservers.set(peer.id, common.services().map((serviceName) =>
-        observeServiceEnabled(options, peer.id, serviceName, (enabled) => {
-          common.publish(peer, serviceName, enabled);
-          updates.publish({
-            type: "set",
-            peer,
-            changed: "publication",
-            serviceName,
-            enabled,
-          });
-        })
-      ));
-      updates.publish({ type: "set", peer, changed: "connection" });
-      return;
-    }
-    if (event === "disconnected") {
-      stopObservingPeer(peer.id);
-      updates.publish({ type: "remove", peerId: peer.id });
-      return;
-    }
-    updates.publish({
-      type: "set",
-      peer,
-      changed: event === "addresses" ? "addresses" : "services",
-    });
-  });
-
-  function stopObservingPeer(peerId: string): void {
+  function stopObserving(peerId: string): void {
     for (const stop of optionObservers.get(peerId) ?? []) stop();
     optionObservers.delete(peerId);
   }
 
+  const stopObservingOptions = common.updates.subscribe((update) => {
+    if (update.type === "connected") {
+      optionObservers.set(
+        update.peer.id,
+        common.services().map((serviceName) =>
+          observeServiceEnabled(options, update.peer.id, serviceName, (enabled) => {
+            common.publish(update.peer, serviceName, enabled);
+          })
+        ),
+      );
+    } else if (update.type === "disconnected") stopObserving(update.peerId);
+  });
+
   return {
-    id: common.id,
-    updates,
+    ...common,
     async connect(address, ...alternates) {
       return await (await common.createPeer(address, ...alternates)).connect();
     },
-    connectedPeers: common.connectedPeers,
-    services: common.services,
     async close() {
       if (shutdown === undefined) {
-        stopNetworkUpdates();
-        for (const peerId of optionObservers.keys()) stopObservingPeer(peerId);
+        stopObservingOptions();
+        for (const peerId of [...optionObservers.keys()]) stopObserving(peerId);
         shutdown = common.close();
       }
       await shutdown;
