@@ -8,6 +8,7 @@ import type { Roster } from "./services/roster";
 import { Account } from "./views/Account";
 import { Chat } from "./views/Chat";
 import { Home } from "./views/Home";
+import { Peer } from "./views/Peer";
 
 interface ActiveSession {
   readonly session: Session;
@@ -18,7 +19,12 @@ interface ActiveSession {
 type Location =
   | { readonly view: "account" }
   | ({ readonly view: "home" } & ActiveSession)
-  | ({ readonly view: "chat"; readonly peerId: string } & ActiveSession);
+  | ({ readonly view: "chat"; readonly peerId: string } & ActiveSession)
+  | ({
+    readonly view: "peer";
+    readonly peerId: string;
+    readonly origin: "home" | "chat";
+  } & ActiveSession);
 
 function Vessel() {
   const [location, setLocation] = createSignal<Location>({ view: "account" });
@@ -49,6 +55,10 @@ function Vessel() {
     const current = location();
     return current.view === "chat" ? current : undefined;
   };
+  const peer = () => {
+    const current = location();
+    return current.view === "peer" ? current : undefined;
+  };
 
   return (
     <main class="container">
@@ -77,6 +87,15 @@ function Vessel() {
                   roster: current().roster,
                   peerId,
                 })}
+              onOpenPeer={(peerId) =>
+                setLocation({
+                  view: "peer",
+                  origin: "home",
+                  session: current().session,
+                  chat: current().chat,
+                  roster: current().roster,
+                  peerId,
+                })}
               onSignedOut={() => {
                 setLocation({ view: "account" });
               }}
@@ -89,8 +108,34 @@ function Vessel() {
               chat={current().chat}
               roster={current().roster}
               peerId={current().peerId}
+              onOpenPeer={() =>
+                setLocation({
+                  view: "peer",
+                  origin: "chat",
+                  session: current().session,
+                  chat: current().chat,
+                  roster: current().roster,
+                  peerId: current().peerId,
+                })}
               onBack={() => setLocation({
                 view: "home",
+                session: current().session,
+                chat: current().chat,
+                roster: current().roster,
+              })}
+            />
+          )}
+        </Match>
+        <Match when={peer()}>
+          {(current) => (
+            <Peer
+              session={current().session}
+              roster={current().roster}
+              peerId={current().peerId}
+              onBack={() => setLocation({
+                ...(current().origin === "chat"
+                  ? { view: "chat", peerId: current().peerId }
+                  : { view: "home" }),
                 session: current().session,
                 chat: current().chat,
                 roster: current().roster,

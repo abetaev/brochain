@@ -18,8 +18,8 @@ import type { NetworkServiceFactories, NetworkServiceFactory } from "./service.t
 import {
   createRegistry,
   registryServiceName,
-  type Registry,
   validateServiceNames,
+  type Registry,
 } from "./services/registry.ts";
 
 export type { Peer } from "./peer.ts";
@@ -125,7 +125,9 @@ export default async function createNetwork(
     },
     services: () => supportedServices,
     publish(peer, serviceName, enabled) {
-      setPublished(requiredPeer(peer), serviceName, enabled);
+      const managed = requiredPeer(peer);
+      setPublished(managed, serviceName, enabled);
+      announceCatalog(managed);
       updates.publish({ type: "publication", peer, serviceName, enabled });
     },
     updates,
@@ -163,6 +165,21 @@ export default async function createNetwork(
     if (managed.hosted(name) === undefined) managed.host(name, factory);
   }
 
+  // A peer learns of a publication change without asking again. Announcing after
+  // Registry itself was refused tells that peer at once that nothing remains.
+  function announceCatalog(managed: ManagedPeer): void {
+    const registry = managed.peer.service<Registry>(registryServiceName);
+    void registry.remote.announce(managed.hostedServices()).catch(() => {
+      // A peer which cannot be told will read the catalog when it next interacts.
+    });
+  }
+
+  function applyCatalog(managed: ManagedPeer, names: readonly string[]): void {
+    if (managed.setServices(names)) {
+      updates.publish({ type: "services", peer: managed.peer });
+    }
+  }
+
   function initializeConnection(
     connection: Awaited<ReturnType<Libp2p["dial"]>>,
     preferred?: ManagedPeer,
@@ -195,6 +212,10 @@ export default async function createNetwork(
       throw reason;
     }
 
+    managed.retain(
+      managed.peer.service<Registry>(registryServiceName).events
+        .subscribe(({ services }) => applyCatalog(managed, services)),
+    );
     managed.connected();
     updates.publish({ type: "connected", peer: managed.peer });
     return managed.peer;
@@ -205,8 +226,7 @@ export default async function createNetwork(
     if (!managed.peer.isConnected()) throw new Error("This peer is not connected.");
     try {
       const registry = managed.peer.service<Registry>(registryServiceName);
-      const names = validateServiceNames(await registry.remote.list());
-      if (managed.setServices(names)) updates.publish({ type: "services", peer: managed.peer });
+      applyCatalog(managed, validateServiceNames(await registry.remote.list()));
       return managed.peer.services();
     } catch (reason) {
       await closePeerConnections(managed.peer.id);

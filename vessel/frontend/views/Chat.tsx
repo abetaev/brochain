@@ -7,6 +7,7 @@ export function Chat(props: {
   chat: ChatService;
   roster: Roster;
   peerId: string;
+  onOpenPeer(): void;
   onBack(): void;
 }) {
   const [items, setItems] = createSignal(props.chat.history(props.peerId));
@@ -98,7 +99,8 @@ export function Chat(props: {
   return (
     <section aria-labelledby="chat-heading">
       <header>
-        <button class="secondary" type="button" onClick={props.onBack}>Back to Home</button>
+        <button class="secondary" type="button" onClick={props.onBack}>Back to Home</button>{" "}
+        <button class="secondary" type="button" onClick={props.onOpenPeer}>Settings</button>
         <h2 id="chat-heading">Chat with {name()}</h2>
       </header>
       <Show when={actionError() ?? availabilityError()}>

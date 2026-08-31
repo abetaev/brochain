@@ -26,6 +26,7 @@ export interface ManagedPeer {
   hosted(name: string): NetworkService | undefined;
   hostedServices(): readonly string[];
   trackEventFeed(name: string, close: () => void): () => void;
+  retain(release: () => void): void;
   connected(): void;
   close(reason: Error): void;
 }
@@ -42,6 +43,7 @@ export function createPeer(
   const eventFeeds = new Map<string, Set<() => void>>();
   const remoteEvents = new Map<string, RemoteEvents<unknown>>();
   const remoteStreams = new Map<string, Stream>();
+  const retained = new Set<() => void>();
   let managed: ManagedPeer;
 
   function isConnected(): boolean {
@@ -167,10 +169,15 @@ export function createPeer(
         if (feeds.size === 0 && eventFeeds.get(name) === feeds) eventFeeds.delete(name);
       };
     },
+    retain(release) {
+      retained.add(release);
+    },
     connected() {
       setFeedsAvailable(true);
     },
     close(reason) {
+      for (const release of retained) release();
+      retained.clear();
       for (const name of [...hosted.keys()]) releaseService(name, reason);
       setFeedsAvailable(false);
     },
