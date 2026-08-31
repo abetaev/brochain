@@ -1,7 +1,7 @@
 import signals from "@c/backend/signals";
 import type { PersistentServiceStorage } from "./storage";
 
-export type OptionValue = string | number | boolean | null;
+type OptionValue = string | number | boolean | null;
 
 declare const optionObjects: unique symbol;
 
@@ -33,19 +33,19 @@ type ObjectIdentifier<Definition extends AnyObjects> =
 type ObjectShape<Definition extends AnyObjects> =
   Definition[typeof optionObjects]["shape"];
 
-export interface OptionRoot<Schema> {
+interface OptionRoot<Schema> {
   cat<Name extends CategoryName<Schema>>(
     name: Name,
   ): OptionCategory<Extract<Schema[Name], AnyObjects>>;
 }
 
-export interface OptionCategory<Definition extends AnyObjects> {
+interface OptionCategory<Definition extends AnyObjects> {
   obj(
     identifier: ObjectIdentifier<Definition>,
   ): OptionObject<ObjectShape<Definition>>;
 }
 
-export interface OptionObject<Shape> {
+interface OptionObject<Shape> {
   get<Name extends ScalarName<Shape>>(name: Name): Shape[Name] | undefined;
   set<Name extends ScalarName<Shape>>(
     name: Name,

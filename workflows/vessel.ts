@@ -1,7 +1,7 @@
 import { test as base, expect, type Page } from "@playwright/test";
 import { workflowCoverage } from "./coverage.ts";
 
-const password = "correct horse battery staple";
+export const password = "correct horse battery staple";
 
 type Fixtures = {
   openVessel: (username: string) => Promise<Page>;

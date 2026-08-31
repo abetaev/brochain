@@ -29,9 +29,9 @@ import {
 import { registryServiceName } from "./services/registry.ts";
 
 type Echo = {
-  inspect(value: { payload: Uint8Array }): {
+  inspect(value: { payload: readonly number[] }): {
     caller: string;
-    nested: { payload: Uint8Array };
+    nested: { payload: readonly number[] };
   };
 };
 
@@ -254,7 +254,7 @@ describe("per-Peer service instances", () => {
       .rejects.toThrow("Method not found");
   });
 
-  it("routes authenticated RPC method objects and binary values", async () => {
+  it("routes authenticated RPC method objects and nested values", async () => {
     const remote = await localNetwork({
       echo: rpc((peer): Echo => ({
         inspect: ({ payload }) => ({ caller: peer.id, nested: { payload } }),
@@ -263,12 +263,15 @@ describe("per-Peer service instances", () => {
     const local = await localNetwork();
     const peer = await (await local.network.createPeer(remote.address)).connect();
     await peer.refreshServices();
-    const payload = new Uint8Array([0, 1, 127, 255]);
+    const payload = [0, 1, 127, 255];
 
     const response = await peer.service<RpcService<Echo>>("echo").remote.inspect({ payload });
 
     expect(response.caller).toBe(local.network.id);
-    expect([...response.nested.payload]).toEqual([...payload]);
+    expect(response.nested.payload).toEqual(payload);
+    await expect(peer.service<RpcService<{ inspect(value: unknown): unknown }>>("echo")
+      .remote.inspect({ payload: new Uint8Array([1]) }))
+      .rejects.toThrow("JSON-compatible values");
   });
 
   it("dispatches an inbound call to the instance created at connection time", async () => {

@@ -1,18 +1,18 @@
 import { createFileRoot, type FileRoot } from "./file";
 import { createPersistentRoot, type PersistentRoot } from "./persistent";
 
-export interface EventStorage<T> {
+interface EventStorage<T> {
   append(event: T): void;
   read(): readonly T[];
 }
 
-export interface SingletonStorage<T> {
+interface SingletonStorage<T> {
   get(): T | undefined;
   put(value: T): void;
   clear(): void;
 }
 
-export interface KeyValueStorage<T> {
+interface KeyValueStorage<T> {
   get(key: string): T | undefined;
   put(key: string, value: T): void;
   delete(key: string): void;
@@ -35,14 +35,14 @@ export interface FileStorage {
   create(size: number): Promise<FileWriter>;
 }
 
-export interface ServiceStorage {
+interface ServiceStorage {
   event<T>(name?: string): EventStorage<T>;
   singleton<T>(name?: string): SingletonStorage<T>;
   kv<T>(name?: string): KeyValueStorage<T>;
   fs(name?: string): FileStorage;
 }
 
-export interface PeerStorage {
+interface PeerStorage {
   service(name: string): ServiceStorage;
 }
 

@@ -41,12 +41,12 @@ export type ChatItem = Readonly<
   })
 >;
 
-export interface ChatRead {
+interface ChatRead {
   readonly peerId: string;
   readonly count: number;
 }
 
-export interface ChatCapabilities {
+interface ChatCapabilities {
   readonly text: boolean;
   readonly files: boolean;
 }

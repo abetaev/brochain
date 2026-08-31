@@ -1,5 +1,10 @@
-import { expect, test } from "./vessel.ts";
+import { Buffer } from "node:buffer";
+import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
+import { expect, password, test } from "./vessel.ts";
+
+const fileName = "notes.txt";
+const fileContents = "bytes bob shared with alice";
 
 // A discovered peer is listed by its peer ID until it is connected and identified,
 // so it is found by the action offered rather than by name.
@@ -8,7 +13,7 @@ function peerOffering(page: Page, action: "Connect" | "Chat") {
     .filter({ has: page.getByRole("button", { name: action, exact: true }) });
 }
 
-test("two people find each other through the Beacon and exchange a message", async ({
+test("two people meet through the Beacon, share a message and a file, then leave", async ({
   openVessel,
 }) => {
   const alice = await openVessel("alice");
@@ -30,7 +35,37 @@ test("two people find each other through the Beacon and exchange a message", asy
   await expect(bob.getByRole("heading", { name: "Chat with alice" })).toBeVisible();
   await expect(bob.getByText("hello from alice")).toBeVisible();
 
-  await bob.getByLabel("Message").fill("hello from bob");
-  await bob.getByRole("button", { name: "Send message" }).click();
-  await expect(alice.getByText("hello from bob")).toBeVisible();
+  await bob.getByLabel("Send a file").setInputFiles({
+    name: fileName,
+    mimeType: "text/plain",
+    buffer: Buffer.from(fileContents),
+  });
+
+  const received = alice.getByRole("link", { name: `Download ${fileName}` });
+  await expect(received).toBeVisible();
+  await expect(bob.getByRole("link", { name: `Download ${fileName}` })).toBeVisible();
+
+  const [download] = await Promise.all([alice.waitForEvent("download"), received.click()]);
+  expect(await readFile(await download.path(), "utf8")).toBe(fileContents);
+
+  await signOut(bob);
+  const [exported] = await Promise.all([
+    bob.waitForEvent("download"),
+    bob.getByRole("button", { name: "Export" }).click(),
+  ]);
+  expect(exported.suggestedFilename()).toBe("bob.brochain-account.json");
+  expect(JSON.parse(await readFile(await exported.path(), "utf8")))
+    .toMatchObject({ username: "bob" });
+
+  await signOut(alice);
+  await alice.locator("summary").filter({ hasText: "Delete" }).click();
+  await alice.getByLabel("Password").fill(password);
+  await alice.getByRole("button", { name: "Delete account" }).click();
+  await expect(alice.getByRole("heading", { name: "Create an account" })).toBeVisible();
 });
+
+async function signOut(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Back to Home" }).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page.getByRole("heading", { name: "Choose an account" })).toBeVisible();
+}
