@@ -1,6 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ByteStream, Peer } from "@c/backend/network";
+import type { Peer } from "@c/backend/network";
 import type { DiscoveryUpdate } from "@c/backend/network/services/discovery";
 import type { Network, NetworkUpdate } from "@v/backend/network";
 import type { Session } from "@v/backend/session";
@@ -117,21 +117,21 @@ describe("Roster state", () => {
   });
 
   it("applies Discovery set and remove patches without reloading its snapshot", async () => {
-    const stream = updateStream();
+    const discoveryUpdates = createSignals().channel<DiscoveryUpdate>({}, "discovery");
     const discovery = vi.fn(async () => []);
     const beacon = provider(
       "beacon",
       () => ["registry", "discovery"],
       discovery,
       undefined,
-      stream.stream,
+      discoveryUpdates,
     );
     const context = testContext(() => [beacon]);
     const roster = await createRoster(context.session);
     const updates = vi.fn();
     roster.updates.subscribe(updates);
 
-    stream.publish({
+    discoveryUpdates.publish({
       type: "set",
       peer: { peerId: firstId, addresses: [firstAddress, firstAlternate] },
     });
@@ -143,7 +143,7 @@ describe("Roster state", () => {
     expect(roster.get(firstId)?.addresses).toEqual([firstAddress, firstAlternate]);
     expect(updates).toHaveBeenLastCalledWith(expect.objectContaining({ type: "set" }));
 
-    stream.publish({ type: "remove", peerId: firstId });
+    discoveryUpdates.publish({ type: "remove", peerId: firstId });
     await vi.waitFor(() => expect(roster.get(firstId)).toBeUndefined());
     expect(updates).toHaveBeenLastCalledWith({ type: "remove", peerId: firstId });
     expect(discovery).toHaveBeenCalledOnce();
@@ -281,7 +281,7 @@ function provider(
   services: () => readonly string[],
   discovery: () => Promise<unknown> = async () => [],
   identity: () => Promise<unknown> = async () => ({ name: "peer" }),
-  stream: ByteStream = idleStream(),
+  discoveryUpdates = createSignals().channel<DiscoveryUpdate>({}, "discovery"),
 ): Peer {
   return {
     id,
@@ -289,12 +289,14 @@ function provider(
     services,
     isConnected: () => true,
     refreshServices: async () => services(),
-    service: (name: string) => {
-      if (name === "registry") return { list: services };
-      if (name === "discovery") return { list: discovery };
-      return { get: identity };
+    service: () => undefined,
+    remote: (name: string) => {
+      if (name === "registry") return { remote: { list: services } };
+      if (name === "discovery") {
+        return { remote: { list: discovery }, events: discoveryUpdates };
+      }
+      return { remote: { get: identity } };
     },
-    open: vi.fn(async () => stream),
   } as unknown as Peer;
 }
 
@@ -355,43 +357,6 @@ function testContext(
           changed: event === "connected" ? "connection" : event,
         });
     },
-  };
-}
-
-function updateStream() {
-  const chunks: Uint8Array[] = [];
-  const readers: Array<() => void> = [];
-  const stream: ByteStream = {
-    async *[Symbol.asyncIterator]() {
-      while (true) {
-        if (chunks.length === 0) {
-          await new Promise<void>((resolve) => readers.push(resolve));
-        }
-        const chunk = chunks.shift();
-        if (chunk !== undefined) yield chunk;
-      }
-    },
-    async write() {},
-    async close() {},
-    abort() {},
-  };
-  return {
-    stream,
-    publish(update: DiscoveryUpdate) {
-      chunks.push(new TextEncoder().encode(`${JSON.stringify(update)}\n`));
-      readers.shift()?.();
-    },
-  };
-}
-
-function idleStream(): ByteStream {
-  return {
-    async *[Symbol.asyncIterator]() {
-      await new Promise<void>(() => {});
-    },
-    async write() {},
-    async close() {},
-    abort() {},
   };
 }
 

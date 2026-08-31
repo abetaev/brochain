@@ -231,7 +231,7 @@ describe("Options", () => {
 
     expect(storage.values.get("settings/current.flag")).toBe(true);
     expect(listener).toHaveBeenCalledWith(true);
-    expect(diagnostic).toHaveBeenCalledWith("Signals subscriber failed.");
+    expect(diagnostic).toHaveBeenCalledWith("Channel subscriber failed.");
   });
 
   it("makes failed invalid-value cleanup observable and retryable", async () => {

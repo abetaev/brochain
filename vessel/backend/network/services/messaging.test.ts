@@ -1,18 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Network, Peer } from "@c/backend/network";
+import type { Peer } from "@c/backend/network";
 import { createSignals } from "@v/backend/signals";
 import {
   createMessaging,
-  type Messaging,
   type MessagingEvent,
-  type TextMessage,
 } from "./messaging.ts";
 
-interface MessagingRpc {
-  send(message: TextMessage): void;
-}
-
-function testPeer(id: string, remote: MessagingRpc = { send: vi.fn() }): Peer {
+function testPeer(
+  id: string,
+  remote = { send: vi.fn() },
+): Peer {
   return {
     id,
     addresses: vi.fn(() => []),
@@ -21,56 +18,48 @@ function testPeer(id: string, remote: MessagingRpc = { send: vi.fn() }): Peer {
     connect: vi.fn(),
     refreshServices: vi.fn(),
     subscribe: vi.fn(() => () => {}),
-    service: vi.fn(() => remote),
-    open: vi.fn(),
+    service: vi.fn(),
+    remote: vi.fn(() => ({ remote })),
   } as unknown as Peer;
-}
-
-function inbound(messaging: Messaging, peer: Peer): MessagingRpc {
-  const rpc = messaging.factory(peer, {} as Network).rpc;
-  if (rpc === undefined) throw new Error("Messaging did not create its RPC facet.");
-  return rpc as MessagingRpc;
 }
 
 describe("Messaging", () => {
   it("creates a separate peer-bound RPC service", () => {
-    const messaging = createMessaging(createSignals());
-    const first = inbound(messaging, testPeer("first"));
-    const second = inbound(messaging, testPeer("second"));
+    const first = createMessaging(testPeer("first"), createSignals());
+    const second = createMessaging(testPeer("second"), createSignals());
 
     expect(first).not.toBe(second);
   });
 
   it("publishes exact validated peer-tagged inbound messages", () => {
-    const messaging = createMessaging(createSignals());
+    const messaging = createMessaging(testPeer("remote-peer"), createSignals());
     const events: MessagingEvent[] = [];
-    messaging.events.subscribe((event) => events.push(event));
-    const receive = inbound(messaging, testPeer("remote-peer"));
+    messaging.updates.subscribe((event) => events.push(event));
 
-    receive.send({ id: "message-1", text: "  exact text  " });
+    messaging.remote.send({ id: "message-1", text: "  exact text  " });
 
     expect(events).toEqual([{
       peerId: "remote-peer",
       type: "received",
       message: { id: "message-1", text: "  exact text  " },
     }]);
-    expect(() => receive.send({ id: "", text: "invalid" })).toThrow("invalid text");
-    expect(() => receive.send({ id: "message-2", text: " \n " })).toThrow("invalid text");
+    expect(() => messaging.remote.send({ id: "", text: "invalid" })).toThrow("invalid text");
+    expect(() => messaging.remote.send({ id: "message-2", text: " \n " })).toThrow("invalid text");
     expect(events).toHaveLength(1);
   });
 
   it("isolates subscriber failures from inbound RPC and other consumers", () => {
-    const messaging = createMessaging(createSignals());
+    const messaging = createMessaging(testPeer("remote"), createSignals());
     const later = vi.fn();
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
     try {
-      messaging.events.subscribe(() => {
+      messaging.updates.subscribe(() => {
         throw new Error("Chat subscriber failed.");
       });
-      messaging.events.subscribe(later);
+      messaging.updates.subscribe(later);
 
-      expect(() => inbound(messaging, testPeer("remote")).send({
+      expect(() => messaging.remote.send({
         id: "message",
         text: "hello",
       })).not.toThrow();
@@ -79,7 +68,7 @@ describe("Messaging", () => {
         type: "received",
         message: { id: "message", text: "hello" },
       });
-      expect(logged.mock.calls).toEqual([["Signals subscriber failed."]]);
+      expect(logged.mock.calls).toEqual([["Channel subscriber failed."]]);
     } finally {
       logged.mockRestore();
     }
@@ -92,11 +81,11 @@ describe("Messaging", () => {
       }),
     };
     const peer = testPeer("remote-peer", remote);
-    const messaging = createMessaging(createSignals());
+    const messaging = createMessaging(peer, createSignals());
     const events: MessagingEvent[] = [];
-    messaging.events.subscribe((event) => events.push(event));
+    messaging.updates.subscribe((event) => events.push(event));
 
-    messaging.send(peer, { id: "message-1", text: "hello" });
+    messaging.send({ id: "message-1", text: "hello" });
     expect(events).toEqual([{
       peerId: "remote-peer",
       type: "sent",
@@ -113,14 +102,14 @@ describe("Messaging", () => {
   });
 
   it("isolates channels between Network entities", () => {
-    const first = createMessaging(createSignals());
-    const second = createMessaging(createSignals());
+    const first = createMessaging(testPeer("first"), createSignals());
+    const second = createMessaging(testPeer("second"), createSignals());
     const firstEvents = vi.fn();
     const secondEvents = vi.fn();
-    first.events.subscribe(firstEvents);
-    second.events.subscribe(secondEvents);
+    first.updates.subscribe(firstEvents);
+    second.updates.subscribe(secondEvents);
 
-    inbound(first, testPeer("remote")).send({ id: "one", text: "first" });
+    first.remote.send({ id: "one", text: "first" });
 
     expect(firstEvents).toHaveBeenCalledOnce();
     expect(secondEvents).not.toHaveBeenCalled();

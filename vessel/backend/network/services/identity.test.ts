@@ -1,22 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { PromisedMethods } from "@c/backend/network";
 import {
   createIdentity,
   loadIdentity,
   validateIdentity,
-  type IdentityService,
 } from "./identity.ts";
 
-function remoteIdentity(get: () => Promise<unknown>): PromisedMethods<IdentityService> {
-  return { get } as PromisedMethods<IdentityService>;
+function remoteIdentity(get: () => Promise<unknown>): Parameters<typeof loadIdentity>[0] {
+  return { get } as Parameters<typeof loadIdentity>[0];
 }
 
 describe("Identity", () => {
   it("exposes the local Identity as a plain service object", () => {
     const identity = createIdentity("local");
 
-    expect(identity).toEqual({ get: expect.any(Function) });
-    expect(identity.get()).toEqual({ name: "local" });
+    expect(identity).toEqual({ remote: { get: expect.any(Function) } });
+    expect(identity.remote.get()).toEqual({ name: "local" });
     expect("name" in identity).toBe(false);
   });
 

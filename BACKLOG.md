@@ -11,15 +11,53 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-network service contract refinement
+restore peer-bound Network Services
 -----------------------------------
-we'll need to work on network service architecture before we continue with functional changes
 
-i see there are 3 different types of remote interactions:
-1. RPC -- synchronous invocation of remote methods with possible return value, much like HTTP request (direct call)
-2. pubsub -- event based integrations when remote service produces event which might need appropriate reaction (opposite direction to RPC)
-3. data transfer -- transmission of large volume of data which does not fit into RPC or pubsub boundaries
-we need to plan to make this obvious in service contract, so it is obvious which kinds of interactions each service has and how to integrate with them from frontend consumers
+type: architecture correction
+scope: Common Network, Vessel Network, Network Services, Peer, frontend services
+
+Replace the incorrect split between hidden hosted handlers, generic Peer
+projections, and Network-wide Messaging/DataTransfer facades.
+
+- Network owns only the fixed catalog of `NetworkServiceFactory` functions.
+- On connection, Network reads that peer's Options and passes each enabled
+  factory to Peer.
+- Peer invokes `(peer) => NetworkService`, owns the returned concrete service,
+  and exposes that service to Frontend and Signals.
+- A factory creates the complete peer-bound service object; no separate global
+  service facade, factory property, second service-construction API, or generic
+  remote projection standing in for that object exists.
+- Registry follows the same factory and Peer ownership mechanism as every other
+  Network Service.
+- Identity, Messaging, DataTransfer, Discovery, and Registry each implement the
+  same construction and ownership flow while declaring only their applicable
+  `remote`, `events`, and `stream` interactions.
+- Common Network owns transport routing and does not expose `ByteStream`,
+  protocol metadata, or transport-specific service APIs.
+- Remove `Network.messaging()` and `Network.dataTransfer()`; Chat and Roster use
+  the concrete services exposed by Peer and receive changes through Signals.
+- Replace the incorrect implementation documentation and tests only after the
+  ownership flow above is implemented.
+
+runtime service catalog updates
+-------------------------------
+
+type: functional correction
+scope: Common Network, Registry, Peer
+
+Publishing or removing a service for a connected Peer currently changes only the
+local published set. The remote Peer keeps the catalog it last read and cannot
+observe the change until it refreshes for an unrelated reason.
+
+Registry MUST declare an event interaction which reports its published catalog
+to a Peer whenever that Peer's published set changes. A Peer receiving the event
+replaces its remote service catalog and publishes the resulting change like any
+other catalog refresh.
+
+Per-peer service Options cannot be edited while connected until the settings
+frontend and peer view exists, so this correction MUST land no later than that
+task and is not reachable before it.
 
 settings frontend and peer view
 -------------------------------

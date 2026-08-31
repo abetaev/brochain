@@ -12,12 +12,14 @@ structure
 ---------
 
 ```text
-Common Network
-├── Peer × remote identity
-│   ├── Registry instance
-│   └── enabled service instances
-├── fixed Network Service Factory catalog
-└── RPC and ByteStream adapters
+Common
+├── Network
+│   ├── Peer × remote identity
+│   │   ├── Registry instance
+│   │   └── enabled service instances
+│   ├── fixed Network Service Factory catalog
+│   └── RPC, event, and data transports
+└── Channel
 
 Vessel
 ├── Backend
@@ -54,12 +56,21 @@ and Beacon use the same Common Network implementation.
 Common
 ------
 
+### Channel
+
+- **dependencies**: none
+- **structure**: an ordered collection of subscriptions
+- **use cases**: publish; subscribe; unsubscribe
+- **behavior**: publication is synchronous, ordered, non-retained, and
+  non-replaying. Subscriber failures do not affect the publisher or later
+  subscribers.
+
 ### Network
 
 - **dependencies**: valid libp2p configuration, a fixed Network Service Factory
   catalog, and a per-Peer publication decision
 - **structure**: one libp2p node, Peer components, the fixed factory catalog,
-  the standard Registry factory, and RPC and ByteStream adapters
+  the standard Registry factory, and shared RPC, event, and data transports
 - **use cases**: read local identity and addresses; create and list Peers;
   inspect supported services; publish or remove one service for a connected
   Peer; observe Peer connection, address, and service-catalog changes; close
@@ -73,24 +84,26 @@ Common
   publishes the connected Peer. A later service-catalog refresh makes
   the first remote Registry request; a missing or invalid Registry terminates
   the Peer. Losing the final direct connection removes the Peer.
-  Publication changes add or remove one peer-bound instance. New RPC calls and
-  byte streams use the current published set; accepted work retains its instance
-  and finishes. The factory catalog remains fixed for the Network lifetime.
+  Publication changes add or remove one peer-bound instance. New RPC, event,
+  and data interactions use the current published set. Accepted RPC and data
+  work retains its instance and finishes; removing an instance closes its event
+  feeds. The factory catalog remains fixed for the Network lifetime.
 
 #### Peer
 
 - **dependencies**: an owning Common Network and a resolved remote identity
 - **structure**: connection state, retained addresses, the current remote
-  service catalog, remote RPC projections, and a ByteStream factory
+  service catalog, enabled peer-bound Network Services, and remote transport
+  projections
 - **use cases**: read addresses, connection state, and remote services; connect;
-  refresh remote services; observe connection changes; access RPC services;
-  open byte streams
+  refresh remote services; observe connection changes; host and access
+  peer-bound services; access remote RPC, event, and streamed-data facets
 - **behavior**: explicit dial targets and Identify results supply retained
-  addresses; inbound transport source addresses do not. RPC values may contain
-  JSON-compatible data and bytes. ByteStream provides asynchronous reads,
-  backpressured writes, half-close, and abort without exposing libp2p streams.
-  RPC and known protocol access reject services absent from the current remote
-  catalog.
+  addresses; inbound transport source addresses do not. A service projection
+  exposes the facets declared by its typed contract: promised remote methods, a
+  local Channel receiving ordered non-replayed events, and Data for asynchronous
+  byte sources. New interactions reject services absent from the current remote
+  catalog. Transport protocols and libp2p streams remain private to Network.
 
 #### Registry
 
@@ -104,8 +117,8 @@ Common
 #### Discovery
 
 - **dependencies**: an owning Common Network
-- **structure**: one optional Network Service Factory which creates a peer-bound RPC
-  list and peer-update ByteStream handler, currently hosted by Beacon
+- **structure**: one optional Network Service Factory which creates a peer-bound
+  remote list and peer-update event Channel, currently hosted by Beacon
 - **use cases**: list and observe other connected Peers with advertised
   addresses
 - **behavior**: the list initializes consumers; later connection, address, and
@@ -145,12 +158,10 @@ Vessel backend
 #### Signals
 
 - **dependencies**: its owning Session
-- **structure**: typed Channels keyed by owner and local name
-- **use cases**: obtain a Channel; publish; subscribe; unsubscribe
-- **behavior**: publication is synchronous, ordered, non-retained, and
-  non-replaying. A subscriber failure is logged without event data and does not
-  affect the publisher or later subscribers. Platform events, request/response
-  flows, Common Network observers, and local reactivity remain outside Signals.
+- **structure**: Common Channels keyed by owner and local name
+- **use cases**: obtain a stable typed Channel for an owner and name
+- **behavior**: owner and name isolate Channel namespaces. Platform events,
+  request/response flows, and local reactivity remain outside Signals.
 
 #### Options
 
@@ -191,48 +202,51 @@ Vessel backend
 - **dependencies**: the Session identity and account name, Options, Signals,
   browser networking, and the Common Network factory
 - **structure**: one Common Network; fixed Identity, Messaging, and DataTransfer
-  factories; Network update, Messaging, and DataTransfer Channels
+  factories; and one Network update Channel
 - **use cases**: read local peer ID and supported services; connect directly;
-  list connected Peers; observe keyed Peer updates; access Messaging and
-  DataTransfer actions; close Network
+  list connected Peers; observe keyed Peer updates; close Network
 - **behavior**: construction creates the Common Network and supplies its fixed
   factories. It performs no external connection. For each Common Peer,
   Network reads that peer's service Options centrally and observes those exact
   properties while connected. Changes publish or remove the corresponding
-  instance. Common connection, address, service-catalog, and disconnection
-  events become one-Peer set or remove updates through Signals.
+  instance and emit that service's publication patch. Common connection,
+  address, service-catalog, and disconnection events become one-Peer set or
+  remove updates through Signals.
 
 ##### Identity
 
 - **dependencies**: the Session account name and Vessel Network
-- **structure**: one Network Service Factory, peer-bound RPC instances, and one remote
-  response validator
+- **structure**: one Network Service Factory, peer-bound remote-method facets,
+  and one remote response validator
 - **use cases**: return local `{ name }`; request and validate remote Identity
 - **behavior**: Identity retains no remote data; Roster owns valid observations.
-  Network decides whether to create its RPC instance for each Peer.
+  Network decides whether to create its service instance for each Peer.
 
 ##### Messaging
 
 - **dependencies**: Vessel Network and Signals
-- **structure**: one Network Service Factory which creates peer-bound RPC instances,
-  plus one peer-tagged event Channel
+- **structure**: one Network Service Factory which creates peer-bound
+  services containing remote methods, send, and a Signals Channel
 - **use cases**: send text; observe sent, received, and failed messages
 - **behavior**: messages require valid opaque IDs and text; Messaging retains no
-  Chat state. Network decides whether to create its RPC instance for each Peer.
+  Chat state. Network decides whether to create its service instance for each
+  Peer.
 
 ##### DataTransfer
 
 - **dependencies**: Vessel Network and Signals
-- **structure**: one Network Service Factory which creates a peer-bound byte-stream
-  handler, plus one ordered event Channel
+- **structure**: one Network Service Factory which creates peer-bound remote
+  services containing remote negotiation methods, streamed Data, send, and a
+  Signals Channel
 - **use cases**: offer and send declared-length data; accept with a sink; observe
   progress, completion, and failure
-- **behavior**: metadata and length are validated before bytes. A receiver must
-  claim an offer during synchronous publication. Transfers preserve
-  backpressure, require final acknowledgement, and allow two streams per
-  direction per Peer. Progress is limited to one event per 250 milliseconds plus
-  the final state. Network decides whether to create its handler for each Peer.
-  Interrupted transfers do not resume.
+- **behavior**: remote methods negotiate metadata, acceptance, completion, and
+  cancellation; Data carries accepted content. Metadata and length are validated
+  before bytes. A receiver must claim an offer during synchronous publication.
+  Transfers preserve backpressure, require final acknowledgement, and allow two
+  streams per direction per Peer. Progress is limited to one event per 250
+  milliseconds plus the final state. Network decides whether to create its
+  service for each Peer. Interrupted transfers do not resume.
 
 Vessel frontend
 ---------------
@@ -268,7 +282,8 @@ Vessel frontend
 
 - **dependencies**: Session Storage, Vessel Network, and Signals
 - **structure**: peer-scoped item/order/read/file stores and update and read
-  Channels
+  Channels, plus subscriptions to each connected Peer's Messaging and
+  DataTransfer services
 - **use cases**: inspect history, unread count, and capabilities; mark read; send
   text or files; observe item and read updates
 - **behavior**: Chat retains item state before publishing updates. Incoming files

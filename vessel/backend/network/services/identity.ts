@@ -1,4 +1,4 @@
-import type { PromisedMethods } from "@c/backend/network";
+import type { RPC } from "@c/backend/network";
 
 export const identityServiceName = "identity";
 
@@ -6,20 +6,20 @@ export interface Identity {
   readonly name: string;
 }
 
-export interface IdentityService {
+type Remote = {
   get(): Identity;
+};
+
+export type IdentityService = {
+  readonly remote: RPC<Remote>;
+};
+
+export function createIdentity(localName: string): { readonly remote: Remote } {
+  return { remote: { get: () => ({ name: localName }) } };
 }
 
-export function createIdentity(localName: string): IdentityService {
-  return {
-    get: () => ({ name: localName }),
-  };
-}
-
-export async function loadIdentity(
-  remote: PromisedMethods<IdentityService>,
-): Promise<Identity> {
-  return validateIdentity(await remote.get());
+export async function loadIdentity(service: IdentityService): Promise<Identity> {
+  return validateIdentity(await service.remote.get());
 }
 
 export function validateIdentity(value: unknown): Identity {

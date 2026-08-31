@@ -3,8 +3,8 @@ import { rpcClient, type JsonRpcResponse, type RpcTransport } from "typed-rpc";
 import { handleRpc } from "typed-rpc/server";
 import { base64ToBytes, bytesToBase64 } from "../../base64.ts";
 
-export type PromisedMethods<Service extends object> = {
-  [Method in keyof Service as Service[Method] extends
+export type RPC<Service extends object> = {
+  readonly [Method in keyof Service as Service[Method] extends
     (...arguments_: never[]) => unknown ? Method : never]:
     Service[Method] extends (...arguments_: infer Arguments) => infer Result
       ? (...arguments_: Arguments) => Promise<Awaited<Result>>
@@ -33,14 +33,14 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 const transcoder = {
-  serialize: encode,
-  deserialize: decode,
+  serialize: encodeRpcValue,
+  deserialize: decodeRpcValue,
 };
 
 export function remoteService<Service extends object>(
   name: string,
   open: (signal: AbortSignal) => Promise<Stream>,
-): PromisedMethods<Service> {
+): RPC<Service> {
   const transport: RpcTransport = async (request, signal) => {
     const stream = await open(signal);
     const abort = () => stream.abort(new Error("The RPC call was aborted."));
@@ -70,7 +70,7 @@ export function remoteService<Service extends object>(
       }
       return Reflect.get(target, property, receiver);
     },
-  }) as PromisedMethods<Service>;
+  }) as RPC<Service>;
 }
 
 export async function answerRpc(
@@ -117,26 +117,29 @@ async function readJson(stream: Stream): Promise<unknown> {
   return JSON.parse(decoder.decode(bytes));
 }
 
-function encode(value: unknown): Encoded {
+export function encodeRpcValue(value: unknown): Encoded {
   if (value === undefined) return ["undefined"];
   if (value === null) return ["null"];
   if (typeof value === "boolean") return ["boolean", value];
   if (typeof value === "number" && Number.isFinite(value)) return ["number", value];
   if (typeof value === "string") return ["string", value];
   if (value instanceof Uint8Array) return ["bytes", bytesToBase64(value)];
-  if (Array.isArray(value)) return ["array", value.map(encode)];
+  if (Array.isArray(value)) return ["array", value.map(encodeRpcValue)];
   if (typeof value === "object") {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
       throw new Error("RPC values must be JSON-compatible values or byte arrays.");
     }
-    return ["object", Object.entries(value).map(([key, entry]) => [key, encode(entry)])];
+    return [
+      "object",
+      Object.entries(value).map(([key, entry]) => [key, encodeRpcValue(entry)]),
+    ];
   }
 
   throw new Error("RPC values must be JSON-compatible values or byte arrays.");
 }
 
-function decode(value: unknown): unknown {
+export function decodeRpcValue(value: unknown): unknown {
   if (!Array.isArray(value) || typeof value[0] !== "string") {
     throw new Error("Invalid RPC value.");
   }
@@ -159,7 +162,7 @@ function decode(value: unknown): unknown {
       if (typeof value[1] === "string") return base64ToBytes(value[1]);
       break;
     case "array":
-      if (Array.isArray(value[1])) return value[1].map(decode);
+      if (Array.isArray(value[1])) return value[1].map(decodeRpcValue);
       break;
     case "object":
       if (Array.isArray(value[1])) return decodeObject(value[1]);
@@ -176,7 +179,7 @@ function decodeObject(entries: unknown[]): Record<string, unknown> {
     if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string") {
       throw new Error("Invalid RPC object.");
     }
-    result[entry[0]] = decode(entry[1]);
+    result[entry[0]] = decodeRpcValue(entry[1]);
   }
 
   return result;

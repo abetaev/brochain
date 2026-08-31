@@ -1,18 +1,18 @@
 // @vitest-environment node
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { NetworkServiceFactory, Peer } from "@c/backend/network";
+import type { Peer } from "@c/backend/network";
 import type { Network } from "@v/backend/network";
+import { dataTransferServiceName } from "@v/backend/network/services/data-transfer";
 import type {
-  DataTransfer,
   DataTransferEvent,
   OutgoingTransfer,
 } from "@v/backend/network/services/data-transfer";
 import type {
-  Messaging,
   MessagingEvent,
   TextMessage,
 } from "@v/backend/network/services/messaging";
+import { messagingServiceName } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
 import { createSignals, type Channel } from "@v/backend/signals";
 import {
@@ -25,8 +25,14 @@ import { createChat, type ChatItem } from "./chat.ts";
 
 let messagingEvents: Channel<MessagingEvent>;
 let transferEvents: Channel<DataTransferEvent>;
-let messaging: Messaging & { send: ReturnType<typeof vi.fn> };
-let dataTransfer: DataTransfer & { send: ReturnType<typeof vi.fn> };
+let messaging: {
+  readonly updates: Channel<MessagingEvent>;
+  send: ReturnType<typeof vi.fn>;
+};
+let dataTransfer: {
+  readonly updates: Channel<DataTransferEvent>;
+  send: ReturnType<typeof vi.fn>;
+};
 let writer: FileWriter;
 let createFile: ReturnType<typeof vi.fn>;
 let session: Session;
@@ -69,16 +75,14 @@ beforeEach(() => {
   messagingEvents = transportSignals.channel({}, "messaging");
   transferEvents = transportSignals.channel({}, "data");
   messaging = {
-    events: messagingEvents,
-    factory: vi.fn() as unknown as NetworkServiceFactory,
-    send: vi.fn((peer: Peer, message: TextMessage) => {
-      messagingEvents.publish({ peerId: peer.id, type: "sent", message });
+    updates: messagingEvents,
+    send: vi.fn((message: TextMessage) => {
+      messagingEvents.publish({ peerId: "remote", type: "sent", message });
     }),
   };
   dataTransfer = {
-    events: transferEvents,
-    factory: vi.fn() as unknown as NetworkServiceFactory,
-    send: vi.fn<(peer: Peer, transfer: OutgoingTransfer) => void>(),
+    updates: transferEvents,
+    send: vi.fn<(transfer: OutgoingTransfer) => void>(),
   };
   const stored: StoredFile = {
     blob: vi.fn(async () => new Blob(["received"])),
@@ -96,8 +100,8 @@ beforeEach(() => {
   session = {
     username: "alice",
     network: vi.fn(() => ({
-      messaging: () => messaging,
-      dataTransfer: () => dataTransfer,
+      connectedPeers: () => [remotePeer()],
+      updates: signals.channel({}, "network"),
     } as unknown as Network)),
     signals: () => signals,
     storage: () => storage,
@@ -114,13 +118,17 @@ function remotePeer(services = ["registry", "messaging", "data-transfer"]): Peer
     connect: vi.fn(),
     refreshServices: vi.fn(async () => services),
     subscribe: vi.fn(() => () => {}),
-    service: vi.fn(() => ({ list: async () => services })),
-    open: vi.fn(),
+    service: vi.fn((name: string) => {
+      if (name === messagingServiceName) return messaging;
+      if (name === dataTransferServiceName) return dataTransfer;
+      return undefined;
+    }),
+    remote: vi.fn(),
   } as unknown as Peer;
 }
 
 describe("Chat service", () => {
-  it("subscribes to Network-owned transports during construction", () => {
+  it("subscribes to peer-bound services during construction", () => {
     const chat = createChat(session);
     messagingEvents.publish({
       peerId: "remote",
@@ -247,10 +255,10 @@ describe("Chat service", () => {
   });
 
   it("sends files through DataTransfer and retains progress snapshots", async () => {
-    dataTransfer.send.mockImplementation((peer: Peer, transfer: OutgoingTransfer) => {
+    dataTransfer.send.mockImplementation((transfer: OutgoingTransfer) => {
       const base = {
         id: transfer.id,
-        peerId: peer.id,
+        peerId: "remote",
         direction: "sent" as const,
         size: transfer.size,
         metadata: transfer.metadata,
@@ -266,7 +274,6 @@ describe("Chat service", () => {
     chat.sendFile(remotePeer(), file);
 
     expect(dataTransfer.send).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "remote" }),
       expect.objectContaining({
         id: "00000000-0000-4000-8000-000000000002",
         size: file.size,
