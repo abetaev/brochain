@@ -1,7 +1,7 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import type { Libp2p } from "libp2p";
 import { createByteStream, type ByteStream } from "./byte-stream.ts";
-import { createRemoteStream, dataProtocol } from "./data.ts";
+import { createRemoteStream, dataProtocol, type Stream } from "./data.ts";
 import { createRemoteEvents, eventsProtocol, type RemoteEvents } from "./events.ts";
 import { remoteService, rpcProtocol } from "./rpc.ts";
 import type { NetworkService, NetworkServiceFactory } from "./service.ts";
@@ -41,6 +41,7 @@ export function createPeer(
   const hosted = new Map<string, NetworkService>();
   const eventFeeds = new Map<string, Set<() => void>>();
   const remoteEvents = new Map<string, RemoteEvents<unknown>>();
+  const remoteStreams = new Map<string, Stream>();
   let managed: ManagedPeer;
 
   function isConnected(): boolean {
@@ -73,6 +74,17 @@ export function createPeer(
     return existing;
   }
 
+  // Sending reaches the peer, so the outgoing stream is stable per service and its
+  // transfer limit counts what this peer is actually sending.
+  function outgoing(name: string): Stream {
+    let existing = remoteStreams.get(name);
+    if (existing === undefined) {
+      existing = createRemoteStream(name, async () => await openBytes(dataProtocol));
+      remoteStreams.set(name, existing);
+    }
+    return existing;
+  }
+
   function callRemote(name: string) {
     return remoteService<object>(name, async (signal) =>
       await activeConnection().newStream(rpcProtocol, { signal })
@@ -101,12 +113,14 @@ export function createPeer(
       // differ, because the host writes them and the peer awaits them.
       return Object.freeze(
         local === undefined
-          ? {
+          ? { remote: callRemote(name), events: feed(name).channel, data: outgoing(name) }
+          : {
+            ...local,
             remote: callRemote(name),
-            events: feed(name).channel,
-            data: createRemoteStream(name, async () => await openBytes(dataProtocol)),
-          }
-          : { ...local, remote: callRemote(name) },
+            ...(local.data === undefined
+              ? {}
+              : { data: pairedStream(outgoing(name), local.data) }),
+          },
       ) as unknown as Service;
     },
   };
@@ -175,6 +189,16 @@ export function createPeer(
   async function openBytes(protocol: string, signal?: AbortSignal): Promise<ByteStream> {
     return createByteStream(await activeConnection().newStream(protocol, { signal }));
   }
+}
+
+// A service sees one Stream for both directions: sending reaches the peer, while
+// accepting takes what the peer sent to the instance hosted for it.
+function pairedStream(outgoing: Stream, incoming: Stream): Stream {
+  return Object.freeze({
+    send: outgoing.send,
+    accept: incoming.accept,
+    abort: incoming.abort,
+  });
 }
 
 export function usableConnection(node: Libp2p, id: string) {

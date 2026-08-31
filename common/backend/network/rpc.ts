@@ -1,7 +1,6 @@
 import type { Libp2p } from "libp2p";
 import { rpcClient, type JsonRpcResponse, type RpcTransport } from "typed-rpc";
 import { handleRpc } from "typed-rpc/server";
-import { base64ToBytes, bytesToBase64 } from "../../base64.ts";
 
 export type RPC<Service extends object> = {
   readonly [Method in keyof Service as Service[Method] extends
@@ -18,7 +17,6 @@ type Encoded =
   | readonly ["boolean", boolean]
   | readonly ["number", number]
   | readonly ["string", string]
-  | readonly ["bytes", string]
   | readonly ["array", readonly Encoded[]]
   | readonly ["object", readonly (readonly [string, Encoded])[]];
 
@@ -123,12 +121,11 @@ export function encodeRpcValue(value: unknown): Encoded {
   if (typeof value === "boolean") return ["boolean", value];
   if (typeof value === "number" && Number.isFinite(value)) return ["number", value];
   if (typeof value === "string") return ["string", value];
-  if (value instanceof Uint8Array) return ["bytes", bytesToBase64(value)];
   if (Array.isArray(value)) return ["array", value.map(encodeRpcValue)];
   if (typeof value === "object") {
     const prototype = Object.getPrototypeOf(value);
     if (prototype !== Object.prototype && prototype !== null) {
-      throw new Error("RPC values must be JSON-compatible values or byte arrays.");
+      throw new Error("RPC values must be JSON-compatible values.");
     }
     return [
       "object",
@@ -136,7 +133,7 @@ export function encodeRpcValue(value: unknown): Encoded {
     ];
   }
 
-  throw new Error("RPC values must be JSON-compatible values or byte arrays.");
+  throw new Error("RPC values must be JSON-compatible values.");
 }
 
 export function decodeRpcValue(value: unknown): unknown {
@@ -157,9 +154,6 @@ export function decodeRpcValue(value: unknown): unknown {
       break;
     case "string":
       if (typeof value[1] === "string") return value[1];
-      break;
-    case "bytes":
-      if (typeof value[1] === "string") return base64ToBytes(value[1]);
       break;
     case "array":
       if (Array.isArray(value[1])) return value[1].map(decodeRpcValue);

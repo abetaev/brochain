@@ -15,7 +15,6 @@ export interface Transfer {
   readonly size?: number;
   readonly progress: Subscription<number>;
   readonly completion: Promise<void>;
-  transferred(): number;
   data(): DataSource;
   cancel(reason: Error): void;
 }
@@ -104,7 +103,6 @@ function trackTransfer(source: DataSource, options?: TransferOptions): TrackedTr
       ...(options?.size === undefined ? {} : { size: options.size }),
       progress,
       completion,
-      transferred: () => transferred,
       data: counted,
       cancel(reason: Error) {
         cancellation = reason;

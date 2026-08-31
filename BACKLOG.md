@@ -46,6 +46,9 @@ reported coverage reflects real use rather than mocked structure.
 - Workflows drive the development server, which already starts a Beacon beside
   Vessel and serves unminified sources for coverage mapping. Driving a production
   build is a later addition.
+- Beacon runs in Node beside the served Vessel, so browser coverage cannot see it
+  and the Common code it alone exercises reads as unreached. Collect the Beacon
+  process coverage and merge it into the workflow report.
 
 The first workflow covers the riskiest path — two browser contexts sign in as
 separate accounts, connect through the Beacon over WebRTC, and exchange text —

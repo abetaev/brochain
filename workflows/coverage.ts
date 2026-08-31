@@ -1,8 +1,20 @@
+import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import MonocartCoverage from "monocart-coverage-reports";
 
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const reportDirectory = resolve(projectDirectory, "coverage/workflows");
+
+// The report has no theme of its own, so it follows the reader's instead. Hue
+// rotation keeps covered green and uncovered red recognisable once inverted.
+const followSystemTheme = `<style>
+@media (prefers-color-scheme: dark) {
+  html { background-color: #fff; filter: invert(1) hue-rotate(180deg); }
+  img, video, .mcr-header { filter: invert(1) hue-rotate(180deg); }
+}
+</style>
+`;
 const frontendRoot = "vessel/frontend";
 
 // The development server serves the frontend from its own root and everything
@@ -18,7 +30,7 @@ function projectPath(distFile: string): string {
 // visible separately from what the lower-level tests prove.
 const options = {
   name: "brochain workflows",
-  outputDir: resolve(projectDirectory, "coverage/workflows"),
+  outputDir: reportDirectory,
   reports: ["v8", "console-summary"],
   entryFilter: (entry: { url: string }) =>
     !entry.url.includes("node_modules") &&
@@ -28,6 +40,11 @@ const options = {
     !path.includes("node_modules") && !path.endsWith(".test.ts"),
   sourcePath: (filePath: string, info: { distFile?: string }) =>
     info.distFile === undefined ? filePath : projectPath(info.distFile),
+  onEnd: async () => {
+    const report = resolve(reportDirectory, "index.html");
+    const html = await readFile(report, "utf8");
+    await writeFile(report, html.replace("</head>", `${followSystemTheme}</head>`));
+  },
 };
 
 export function workflowCoverage() {
