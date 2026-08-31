@@ -2,11 +2,12 @@ import type { Peer } from "@c/backend/network";
 import {
   dataTransferServiceName,
   type DataTransferEvent,
+  type DataTransferService,
   type TransferMetadata,
 } from "@v/backend/network/services/data-transfer";
 import {
   messagingServiceName,
-  type MessagingEvent,
+  type MessagingService,
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
 import type { Channel } from "@v/backend/signals";
@@ -68,10 +69,32 @@ export function createChat(session: Session): Chat {
   const reads = signals.channel<ChatRead>({}, "reads");
   const incomingWriters = new Map<string, FileWriter>();
   const network = session.network();
-  const messaging = network.messaging();
-  messaging.events.subscribe(receiveMessaging);
-  const dataTransfer = network.dataTransfer();
-  dataTransfer.events.subscribe(receiveTransfer);
+  const serviceSubscriptions = new Map<string, readonly (() => void)[]>();
+
+  function attach(peer: Peer): void {
+    for (const stop of serviceSubscriptions.get(peer.id) ?? []) stop();
+    const services = peer.services();
+    const subscriptions: (() => void)[] = [];
+    if (services.includes(messagingServiceName)) {
+      subscriptions.push(peer.service<MessagingService>(messagingServiceName)
+        .events.subscribe(({ message }) => receiveMessage(peer.id, message)));
+    }
+    if (services.includes(dataTransferServiceName)) {
+      subscriptions.push(peer.service<DataTransferService>(dataTransferServiceName)
+        .events.subscribe(receiveTransfer));
+    }
+    serviceSubscriptions.set(peer.id, subscriptions);
+  }
+
+  for (const peer of network.connectedPeers()) attach(peer);
+  network.updates.subscribe((update) => {
+    if (update.type === "remove") {
+      for (const stop of serviceSubscriptions.get(update.peerId) ?? []) stop();
+      serviceSubscriptions.delete(update.peerId);
+    } else if (update.changed === "connection" || update.changed === "publication") {
+      attach(update.peer);
+    }
+  });
 
   function itemStorage(peerId: string) {
     return session.storage().peer(peerId).service(chatServiceName).kv<ChatItem>("items");
@@ -118,22 +141,15 @@ export function createChat(session: Session): Chat {
     return itemStorage(peerId).get(id);
   }
 
-  function receiveMessaging(event: MessagingEvent): void {
-    if (event.type === "sent" || event.type === "received") {
-      retain({
-        id: event.message.id,
-        peerId: event.peerId,
-        direction: event.type,
-        kind: "text",
-        text: event.message.text,
-        status: "complete",
-      });
-      return;
-    }
-
-    const item = current(event.peerId, event.message.id);
-    if (item?.kind !== "text") return;
-    update({ ...item, status: "failed", error: event.error });
+  function receiveMessage(peerId: string, text: string): void {
+    retain({
+      id: crypto.randomUUID(),
+      peerId,
+      direction: "received",
+      kind: "text",
+      text,
+      status: "complete",
+    });
   }
 
   function receiveTransfer(event: DataTransferEvent): void {
@@ -218,7 +234,25 @@ export function createChat(session: Session): Chat {
       if (typeof value !== "string" || value.trim().length === 0) {
         throw new Error("Enter a message.");
       }
-      messaging.send(peer, { id: crypto.randomUUID(), text: value });
+      if (!peer.services().includes(messagingServiceName)) {
+        throw new Error("Messaging is unavailable.");
+      }
+      const id = crypto.randomUUID();
+      retain({
+        id,
+        peerId: peer.id,
+        direction: "sent",
+        kind: "text",
+        text: value,
+        status: "complete",
+      });
+      void peer.service<MessagingService>(messagingServiceName).remote.send(value)
+        .catch((reason: unknown) => {
+          const item = current(peer.id, id);
+          if (item?.kind === "text") {
+            update({ ...item, status: "failed", error: errorMessage(reason) });
+          }
+        });
     },
     sendFile(peer, file) {
       if (!(file instanceof File)) throw new Error("Select a file to send.");
@@ -237,7 +271,11 @@ export function createChat(session: Session): Chat {
         file: browserFile(file),
       });
       try {
-        dataTransfer.send(peer, {
+        const transfers = peer.service<DataTransferService>(dataTransferServiceName);
+        if (!peer.services().includes(dataTransferServiceName) || transfers.send === undefined) {
+          throw new Error("Data transfer is unavailable.");
+        }
+        transfers.send({
           id,
           size: file.size,
           metadata: {

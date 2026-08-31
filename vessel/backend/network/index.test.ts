@@ -32,11 +32,7 @@ vi.mock("@libp2p/webrtc", () => ({ webRTC: () => ({ type: "webrtc" }) }));
 vi.mock("@libp2p/websockets", () => ({ webSockets: () => ({ type: "websockets" }) }));
 vi.mock("@c/backend/network", () => ({ default: dependencies.createCommonNetwork }));
 
-import {
-  createNetwork,
-  defaultBeaconAddress,
-  type NetworkUpdate,
-} from "./index.ts";
+import { createNetwork, type NetworkUpdate } from "./index.ts";
 
 type TestNetwork = CommonNetwork & {
   readonly createPeer: CommonNetwork["createPeer"] & ReturnType<typeof vi.fn>;
@@ -61,7 +57,7 @@ function peer(id = "remote"): Peer {
     refreshServices: vi.fn(),
     subscribe: vi.fn(() => () => {}),
     service: vi.fn(),
-    open: vi.fn(),
+    remote: vi.fn(),
   } as unknown as Peer;
 }
 
@@ -98,9 +94,6 @@ function setOption(peerId: string, serviceName: string, value: boolean): void {
 }
 
 beforeEach(() => {
-  vi.stubGlobal("window", {
-    location: { hostname: "localhost", protocol: "http:" },
-  });
   optionValues = new Map();
   optionListeners = new Map();
   listener = undefined;
@@ -136,7 +129,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 describe("Vessel Network", () => {
@@ -154,12 +146,15 @@ describe("Vessel Network", () => {
     );
     expect(dependencies.createCommonNetwork).toHaveBeenCalledOnce();
     expect(Object.keys(factories)).toEqual(["identity", "messaging", "data-transfer"]);
-    expect(factories.identity?.(peer(), common).rpc).toMatchObject({
+    expect(factories.identity?.(peer()).remote).toMatchObject({
       get: expect.any(Function),
     });
     expect(component.id).toBe("local");
-    expect(component.messaging()).toBe(component.messaging());
-    expect(component.dataTransfer()).toBe(component.dataTransfer());
+    expect(factories.messaging?.(peer())).toMatchObject({
+      remote: { send: expect.any(Function) },
+      send: expect.any(Function),
+      updates: { publish: expect.any(Function), subscribe: expect.any(Function) },
+    });
   });
 
   it("reads publication centrally for every service", async () => {
@@ -208,6 +203,20 @@ describe("Vessel Network", () => {
       { type: "set", peer: remote, changed: "connection" },
       { type: "set", peer: remote, changed: "addresses" },
       { type: "set", peer: remote, changed: "services" },
+      {
+        type: "set",
+        peer: remote,
+        changed: "publication",
+        serviceName: "messaging",
+        enabled: false,
+      },
+      {
+        type: "set",
+        peer: remote,
+        changed: "publication",
+        serviceName: "registry",
+        enabled: false,
+      },
       { type: "remove", peerId: remote.id },
     ]);
     expect(common.publish).toHaveBeenCalledWith(remote, "messaging", false);
@@ -233,17 +242,5 @@ describe("Vessel Network", () => {
 
     await expect(createNetwork("AA==", "alice", options(), createSignals()))
       .rejects.toBe(failure);
-  });
-});
-
-describe("default Beacon address", () => {
-  it("uses the current host and transport security", () => {
-    expect(defaultBeaconAddress()).toBe("/dns4/localhost/tcp/9090/ws");
-    vi.stubGlobal("window", {
-      location: { hostname: "vessel.example", protocol: "https:" },
-    });
-    expect(defaultBeaconAddress()).toBe(
-      "/dns4/vessel.example/tcp/9090/tls/ws",
-    );
   });
 });

@@ -1,6 +1,6 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import type { Session } from "@v/backend/session";
-import { defaultBeaconAddress } from "@v/backend/network";
+import { defaultBeaconAddress } from "@v/frontend/beacon";
 import type { Chat } from "@v/frontend/services/chat";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 

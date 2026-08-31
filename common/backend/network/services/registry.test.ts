@@ -9,9 +9,9 @@ describe("Registry", () => {
     const names = ["registry"];
     const registry = createRegistry(() => names);
 
-    expect(registry.list()).toEqual(["registry"]);
+    expect(registry.remote.list()).toEqual(["registry"]);
     names.push("identity");
-    expect(registry.list()).toEqual(["registry", "identity"]);
+    expect(registry.remote.list()).toEqual(["registry", "identity"]);
   });
 
   it("accepts only unique non-empty service names", () => {

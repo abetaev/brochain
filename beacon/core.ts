@@ -4,11 +4,7 @@ import { circuitRelayServer } from "@libp2p/circuit-relay-v2";
 import { identify, identifyPush } from "@libp2p/identify";
 import { webSockets } from "@libp2p/websockets";
 import type { ServerOptions } from "node:https";
-import createNetwork, {
-  type Network,
-  type NetworkService,
-  type Peer,
-} from "../common/backend/network/index.ts";
+import createNetwork from "../common/backend/network/index.ts";
 import {
   createDiscoveryHost,
   discoveryServiceName,
@@ -25,17 +21,6 @@ export async function createBeacon(configuration: BeaconConfiguration) {
   const announcePort = configuration.announcePort ?? configuration.relayPort;
   const tlsAddress = configuration.tls === undefined ? "" : "/tls";
   const discovery = createDiscoveryHost();
-  function discoveryFactory(peer: Peer, network: Network): NetworkService {
-    return {
-      rpc: discovery.service(peer, network.connectedPeers),
-      protocols: {
-        [discovery.updates.id]: async (stream) => {
-          await discovery.updates.accept(peer, stream);
-        },
-      },
-    };
-  }
-  discoveryFactory.protocols = [{ id: discovery.updates.id }];
   const network = await createNetwork({
     addresses: {
       listen: [`/ip4/0.0.0.0/tcp/${configuration.relayPort}/ws`],
@@ -57,7 +42,7 @@ export async function createBeacon(configuration: BeaconConfiguration) {
       }),
     },
   }, {
-    [discoveryServiceName]: discoveryFactory,
+    [discoveryServiceName]: (peer) => discovery.service(peer),
   });
   network.subscribe(discovery.peerChanged);
   return network;

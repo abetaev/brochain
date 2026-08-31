@@ -1,6 +1,8 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import { createLibp2p, type Libp2p, type Libp2pOptions } from "libp2p";
-import { createByteStream, type ByteStream } from "./byte-stream.ts";
+import { createByteStream } from "./byte-stream.ts";
+import { answerData, dataProtocol, type Stream } from "./data.ts";
+import { answerEvents, eventsProtocol } from "./events.ts";
 import {
   createPeer as createManagedPeer,
   destinationPeerId,
@@ -10,36 +12,33 @@ import {
   type Peer,
 } from "./peer.ts";
 import { answerRpc, remoteService, rpcProtocol } from "./rpc.ts";
+import type { Channel } from "../channel.ts";
+import type {
+  HostedNetworkService,
+  NetworkServiceFactories,
+  NetworkServiceFactory,
+} from "./service.ts";
 import {
   createRegistry,
   registryServiceName,
-  type Registry,
+  type RegistryMethods,
   validateServiceNames,
 } from "./services/registry.ts";
 
 export type { Peer } from "./peer.ts";
-export type { PromisedMethods } from "./rpc.ts";
-export type { ByteStream } from "./byte-stream.ts";
+export { createStream } from "./data.ts";
+export type { DataSource, Stream } from "./data.ts";
+export type {
+  AtLeastOne,
+  Methods,
+  NetworkService,
+  NetworkServiceFactories,
+  NetworkServiceFactory,
+  RPC,
+} from "./service.ts";
 
 export type PeerEvent = "connected" | "disconnected" | "addresses" | "services";
 
-export interface Protocol {
-  readonly id: string;
-  readonly maxInboundStreams?: number;
-  readonly maxOutboundStreams?: number;
-}
-
-export interface NetworkService {
-  readonly rpc?: object;
-  readonly protocols?: Readonly<Record<string, (stream: ByteStream) => Promise<void>>>;
-}
-
-export interface NetworkServiceFactory {
-  (peer: Peer, network: Network): NetworkService;
-  readonly protocols?: readonly Protocol[];
-}
-
-export type NetworkServiceFactories = Readonly<Record<string, NetworkServiceFactory>>;
 export type NetworkConfiguration = Omit<Libp2pOptions, "start">;
 export type ServicePublication = (peer: Peer, serviceName: string) => boolean;
 
@@ -59,12 +58,6 @@ interface PendingConnection {
   readonly completion: Promise<Peer>;
 }
 
-interface PeerState {
-  readonly managed: ManagedPeer;
-  readonly published: Map<string, NetworkService>;
-  ready: boolean;
-}
-
 export default async function createNetwork(
   configuration: NetworkConfiguration,
   suppliedFactories: NetworkServiceFactories = {},
@@ -74,17 +67,15 @@ export default async function createNetwork(
 
   const node = await createLibp2p({ ...configuration, start: false });
   const localId = node.peerId.toString();
-  const peerStates = new Map<string, PeerState>();
+  const peers = new Map<string, ManagedPeer>();
   const pendingConnections = new Map<string, PendingConnection>();
   const pendingAuthentications = new Map<string, Promise<Peer>>();
   const peerListeners = new Set<(peer: Peer, event: PeerEvent) => void>();
   const lifetime = new AbortController();
-  const protocolServices = new Map<string, string>();
   let shutdown: Promise<void> | undefined;
 
-  const registryFactory: NetworkServiceFactory = (peer) => ({
-    rpc: createRegistry(() => [...requiredState(peer).published.keys()]),
-  });
+  const registryFactory: NetworkServiceFactory = (peer) =>
+    createRegistry(() => requiredPeer(peer).hostedServices());
   const serviceFactories: NetworkServiceFactories = Object.freeze({
     [registryServiceName]: registryFactory,
     ...suppliedFactories,
@@ -104,14 +95,14 @@ export default async function createNetwork(
         if (knownId === localId) {
           throw new Error("The local peer cannot be created as a remote peer.");
         }
-        const existing = peerState(knownId);
+        const existing = peers.get(knownId);
         if (existing !== undefined) {
           updateAddresses(existing, addresses);
-          return existing.managed.peer;
+          return existing.peer;
         }
-        const peer = constructPeer(knownId);
-        addAddresses(peer, addresses);
-        return peer.peer;
+        const candidate = constructPeer(knownId);
+        addAddresses(candidate, addresses);
+        return candidate.peer;
       }
 
       const key = [...addresses].sort().join("\n");
@@ -128,14 +119,13 @@ export default async function createNetwork(
       return await authentication;
     },
     connectedPeers() {
-      for (const id of [...peerStates.keys()]) disconnectPeer(id);
-      return [...peerStates.values()]
-        .filter(({ ready }) => ready)
-        .map(({ managed }) => managed.peer);
+      return Object.freeze([...peers.values()]
+        .map(({ peer }) => peer)
+        .filter((peer) => peer.isConnected()));
     },
     services: () => supportedServices,
     publish(peer, serviceName, enabled) {
-      setPublished(requiredState(peer), serviceName, enabled);
+      setPublished(requiredPeer(peer), serviceName, enabled);
     },
     subscribe(listener) {
       peerListeners.add(listener);
@@ -151,20 +141,12 @@ export default async function createNetwork(
     for (const listener of peerListeners) listener(peer, event);
   }
 
-  function requiredState(peer: Peer): PeerState {
-    const state = peerStates.get(peer.id);
-    if (state === undefined || state.managed.peer !== peer) {
+  function requiredPeer(peer: Peer): ManagedPeer {
+    const managed = peers.get(peer.id);
+    if (managed === undefined || managed.peer !== peer) {
       throw new Error("This peer does not belong to the Network connection.");
     }
-    return state;
-  }
-
-  function peerState(id: string): PeerState | undefined {
-    const state = peerStates.get(id);
-    if (state === undefined) return undefined;
-    if (usableConnection(node, id) !== undefined) return state;
-    deactivatePeer(id, state);
-    return undefined;
+    return managed;
   }
 
   function constructPeer(id: string): ManagedPeer {
@@ -174,39 +156,34 @@ export default async function createNetwork(
       id,
       connectManagedPeer,
       refreshPeerServices,
-      (protocol) => protocolServices.get(protocol),
     );
   }
 
-  function createService(state: PeerState, name: string): NetworkService {
+  function setPublished(managed: ManagedPeer, name: string, enabled: boolean): void {
     const factory = serviceFactories[name];
     if (factory === undefined) throw new Error(`Unknown network service "${name}".`);
-    const service = factory(state.managed.peer, network);
-    validateService(name, factory, service);
-    return service;
+    if (!enabled) {
+      managed.remove(name);
+      return;
+    }
+    if (managed.hosted(name) !== undefined) return;
+    validateService(name, managed.host(name, factory));
   }
 
-  function setPublished(state: PeerState, name: string, enabled: boolean): void {
-    if (serviceFactories[name] === undefined) {
-      throw new Error(`Unknown network service "${name}".`);
-    }
-    if (enabled) {
-      if (!state.published.has(name)) state.published.set(name, createService(state, name));
-    } else {
-      state.published.delete(name);
-    }
-  }
-
-  function prepareConnection(
+  function initializeConnection(
     connection: Awaited<ReturnType<Libp2p["dial"]>>,
     preferred?: ManagedPeer,
-  ): PeerState | undefined {
-    if (!isUsableConnection(connection)) return undefined;
+  ): Peer {
+    if (!isUsableConnection(connection)) {
+      throw new Error("A direct connection to this peer could not be established.");
+    }
     const id = connection.remotePeer.toString();
-    if (id === localId) return undefined;
+    if (id === localId) {
+      throw new Error("The local peer cannot be created as a remote peer.");
+    }
 
-    const retained = peerStates.get(id);
-    if (retained !== undefined) return retained;
+    const retained = peers.get(id);
+    if (retained !== undefined) return retained.peer;
 
     const pending = pendingConnections.get(id)?.candidate;
     const managed = preferred?.peer.id === id
@@ -214,48 +191,34 @@ export default async function createNetwork(
       : pending?.peer.id === id
       ? pending
       : constructPeer(id);
-    const state: PeerState = { managed, published: new Map(), ready: false };
-    peerStates.set(id, state);
+    peers.set(id, managed);
 
     try {
       for (const name of supportedServices) {
-        if (shouldPublish(managed.peer, name)) setPublished(state, name, true);
+        if (shouldPublish(managed.peer, name)) setPublished(managed, name, true);
       }
     } catch (reason) {
-      peerStates.delete(id);
+      peers.delete(id);
       throw reason;
     }
-    return state;
-  }
 
-  async function initializeConnection(
-    connection: Awaited<ReturnType<Libp2p["dial"]>>,
-    preferred?: ManagedPeer,
-  ): Promise<Peer> {
-    const state = prepareConnection(connection, preferred);
-    if (state === undefined) {
-      throw new Error("A direct connection to this peer could not be established.");
-    }
-    if (state.ready) return state.managed.peer;
-
-    state.ready = true;
-    state.managed.connectionOpened();
-    notifyPeer(state.managed.peer, "connected");
-    return state.managed.peer;
+    managed.connected();
+    notifyPeer(managed.peer, "connected");
+    return managed.peer;
   }
 
   async function readRemoteServices(id: string): Promise<readonly string[]> {
     const connection = usableConnection(node, id);
     if (connection === undefined) throw new Error("This peer is not connected.");
-    const registry = remoteService<Registry>(registryServiceName, async (signal) =>
+    const registry = remoteService<RegistryMethods>(registryServiceName, async (signal) =>
       await connection.newStream(rpcProtocol, { signal })
     );
     return validateServiceNames(await registry.list());
   }
 
   async function refreshPeerServices(managed: ManagedPeer): Promise<readonly string[]> {
-    const state = requiredState(managed.peer);
-    if (!state.ready) throw new Error("This peer is not connected.");
+    requiredPeer(managed.peer);
+    if (!managed.peer.isConnected()) throw new Error("This peer is not connected.");
     try {
       const names = await readRemoteServices(managed.peer.id);
       if (managed.setServices(names)) notifyPeer(managed.peer, "services");
@@ -266,36 +229,36 @@ export default async function createNetwork(
     }
   }
 
-  function updateAddresses(state: PeerState, addresses: readonly string[]): void {
-    if (addAddresses(state.managed, addresses) && state.ready) {
-      notifyPeer(state.managed.peer, "addresses");
+  function updateAddresses(managed: ManagedPeer, addresses: readonly string[]): void {
+    if (addAddresses(managed, addresses) && peers.get(managed.peer.id) === managed) {
+      notifyPeer(managed.peer, "addresses");
     }
   }
 
-  function deactivatePeer(id: string, state: PeerState): void {
-    if (peerStates.get(id) !== state) return;
-    peerStates.delete(id);
-    state.managed.connectionClosed();
-    if (state.ready) notifyPeer(state.managed.peer, "disconnected");
+  function deactivatePeer(id: string, managed: ManagedPeer, reason: Error): void {
+    if (peers.get(id) !== managed) return;
+    peers.delete(id);
+    managed.close(reason);
+    notifyPeer(managed.peer, "disconnected");
   }
 
   function disconnectPeer(id: string): void {
-    const state = peerStates.get(id);
-    if (state === undefined || usableConnection(node, id) !== undefined) return;
-    deactivatePeer(id, state);
+    const managed = peers.get(id);
+    if (managed === undefined || usableConnection(node, id) !== undefined) return;
+    deactivatePeer(id, managed, new Error("The peer disconnected."));
   }
 
   async function connectManagedPeer(candidate: ManagedPeer): Promise<Peer> {
     const id = candidate.peer.id;
-    const connected = peerState(id);
-    if (connected?.ready === true) {
+    const connected = peers.get(id);
+    if (connected !== undefined && connected.peer.isConnected()) {
       updateAddresses(connected, candidate.peer.addresses());
-      return connected.managed.peer;
+      return connected.peer;
     }
 
     const existingConnection = usableConnection(node, id);
     if (existingConnection !== undefined) {
-      return await initializeConnection(existingConnection, candidate);
+      return initializeConnection(existingConnection, candidate);
     }
 
     const pending = pendingConnections.get(id);
@@ -330,8 +293,8 @@ export default async function createNetwork(
     }
 
     try {
-      const peer = await initializeConnection(connection, candidate);
-      updateAddresses(requiredState(peer), candidate.peer.addresses());
+      const peer = initializeConnection(connection, candidate);
+      updateAddresses(requiredPeer(peer), candidate.peer.addresses());
       return peer;
     } catch (reason) {
       await closePeerConnections(id);
@@ -353,8 +316,8 @@ export default async function createNetwork(
     }
 
     try {
-      const peer = await initializeConnection(connection);
-      updateAddresses(requiredState(peer), addresses);
+      const peer = initializeConnection(connection);
+      updateAddresses(requiredPeer(peer), addresses);
       return peer;
     } catch (reason) {
       await closePeerConnections(id);
@@ -362,16 +325,26 @@ export default async function createNetwork(
     }
   }
 
-  function rpcService(state: PeerState, name: string): object | undefined {
-    return state.published.get(name)?.rpc;
+  function rpcService(managed: ManagedPeer, name: string): object | undefined {
+    return managed.hosted(name)?.remote;
+  }
+
+  function eventService(managed: ManagedPeer, name: string): Channel<unknown> | undefined {
+    return managed.hosted(name)?.events as Channel<unknown> | undefined;
+  }
+
+  function dataService(managed: ManagedPeer, name: string): Stream | undefined {
+    return managed.hosted(name)?.data;
   }
 
   async function closePeerConnections(id: string): Promise<void> {
     await Promise.allSettled(node.getConnections()
       .filter((connection) => connection.remotePeer.toString() === id)
       .map(async (connection) => await connection.close()));
-    const state = peerStates.get(id);
-    if (state !== undefined) deactivatePeer(id, state);
+    const managed = peers.get(id);
+    if (managed !== undefined) {
+      deactivatePeer(id, managed, new Error("The peer disconnected."));
+    }
   }
 
   async function stopNetwork(): Promise<void> {
@@ -379,16 +352,19 @@ export default async function createNetwork(
     try {
       await node.stop();
     } finally {
-      for (const [id, state] of peerStates) deactivatePeer(id, state);
+      const reason = new Error("The Network was closed.");
+      for (const [id, managed] of [...peers]) deactivatePeer(id, managed, reason);
       peerListeners.clear();
     }
   }
 
   node.addEventListener("connection:open", (event) => {
     if (!isUsableConnection(event.detail)) return;
-    void initializeConnection(event.detail).catch(async () => {
-      await closePeerConnections(event.detail.remotePeer.toString());
-    });
+    try {
+      initializeConnection(event.detail);
+    } catch {
+      void closePeerConnections(event.detail.remotePeer.toString());
+    }
   }, { signal: lifetime.signal });
   node.addEventListener("connection:close", (event) => {
     disconnectPeer(event.detail.remotePeer.toString());
@@ -396,68 +372,63 @@ export default async function createNetwork(
   node.addEventListener("peer:identify", (event) => {
     const id = event.detail.peerId.toString();
     if (id === localId) return;
-    const state = peerStates.get(id);
-    if (state === undefined) return;
+    const managed = peers.get(id);
+    if (managed === undefined) return;
 
     let changed = false;
     for (const address of event.detail.listenAddrs) {
       try {
-        changed = state.managed.addAddress(address.toString()) || changed;
+        changed = managed.addAddress(address.toString()) || changed;
       } catch {
         // A peer may only advertise addresses that identify its authenticated identity.
       }
     }
-    if (changed && state.ready) notifyPeer(state.managed.peer, "addresses");
+    if (changed) notifyPeer(managed.peer, "addresses");
   }, { signal: lifetime.signal });
   try {
-    for (const [serviceName, factory] of Object.entries(serviceFactories)) {
-      for (const protocol of factory.protocols ?? []) {
-        if (protocolServices.has(protocol.id)) {
-          throw new Error(`A byte-stream protocol named "${protocol.id}" is already provided.`);
-        }
-        protocolServices.set(protocol.id, serviceName);
-        await node.handle(
-          protocol.id,
-          async (stream, connection) => {
-            if (!isUsableConnection(connection)) {
-              stream.abort(new Error("Byte streams require a direct connection."));
-              return;
-            }
-            const state = prepareConnection(connection);
-            const accept = state?.published.get(serviceName)?.protocols?.[protocol.id];
-            if (accept === undefined) {
-              stream.abort(new Error("This byte-stream service is not available to the peer."));
-              return;
-            }
-            try {
-              await accept(createByteStream(stream));
-            } catch (reason) {
-              if (stream.status !== "closed" && stream.status !== "aborted") {
-                stream.abort(asError(reason));
-              }
-            }
-          },
-          {
-            signal: lifetime.signal,
-            maxInboundStreams: protocol.maxInboundStreams,
-            maxOutboundStreams: protocol.maxOutboundStreams,
-          },
-        );
-      }
-    }
     await node.handle(
       rpcProtocol,
       async (stream, connection) => {
-        if (!isUsableConnection(connection)) {
-          stream.abort(new Error("RPC requires a direct connection."));
-          return;
-        }
-        const state = prepareConnection(connection);
-        if (state === undefined) {
+        let managed: ManagedPeer;
+        try {
+          managed = requiredPeer(initializeConnection(connection));
+        } catch {
           stream.abort(new Error("RPC requires an authenticated remote peer."));
           return;
         }
-        await answerRpc(stream, (name) => rpcService(state, name));
+        await answerRpc(stream, (name) => rpcService(managed, name));
+      },
+      { signal: lifetime.signal },
+    );
+    await node.handle(
+      eventsProtocol,
+      async (stream, connection) => {
+        let managed: ManagedPeer;
+        try {
+          managed = requiredPeer(initializeConnection(connection));
+        } catch {
+          stream.abort(new Error("Events require an authenticated remote peer."));
+          return;
+        }
+        await answerEvents(
+          createByteStream(stream),
+          (name) => eventService(managed, name),
+          (name, close) => managed.trackEventFeed(name, close),
+        );
+      },
+      { signal: lifetime.signal },
+    );
+    await node.handle(
+      dataProtocol,
+      async (stream, connection) => {
+        let managed: ManagedPeer;
+        try {
+          managed = requiredPeer(initializeConnection(connection));
+        } catch {
+          stream.abort(new Error("Data transfers require an authenticated remote peer."));
+          return;
+        }
+        await answerData(createByteStream(stream), (name) => dataService(managed, name));
       },
       { signal: lifetime.signal },
     );
@@ -489,29 +460,37 @@ function validateFactories(factories: NetworkServiceFactories): void {
     if (typeof factory !== "function") {
       throw new Error(`The network service factory "${name}" must be a function.`);
     }
-    if (factory.protocols !== undefined && !Array.isArray(factory.protocols)) {
-      throw new Error(`The network service factory "${name}" has invalid protocols.`);
-    }
-    for (const protocol of factory.protocols ?? []) validateProtocol(protocol);
   }
 }
 
 function validateService(
   name: string,
-  factory: NetworkServiceFactory,
-  service: NetworkService,
+  service: HostedNetworkService,
 ): void {
   if (typeof service !== "object" || service === null || Array.isArray(service)) {
     throw new Error(`The network service "${name}" must be an object.`);
   }
-  if (service.rpc === undefined && (factory.protocols?.length ?? 0) === 0) {
-    throw new Error(`The network service "${name}" must provide RPC or a protocol.`);
+  if (
+    service.remote === undefined &&
+    service.events === undefined &&
+    service.data === undefined
+  ) {
+    throw new Error(`The network service "${name}" must provide an interaction.`);
   }
-  if (service.rpc !== undefined) validateRpcService(name, service.rpc);
-  for (const protocol of factory.protocols ?? []) {
-    if (typeof service.protocols?.[protocol.id] !== "function") {
-      throw new Error(`The network service "${name}" must handle "${protocol.id}".`);
-    }
+  if (service.remote !== undefined) validateRpcService(name, service.remote);
+  if (
+    service.events !== undefined &&
+    (typeof service.events.publish !== "function" ||
+      typeof service.events.subscribe !== "function")
+  ) {
+    throw new Error(`The events facet of "${name}" must be a Channel.`);
+  }
+  if (
+    service.data !== undefined &&
+    (typeof service.data.accept !== "function" ||
+      typeof service.data.send !== "function")
+  ) {
+    throw new Error(`The data facet of "${name}" must be a Stream.`);
   }
 }
 
@@ -522,29 +501,4 @@ function validateRpcService(name: string, service: object | undefined): void {
   if (Object.values(service).some((member) => typeof member !== "function")) {
     throw new Error(`The RPC facet of "${name}" may contain only methods.`);
   }
-}
-
-function validateProtocol(protocol: Protocol): void {
-  if (typeof protocol !== "object" || protocol === null || Array.isArray(protocol)) {
-    throw new Error("Every byte-stream protocol must be an object.");
-  }
-  if (typeof protocol.id !== "string" || protocol.id.length === 0) {
-    throw new Error("Every byte-stream protocol must have an identifier.");
-  }
-  validateStreamLimit(protocol.id, "inbound", protocol.maxInboundStreams);
-  validateStreamLimit(protocol.id, "outbound", protocol.maxOutboundStreams);
-}
-
-function validateStreamLimit(
-  protocol: string,
-  direction: string,
-  limit: number | undefined,
-): void {
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
-    throw new Error(`The ${direction} limit for "${protocol}" must be a positive integer.`);
-  }
-}
-
-function asError(reason: unknown): Error {
-  return reason instanceof Error ? reason : new Error(String(reason));
 }

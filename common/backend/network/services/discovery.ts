@@ -1,5 +1,6 @@
-import type { ByteStream } from "../byte-stream.ts";
+import { createChannel, type Channel } from "../../channel.ts";
 import type { Peer } from "../peer.ts";
+import type { RPC } from "../service.ts";
 
 export interface DiscoveredPeer {
   readonly peerId: string;
@@ -11,19 +12,12 @@ export type DiscoveryUpdate = Readonly<
   | { type: "remove"; peerId: string }
 >;
 
-export interface Discovery {
+export type DiscoveryMethods = {
   list(): readonly DiscoveredPeer[];
-}
+};
 
 interface DiscoveryHost {
-  service(
-    requester: Peer,
-    connectedPeers: () => readonly Peer[],
-  ): Discovery;
-  readonly updates: {
-    readonly id: string;
-    accept(peer: Peer, stream: ByteStream): Promise<void>;
-  };
+  service(requester: Peer): HostedDiscovery;
   peerChanged(
     peer: Peer,
     event: "connected" | "disconnected" | "addresses" | "services",
@@ -31,48 +25,50 @@ interface DiscoveryHost {
 }
 
 export const discoveryServiceName = "discovery";
-export const discoveryUpdatesProtocol = "/brochain/discovery/1.0.0";
+
+export type DiscoveryService = {
+  readonly remote: RPC<DiscoveryMethods>;
+  readonly events: Channel<DiscoveryUpdate>;
+};
+
+type HostedDiscovery = {
+  readonly remote: DiscoveryMethods;
+  readonly events: Channel<DiscoveryUpdate>;
+};
 
 export function createDiscoveryHost(): DiscoveryHost {
-  const subscribers = new Set<{ readonly peerId: string; readonly stream: ByteStream }>();
+  const peers = new Map<string, Peer>();
+  const updates = new Map<string, Channel<DiscoveryUpdate>>();
 
   return {
-    service(requester, connectedPeers) {
+    service(requester) {
+      const events = createChannel<DiscoveryUpdate>();
+      updates.set(requester.id, events);
       return {
-        list: () => Object.freeze(connectedPeers()
-          .filter((peer) => peer.id !== requester.id && peer.isConnected())
-          .map(discoveredPeer)
-          .filter((peer) => peer.addresses.length > 0)),
+        remote: {
+          list: () => Object.freeze([...peers.values()]
+            .filter((peer) => peer.id !== requester.id && peer.isConnected())
+            .map(discoveredPeer)
+            .filter((peer) => peer.addresses.length > 0)),
+        },
+        events,
       };
-    },
-    updates: {
-      id: discoveryUpdatesProtocol,
-      async accept(peer, stream) {
-        const subscriber = { peerId: peer.id, stream };
-        subscribers.add(subscriber);
-        try {
-          for await (const _ of stream) {
-            // Discovery subscribers do not send data.
-          }
-        } finally {
-          subscribers.delete(subscriber);
-        }
-      },
     },
     peerChanged(peer, event) {
       if (event === "services") return;
-      if (event !== "disconnected" && peer.addresses().length === 0) return;
+      if (event === "disconnected") {
+        peers.delete(peer.id);
+        updates.delete(peer.id);
+      } else {
+        if (peer.addresses().length === 0) return;
+        peers.set(peer.id, peer);
+      }
       const update: DiscoveryUpdate = event === "disconnected"
         ? { type: "remove", peerId: peer.id }
         : { type: "set", peer: discoveredPeer(peer) };
-      const message = encodeUpdate(update);
 
-      for (const subscriber of subscribers) {
-        if (subscriber.peerId === peer.id) continue;
-        void subscriber.stream.write(message).catch((reason) => {
-          subscribers.delete(subscriber);
-          subscriber.stream.abort(asError(reason));
-        });
+      for (const [requesterId, events] of updates) {
+        if (requesterId !== peer.id) events.publish(update);
       }
     },
   };
@@ -83,29 +79,6 @@ export function validateDiscoveredPeers(value: unknown): readonly DiscoveredPeer
   return Object.freeze(value.map(validateDiscoveredPeer));
 }
 
-export async function* readDiscoveryUpdates(
-  stream: ByteStream,
-): AsyncGenerator<DiscoveryUpdate> {
-  const decoder = new TextDecoder();
-  let buffered = "";
-
-  for await (const chunk of stream) {
-    buffered += decoder.decode(chunk, { stream: true });
-    let boundary = buffered.indexOf("\n");
-    while (boundary >= 0) {
-      const message = buffered.slice(0, boundary);
-      buffered = buffered.slice(boundary + 1);
-      if (message.length > 0) yield validateDiscoveryUpdate(JSON.parse(message));
-      boundary = buffered.indexOf("\n");
-    }
-  }
-
-  buffered += decoder.decode();
-  if (buffered.length > 0) {
-    throw new Error("Peer ended a partial discovery update.");
-  }
-}
-
 function discoveredPeer(peer: Peer): DiscoveredPeer {
   return Object.freeze({
     peerId: peer.id,
@@ -113,7 +86,7 @@ function discoveredPeer(peer: Peer): DiscoveredPeer {
   });
 }
 
-function validateDiscoveryUpdate(value: unknown): DiscoveryUpdate {
+export function validateDiscoveryUpdate(value: unknown): DiscoveryUpdate {
   if (typeof value !== "object" || value === null || !("type" in value)) {
     throw new Error("Peer sent an invalid discovery update.");
   }
@@ -148,12 +121,4 @@ function validateDiscoveredPeer(value: unknown): DiscoveredPeer {
     peerId: value.peerId,
     addresses: Object.freeze([...value.addresses]),
   });
-}
-
-function encodeUpdate(update: DiscoveryUpdate): Uint8Array {
-  return new TextEncoder().encode(`${JSON.stringify(update)}\n`);
-}
-
-function asError(reason: unknown): Error {
-  return reason instanceof Error ? reason : new Error(String(reason));
 }

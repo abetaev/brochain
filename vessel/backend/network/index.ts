@@ -13,7 +13,6 @@ import createCommonNetwork, {
 import {
   createDataTransfer,
   dataTransferServiceName,
-  type DataTransfer,
 } from "@v/backend/network/services/data-transfer";
 import {
   createIdentity,
@@ -22,7 +21,6 @@ import {
 import {
   createMessaging,
   messagingServiceName,
-  type Messaging,
 } from "@v/backend/network/services/messaging";
 import {
   isServiceEnabled,
@@ -37,6 +35,13 @@ export type NetworkUpdate = Readonly<
     peer: Peer;
     changed: "connection" | "addresses" | "services";
   }
+  | {
+    type: "set";
+    peer: Peer;
+    changed: "publication";
+    serviceName: string;
+    enabled: boolean;
+  }
   | { type: "remove"; peerId: string }
 >;
 
@@ -46,8 +51,6 @@ export interface Network {
   connect(address: string, ...alternates: readonly string[]): Promise<Peer>;
   connectedPeers(): readonly Peer[];
   services(): readonly string[];
-  messaging(): Messaging;
-  dataTransfer(): DataTransfer;
   close(): Promise<void>;
 }
 
@@ -63,12 +66,10 @@ export async function createNetwork(
     "Ed25519",
     base64ToBytes(identitySeed),
   );
-  const messaging = createMessaging(signals);
-  const dataTransfer = createDataTransfer(signals);
   const serviceFactories: NetworkServiceFactories = {
-    [identityServiceName]: () => ({ rpc: createIdentity(username) }),
-    [messagingServiceName]: messaging.factory,
-    [dataTransferServiceName]: dataTransfer.factory,
+    [identityServiceName]: () => createIdentity(username),
+    [messagingServiceName]: () => createMessaging(),
+    [dataTransferServiceName]: (peer) => createDataTransfer(peer),
   };
   const common = await createCommonNetwork({
     privateKey,
@@ -97,6 +98,13 @@ export async function createNetwork(
       optionObservers.set(peer.id, common.services().map((serviceName) =>
         observeServiceEnabled(options, peer.id, serviceName, (enabled) => {
           common.publish(peer, serviceName, enabled);
+          updates.publish({
+            type: "set",
+            peer,
+            changed: "publication",
+            serviceName,
+            enabled,
+          });
         })
       ));
       updates.publish({ type: "set", peer, changed: "connection" });
@@ -127,8 +135,6 @@ export async function createNetwork(
     },
     connectedPeers: common.connectedPeers,
     services: common.services,
-    messaging: () => messaging,
-    dataTransfer: () => dataTransfer,
     async close() {
       if (shutdown === undefined) {
         stopNetworkUpdates();
@@ -138,9 +144,4 @@ export async function createNetwork(
       await shutdown;
     },
   };
-}
-
-export function defaultBeaconAddress(): string {
-  const tls = window.location.protocol === "https:" ? "/tls" : "";
-  return `/dns4/${window.location.hostname}/tcp/${import.meta.env.BEACON_RELAY_PORT}${tls}/ws`;
 }

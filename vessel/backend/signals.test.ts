@@ -82,7 +82,7 @@ describe("Signals", () => {
 
       expect(() => channel.publish(undefined)).not.toThrow();
       expect(later).toHaveBeenCalledOnce();
-      expect(logged.mock.calls).toEqual([["Signals subscriber failed."]]);
+      expect(logged.mock.calls).toEqual([["Channel subscriber failed."]]);
     } finally {
       logged.mockRestore();
     }

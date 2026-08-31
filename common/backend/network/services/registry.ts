@@ -1,11 +1,19 @@
-export interface Registry {
+import type { RPC } from "../service.ts";
+
+export type RegistryMethods = {
   list(): readonly string[];
-}
+};
+
+export type Registry = {
+  readonly remote: RPC<RegistryMethods>;
+};
 
 export const registryServiceName = "registry";
 
-export function createRegistry(hostedServiceNames: () => readonly string[]): Registry {
-  return { list: hostedServiceNames };
+export function createRegistry(
+  hostedServiceNames: () => readonly string[],
+): { readonly remote: RegistryMethods } {
+  return { remote: { list: hostedServiceNames } };
 }
 
 export function validateServiceNames(value: unknown): readonly string[] {

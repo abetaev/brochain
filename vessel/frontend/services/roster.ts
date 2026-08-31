@@ -1,13 +1,12 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import {
   discoveryServiceName,
-  discoveryUpdatesProtocol,
-  readDiscoveryUpdates,
   validateDiscoveredPeers,
+  validateDiscoveryUpdate,
   type DiscoveredPeer,
-  type Discovery,
+  type DiscoveryService,
 } from "@c/backend/network/services/discovery";
-import type { ByteStream, Peer } from "@c/backend/network";
+import type { Peer } from "@c/backend/network";
 import {
   identityServiceName,
   loadIdentity,
@@ -51,7 +50,7 @@ export async function createRoster(session: Session): Promise<Roster> {
   const identities = new Map<string, Identity>();
   const connected = new Map<string, Peer>();
   const discovered = new Map<string, readonly string[]>();
-  const discoveryProviders = new Set<string>();
+  const discoveryProviders = new Map<string, () => void>();
   const entries = new Map<string, RosterEntry>();
   const updates = session.signals().channel<RosterUpdate>({}, "updates");
 
@@ -143,47 +142,44 @@ export async function createRoster(session: Session): Promise<Roster> {
   async function refreshDiscovery(peer: Peer): Promise<void> {
     try {
       applyDiscoveryList(
-        await peer.service<Discovery>(discoveryServiceName).list(),
+        await peer.service<DiscoveryService>(discoveryServiceName).remote.list(),
       );
     } catch {
       // Existing observations remain when Discovery is temporarily unavailable.
     }
   }
 
-  async function applyDiscoveryUpdates(stream: ByteStream): Promise<void> {
+  function applyDiscoveryUpdate(value: unknown): void {
     try {
-      for await (const update of readDiscoveryUpdates(stream)) {
-        if (update.type === "set") applyDiscovered(update.peer);
-        else removeDiscovered(update.peerId);
-      }
+      const update = validateDiscoveryUpdate(value);
+      if (update.type === "set") applyDiscovered(update.peer);
+      else removeDiscovered(update.peerId);
     } catch {
-      // Reconnecting the provider establishes a new update stream.
+      // Invalid remote observations do not affect the current projection.
     }
   }
 
   async function attachDiscovery(peer: Peer): Promise<void> {
-    try {
-      const stream = await peer.open(discoveryUpdatesProtocol);
-      await refreshDiscovery(peer);
-      void applyDiscoveryUpdates(stream);
-    } catch {
-      await refreshDiscovery(peer);
+    const service = peer.service<DiscoveryService>(discoveryServiceName);
+    discoveryProviders.set(peer.id, service.events.subscribe(applyDiscoveryUpdate));
+    await refreshDiscovery(peer);
+  }
+
+  async function applyServices(peer: Peer, services: readonly string[]): Promise<void> {
+    await refreshIdentity(peer, services);
+    if (services.includes(discoveryServiceName) && !discoveryProviders.has(peer.id)) {
+      await attachDiscovery(peer);
+    } else if (!services.includes(discoveryServiceName)) {
+      discoveryProviders.get(peer.id)?.();
+      discoveryProviders.delete(peer.id);
     }
   }
 
   async function attach(peer: Peer): Promise<void> {
-    let services: readonly string[];
     try {
-      services = await peer.refreshServices();
+      await applyServices(peer, await peer.refreshServices());
     } catch {
-      return;
-    }
-    await refreshIdentity(peer, services);
-    if (services.includes(discoveryServiceName) && !discoveryProviders.has(peer.id)) {
-      discoveryProviders.add(peer.id);
-      await attachDiscovery(peer);
-    } else if (!services.includes(discoveryServiceName)) {
-      discoveryProviders.delete(peer.id);
+      // The connected peer is removed when Registry is unavailable.
     }
   }
 
@@ -209,10 +205,14 @@ export async function createRoster(session: Session): Promise<Roster> {
       connected.set(peer.id, peer);
       publish(peer.id);
       if (update.changed === "connection") void attach(peer);
+      else if (update.changed === "services") void applyServices(peer, peer.services());
       return;
     }
     connected.delete(update.peerId);
-    if (discoveryProviders.delete(update.peerId)) {
+    const stopDiscovery = discoveryProviders.get(update.peerId);
+    discoveryProviders.delete(update.peerId);
+    stopDiscovery?.();
+    if (stopDiscovery !== undefined) {
       for (const peerId of [...discovered.keys()]) removeDiscovered(peerId);
     }
     publish(update.peerId);
