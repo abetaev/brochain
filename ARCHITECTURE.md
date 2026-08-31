@@ -123,11 +123,16 @@ Common
 #### Registry
 
 - **dependencies**: an owning Peer and its published instances
-- **use cases**: list the services published to the requesting Peer
+- **structure**: the published catalog and one announcement Channel
+- **use cases**: list the services published to the requesting Peer; announce a
+  changed catalog to it; observe a peer's announcements
 - **behavior**: Registry follows the same per-Peer publication as every other
   service and is enabled by default. Refusing it to a peer leaves that peer no
-  way to learn what is supported and so bars it. Catalog reads are lazy: a Peer
-  whose Registry cannot be listed is terminated when a consumer asks.
+  way to learn what is supported and so bars it, and the refusal is announced
+  before the instance goes. A publication change announces the new catalog to
+  that peer, which replaces its remote catalog and publishes the change without
+  asking again. Catalog reads remain lazy: a Peer whose Registry cannot be listed
+  is terminated when a consumer asks.
 
 #### Discovery
 
@@ -292,13 +297,25 @@ Vessel frontend
 - **behavior**: one busy state prevents concurrent mutations; successful
   authentication hands the Session to Application.
 
+### Peer view
+
+- **dependencies**: Session, Roster, and the peer identity being configured
+- **structure**: one Roster-entry signal, a published-service projection observed
+  from Options, and view-local settings errors
+- **use cases**: read a peer's identity, availability, and addresses; publish or
+  refuse each supported service for it
+- **behavior**: the view lists the locally supported services and reflects each
+  peer's Options while open, so a change made elsewhere appears. A refusal takes
+  effect immediately, including while connected. A refused write restores its
+  control and reports the failure. Leaving returns to the view which opened it.
+
 ### Home view
 
 - **dependencies**: Session, Roster, and Chat
 - **structure**: one peer-list signal, peer rows, direct-connection controls, and
   view-local action and Beacon errors
 - **use cases**: refresh peers; connect a listed Peer or a direct address; open
-  Chat; sign out
+  Chat or Peer; sign out
 - **behavior**: once subscriptions exist, Home starts the default Beacon
   connection in the background, and Refresh retries it and refreshes Roster.
   Selecting a listed Peer connects and opens its conversation. A direct address
@@ -312,8 +329,8 @@ Vessel frontend
 - **dependencies**: Roster and Chat
 - **structure**: one Roster-entry signal, Chat-history projection, text and file
   controls, and file downloads
-- **use cases**: return Home; read a conversation; send text or files; download
-  received files
+- **use cases**: return Home; open Peer; read a conversation; send text or files;
+  download received files
 - **behavior**: the view initializes from Roster and Chat snapshots, applies
   updates for its peer, derives capabilities from its current Peer catalog, and
   marks existing and new received items read. It retains only interaction errors

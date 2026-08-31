@@ -25,6 +25,20 @@ export function isServiceEnabled(
     .get("enabled") !== false;
 }
 
+export async function setServiceEnabled(
+  options: Options,
+  peerId: string,
+  serviceName: string,
+  enabled: boolean,
+): Promise<void> {
+  await options
+    .cat("peers")
+    .obj(peerId)
+    .cat("services")
+    .obj(serviceName)
+    .set("enabled", enabled);
+}
+
 export function observeServiceEnabled(
   options: Options,
   peerId: string,

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createRegistry,
   validateServiceNames,
@@ -12,6 +12,19 @@ describe("Registry", () => {
     expect(registry.remote.list()).toEqual(["registry"]);
     names.push("identity");
     expect(registry.remote.list()).toEqual(["registry", "identity"]);
+  });
+
+  it("publishes an announced catalog and refuses an invalid one", () => {
+    const registry = createRegistry(() => []);
+    const announced = vi.fn();
+    registry.events.subscribe(announced);
+
+    registry.remote.announce(["registry", "identity"]);
+
+    expect(announced).toHaveBeenCalledWith({ services: ["registry", "identity"] });
+    expect(() => registry.remote.announce(["registry", "registry"]))
+      .toThrow("invalid service names");
+    expect(announced).toHaveBeenCalledOnce();
   });
 
   it("accepts only unique non-empty service names", () => {

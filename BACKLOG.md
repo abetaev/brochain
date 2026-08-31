@@ -11,40 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-settings frontend and peer view
--------------------------------
-
-type: feature
-scope: frontend services, views, components, options, network
-
-Add a `Peer` view which displays information about an identified peer and
-provides the generic settings controls used to configure it. Every Home roster
-row and Chat MUST provide navigation to this view, and leaving it returns to the
-originating view.
-
-Initially, Peer lists the locally supported services from Network's Services
-catalog and edits their per-peer enabled Options. Saved changes apply
-immediately, including while connected.
-
-runtime service catalog updates
--------------------------------
-
-type: functional correction
-scope: Common Network, Registry, Peer
-
-Publishing or removing a service for a connected Peer currently changes only the
-local published set. The remote Peer keeps the catalog it last read and cannot
-observe the change until it refreshes for an unrelated reason.
-
-Registry MUST declare an event interaction which reports its published catalog
-to a Peer whenever that Peer's published set changes. A Peer receiving the event
-replaces its remote service catalog and publishes the resulting change like any
-other catalog refresh.
-
-Per-peer service Options cannot be edited while connected until the settings
-frontend and peer view exists, so this correction MUST land no later than that
-task and is not reachable before it.
-
 peer display-name customization
 -------------------------------
 

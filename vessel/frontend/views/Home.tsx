@@ -8,6 +8,7 @@ export function Home(props: {
   chat: Chat;
   roster: Roster;
   onOpenChat(peerId: string): void;
+  onOpenPeer(peerId: string): void;
   onSignedOut(): void;
 }) {
   const [actionError, setActionError] = createSignal<string>();
@@ -152,6 +153,7 @@ export function Home(props: {
                     () => connectAndOpen(selected.addresses),
                   )}
                   onOpenChat={props.onOpenChat}
+                  onOpenPeer={props.onOpenPeer}
                 />
               )}
             </For>
@@ -194,6 +196,7 @@ function PeerRow(props: {
   busy: boolean;
   onConnect(peer: RosterEntry): void;
   onOpenChat(peerId: string): void;
+  onOpenPeer(peerId: string): void;
 }) {
   const capabilities = () => props.listed.peer === undefined
     ? undefined
@@ -236,7 +239,14 @@ function PeerRow(props: {
             Chat
           </button>
         </Show>
-      </Show>
+      </Show>{" "}
+      <button
+        class="secondary"
+        type="button"
+        onClick={() => props.onOpenPeer(props.listed.peerId)}
+      >
+        Settings
+      </button>
     </li>
   );
 }

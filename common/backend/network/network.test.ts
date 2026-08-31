@@ -297,7 +297,7 @@ describe("per-Peer service instances", () => {
     expect(received).toEqual(["immediate"]);
   });
 
-  it("publishes and removes one service dynamically, visible on refresh", async () => {
+  it("publishes and removes one service dynamically, announced without a refresh", async () => {
     let generation = 0;
     const remote = await localNetwork({
       changing: rpc(() => {
@@ -314,17 +314,19 @@ describe("per-Peer service instances", () => {
     const service = peer.service<RpcService<{ read(): number }>>("changing").remote;
 
     await expect(service.read()).resolves.toBe(1);
-    remote.network.publish(inbound, "changing", false);
-    expect(remote.network.services()).toEqual(["registry", "changing"]);
     const events: string[] = [];
     local.network.updates.subscribe(({ type }) => events.push(type));
-    await peer.refreshServices();
-    expect(peer.services()).toEqual([registryServiceName]);
+
+    remote.network.publish(inbound, "changing", false);
+    expect(remote.network.services()).toEqual(["registry", "changing"]);
+    await vi.waitFor(() => expect(peer.services()).toEqual([registryServiceName]));
     expect(events).toEqual(["services"]);
     await expect(service.read()).rejects.toThrow("Method not found");
 
     remote.network.publish(inbound, "changing", true);
-    await peer.refreshServices();
+    await vi.waitFor(() =>
+      expect(peer.services()).toEqual([registryServiceName, "changing"])
+    );
     await expect(service.read()).resolves.toBe(2);
   });
 

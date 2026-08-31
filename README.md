@@ -26,5 +26,9 @@ using brochain
 5. **Read.** Home marks conversations holding unread items, and opening one
    clears its marker. Messages and received files stay available while you are
    signed in and disappear after sign-out or reload.
-6. **Sign out** to return to the account screen, where you can export an account
+6. **Configure.** Select **Settings** beside a peer, or from a conversation, to
+   see what they report about themselves and choose which services they may
+   reach. Changes apply at once, including while connected. Refusing the registry
+   leaves them no way to learn what you support, which bars them entirely.
+7. **Sign out** to return to the account screen, where you can export an account
    or permanently delete it after confirming its password.
