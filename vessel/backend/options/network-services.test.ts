@@ -2,7 +2,6 @@
 
 import { describe, expect, it } from "vitest";
 import { createOptions } from "@v/backend/options";
-import { createSignals } from "@v/backend/signals";
 import type {
   PersistentKeyValueStorage,
   PersistentServiceStorage,
@@ -27,7 +26,7 @@ async function testOptions() {
   const storage: PersistentServiceStorage = {
     kv: <Value>() => keyValues as PersistentKeyValueStorage<Value>,
   };
-  return { options: await createOptions(storage, createSignals()), values };
+  return { options: await createOptions(storage), values };
 }
 
 describe("network service Options", () => {

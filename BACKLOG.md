@@ -11,35 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-restore peer-bound Network Services
------------------------------------
-
-type: architecture correction
-scope: Common Network, Vessel Network, Network Services, Peer, frontend services
-
-Replace the incorrect split between hidden hosted handlers, generic Peer
-projections, and Network-wide Messaging/DataTransfer facades.
-
-- Network owns only the fixed catalog of `NetworkServiceFactory` functions.
-- On connection, Network reads that peer's Options and passes each enabled
-  factory to Peer.
-- Peer invokes `(peer) => NetworkService`, owns the returned concrete service,
-  and exposes that service to Frontend and Signals.
-- A factory creates the complete peer-bound service object; no separate global
-  service facade, factory property, second service-construction API, or generic
-  remote projection standing in for that object exists.
-- Registry follows the same factory and Peer ownership mechanism as every other
-  Network Service.
-- Identity, Messaging, DataTransfer, Discovery, and Registry each implement the
-  same construction and ownership flow while declaring only their applicable
-  `remote`, `events`, and `stream` interactions.
-- Common Network owns transport routing and does not expose `ByteStream`,
-  protocol metadata, or transport-specific service APIs.
-- Remove `Network.messaging()` and `Network.dataTransfer()`; Chat and Roster use
-  the concrete services exposed by Peer and receive changes through Signals.
-- Replace the incorrect implementation documentation and tests only after the
-  ownership flow above is implemented.
-
 runtime service catalog updates
 -------------------------------
 
@@ -58,6 +29,35 @@ other catalog refresh.
 Per-peer service Options cannot be edited while connected until the settings
 frontend and peer view exists, so this correction MUST land no later than that
 task and is not reachable before it.
+
+browser workflows
+-----------------
+
+type: infrastructure
+scope: project commands, tests, frontend
+
+Add Playwright workflows which demonstrate complete user interactions, so
+reported coverage reflects real use rather than mocked structure.
+
+- `npm run test` MUST run the workflows together with the remaining lower-level
+  tests.
+- Workflows MUST report their coverage separately from lower-level test coverage,
+  so the reach of each set is visible on its own.
+- Workflows drive the development server, which already starts a Beacon beside
+  Vessel and serves unminified sources for coverage mapping. Driving a production
+  build is a later addition.
+
+The first workflow covers the riskiest path — two browser contexts sign in as
+separate accounts, connect through the Beacon over WebRTC, and exchange text —
+and headless WebRTC proved reliable. Still to cover: file transfer, direct
+connection by address, reconnection after a peer disappears, unread state, and
+account export and deletion.
+
+Remove the lower-level tests each workflow replaces as it lands. Lower-level
+tests remain only for behavior a workflow cannot prove: transport contracts,
+protocol edge cases, remote-input validators, and browser-storage guarantees. The
+frontend service tests and the mocked Vessel Network test are the known
+candidates for removal.
 
 settings frontend and peer view
 -------------------------------
@@ -194,11 +194,6 @@ calls
 
 - Add direct voice and video calls.
 - Refine latency-aware routing before designing multi-peer calls.
-
-browser workflows
------------------
-
-Add Playwright workflows that demonstrate complete user interactions. `npm run test` MUST run them together with the necessary lower-level tests.
 
 storage
 -------

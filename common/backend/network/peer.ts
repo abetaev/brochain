@@ -1,14 +1,10 @@
 import { multiaddr } from "@multiformats/multiaddr";
 import type { Libp2p } from "libp2p";
 import { createByteStream, type ByteStream } from "./byte-stream.ts";
-import { cancelData, createRemoteData, dataProtocol } from "./data.ts";
+import { createRemoteStream, dataProtocol } from "./data.ts";
 import { createRemoteEvents, eventsProtocol, type RemoteEvents } from "./events.ts";
 import { remoteService, rpcProtocol } from "./rpc.ts";
-import type {
-  HostedNetworkService,
-  NetworkService,
-  NetworkServiceFactory,
-} from "./service.ts";
+import type { NetworkService, NetworkServiceFactory } from "./service.ts";
 
 export interface Peer {
   readonly id: string;
@@ -17,27 +13,21 @@ export interface Peer {
   isConnected(): boolean;
   connect(): Promise<Peer>;
   refreshServices(): Promise<readonly string[]>;
-  subscribe(listener: (event: "connected" | "disconnected") => void): () => void;
-  service<Service extends NetworkService>(name: string): Service;
+  hosts(name: string): boolean;
+  service<Service extends object>(name: string): Service;
 }
 
 export interface ManagedPeer {
   readonly peer: Peer;
   addAddress(address: string): boolean;
   setServices(names: readonly string[]): boolean;
-  host(name: string, factory: NetworkServiceFactory): HostedNetworkService;
+  host(name: string, factory: NetworkServiceFactory): NetworkService;
   remove(name: string): void;
-  hosted(name: string): HostedNetworkService | undefined;
+  hosted(name: string): NetworkService | undefined;
   hostedServices(): readonly string[];
   trackEventFeed(name: string, close: () => void): () => void;
   connected(): void;
   close(reason: Error): void;
-}
-
-interface RemoteProjection {
-  readonly remote: object;
-  readonly events: RemoteEvents<unknown>;
-  readonly data: ReturnType<typeof createRemoteData>;
 }
 
 export function createPeer(
@@ -48,21 +38,17 @@ export function createPeer(
 ): ManagedPeer {
   const addresses = new Set<string>();
   let services: readonly string[] = [];
-  const listeners = new Set<(event: "connected" | "disconnected") => void>();
-  const hosted = new Map<string, HostedNetworkService>();
+  const hosted = new Map<string, NetworkService>();
   const eventFeeds = new Map<string, Set<() => void>>();
-  const projections = new Map<string, RemoteProjection>();
+  const remoteEvents = new Map<string, RemoteEvents<unknown>>();
   let managed: ManagedPeer;
 
   function isConnected(): boolean {
     return usableConnection(node, id) !== undefined;
   }
 
-  function refreshAvailability(): void {
-    const connected = isConnected();
-    for (const [name, projection] of projections) {
-      projection.events.available(connected && services.includes(name));
-    }
+  function setFeedsAvailable(value: boolean): void {
+    for (const events of remoteEvents.values()) events.available(value);
   }
 
   function releaseService(name: string, reason: Error): void {
@@ -70,31 +56,27 @@ export function createPeer(
     eventFeeds.delete(name);
     for (const close of feeds ?? []) close();
 
-    const data = hosted.get(name)?.data;
-    if (data !== undefined) cancelData(data, reason);
+    hosted.get(name)?.data?.abort(reason);
     hosted.delete(name);
   }
 
-  function projection(name: string): RemoteProjection {
-    let existing = projections.get(name);
+  // Only the event feed carries state across calls; the other facets are opened per use.
+  function feed(name: string): RemoteEvents<unknown> {
+    let existing = remoteEvents.get(name);
     if (existing === undefined) {
-      const events = createRemoteEvents<unknown>(name, async (signal) =>
-        await openBytes(name, eventsProtocol, signal)
+      existing = createRemoteEvents<unknown>(name, async (signal) =>
+        await openBytes(eventsProtocol, signal)
       );
-      existing = {
-        events,
-        remote: remoteService<object>(name, async (signal) => {
-          requireAvailable(name);
-          const connection = usableConnection(node, id);
-          if (connection === undefined) throw new Error("This peer is not connected.");
-          return await connection.newStream(rpcProtocol, { signal });
-        }),
-        data: createRemoteData(name, async () => await openBytes(name, dataProtocol)),
-      };
-      projections.set(name, existing);
-      events.available(isConnected() && services.includes(name));
+      remoteEvents.set(name, existing);
+      existing.available(isConnected());
     }
     return existing;
+  }
+
+  function callRemote(name: string) {
+    return remoteService<object>(name, async (signal) =>
+      await activeConnection().newStream(rpcProtocol, { signal })
+    );
   }
 
   const peer: Peer = {
@@ -108,20 +90,23 @@ export function createPeer(
     async refreshServices() {
       return await refreshServices(managed);
     },
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    service<Service extends NetworkService>(name: string) {
+    hosts(name) {
       validateServiceName(name);
-      const remote = projection(name);
+      return hosted.has(name);
+    },
+    service<Service extends object>(name: string) {
+      validateServiceName(name);
       const local = hosted.get(name);
       // A hosted instance already owns the facets its peer reaches; only its methods
       // differ, because the host writes them and the peer awaits them.
       return Object.freeze(
         local === undefined
-          ? { remote: remote.remote, events: remote.events.channel, data: remote.data }
-          : { ...local, remote: remote.remote },
+          ? {
+            remote: callRemote(name),
+            events: feed(name).channel,
+            data: createRemoteStream(name, async () => await openBytes(dataProtocol)),
+          }
+          : { ...local, remote: callRemote(name) },
       ) as unknown as Service;
     },
   };
@@ -140,7 +125,7 @@ export function createPeer(
         services.every((name, index) => name === names[index])
       ) return false;
       services = Object.freeze([...names]);
-      refreshAvailability();
+      for (const events of remoteEvents.values()) events.retry();
       return true;
     },
     host(name, factory) {
@@ -169,34 +154,26 @@ export function createPeer(
       };
     },
     connected() {
-      refreshAvailability();
-      for (const listener of listeners) listener("connected");
+      setFeedsAvailable(true);
     },
     close(reason) {
       for (const name of [...hosted.keys()]) releaseService(name, reason);
-      refreshAvailability();
-      for (const listener of listeners) listener("disconnected");
+      setFeedsAvailable(false);
     },
   };
 
   return managed;
 
-  function requireAvailable(name: string): void {
-    if (!isConnected()) throw new Error("This peer is not connected.");
-    if (!services.includes(name)) {
-      throw new Error(`This peer does not provide the "${name}" service.`);
-    }
-  }
-
-  async function openBytes(
-    serviceName: string,
-    protocol: string,
-    signal?: AbortSignal,
-  ): Promise<ByteStream> {
-    requireAvailable(serviceName);
+  // Whether the peer actually provides a service is the peer's answer to give, so
+  // an interaction is attempted and its refusal reported rather than guessed here.
+  function activeConnection() {
     const connection = usableConnection(node, id);
     if (connection === undefined) throw new Error("This peer is not connected.");
-    return createByteStream(await connection.newStream(protocol, { signal }));
+    return connection;
+  }
+
+  async function openBytes(protocol: string, signal?: AbortSignal): Promise<ByteStream> {
+    return createByteStream(await activeConnection().newStream(protocol, { signal }));
   }
 }
 

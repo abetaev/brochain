@@ -1,6 +1,6 @@
 import type { RPC } from "../service.ts";
 
-export type RegistryMethods = {
+type RegistryMethods = {
   list(): readonly string[];
 };
 

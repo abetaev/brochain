@@ -2,14 +2,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  Channel,
+} from "@c/backend/signals";
+import type {
   Network as CommonNetwork,
   NetworkServiceFactories,
   Peer,
-  PeerEvent,
+  NetworkUpdate,
   ServicePublication,
 } from "@c/backend/network";
 import type { Options } from "@v/backend/options";
-import { createSignals } from "@v/backend/signals";
 
 const dependencies = vi.hoisted(() => ({
   createCommonNetwork: vi.fn(),
@@ -32,7 +34,8 @@ vi.mock("@libp2p/webrtc", () => ({ webRTC: () => ({ type: "webrtc" }) }));
 vi.mock("@libp2p/websockets", () => ({ webSockets: () => ({ type: "websockets" }) }));
 vi.mock("@c/backend/network", () => ({ default: dependencies.createCommonNetwork }));
 
-import { createNetwork, type NetworkUpdate } from "./index.ts";
+import signals from "@c/backend/signals";
+import { createNetwork } from "./index.ts";
 
 type TestNetwork = CommonNetwork & {
   readonly createPeer: CommonNetwork["createPeer"] & ReturnType<typeof vi.fn>;
@@ -41,7 +44,7 @@ type TestNetwork = CommonNetwork & {
 };
 
 let common: TestNetwork;
-let listener: ((peer: Peer, event: PeerEvent) => void) | undefined;
+let commonUpdates: Channel<NetworkUpdate>;
 let factories: NetworkServiceFactories;
 let publication: ServicePublication;
 let optionValues: Map<string, boolean>;
@@ -56,8 +59,8 @@ function peer(id = "remote"): Peer {
     connect: vi.fn(),
     refreshServices: vi.fn(),
     subscribe: vi.fn(() => () => {}),
+    hosts: vi.fn(() => true),
     service: vi.fn(),
-    remote: vi.fn(),
   } as unknown as Peer;
 }
 
@@ -96,7 +99,7 @@ function setOption(peerId: string, serviceName: string, value: boolean): void {
 beforeEach(() => {
   optionValues = new Map();
   optionListeners = new Map();
-  listener = undefined;
+  commonUpdates = signals.channel<NetworkUpdate>();
   factories = {};
   publication = () => true;
   common = {
@@ -105,12 +108,7 @@ beforeEach(() => {
     connectedPeers: vi.fn(() => []),
     services: vi.fn(() => ["registry", ...Object.keys(factories)]),
     publish: vi.fn(),
-    subscribe: vi.fn((next: (peer: Peer, event: PeerEvent) => void) => {
-      listener = next;
-      return () => {
-        listener = undefined;
-      };
-    }),
+    updates: commonUpdates,
     close: vi.fn(async () => {}),
   } as unknown as TestNetwork;
   dependencies.generateKeyPairFromSeed.mockReset().mockResolvedValue({ type: "private-key" });
@@ -137,7 +135,6 @@ describe("Vessel Network", () => {
       "AA==",
       "alice",
       options(),
-      createSignals(),
     );
 
     expect(dependencies.generateKeyPairFromSeed).toHaveBeenCalledWith(
@@ -146,21 +143,20 @@ describe("Vessel Network", () => {
     );
     expect(dependencies.createCommonNetwork).toHaveBeenCalledOnce();
     expect(Object.keys(factories)).toEqual(["identity", "messaging", "data-transfer"]);
-    expect(factories.identity?.(peer()).remote).toMatchObject({
-      get: expect.any(Function),
+    expect(factories.identity?.(peer())).toMatchObject({
+      remote: { get: expect.any(Function) },
     });
     expect(component.id).toBe("local");
     expect(factories.messaging?.(peer())).toMatchObject({
       remote: { send: expect.any(Function) },
-      send: expect.any(Function),
-      updates: { publish: expect.any(Function), subscribe: expect.any(Function) },
+      events: { publish: expect.any(Function), subscribe: expect.any(Function) },
     });
   });
 
   it("reads publication centrally for every service", async () => {
     optionValues.set("first/messaging", false);
     optionValues.set("first/registry", false);
-    await createNetwork("AA==", "alice", options(), createSignals());
+    await createNetwork("AA==", "alice", options());
 
     expect(publication(peer("first"), "identity")).toBe(true);
     expect(publication(peer("first"), "messaging")).toBe(false);
@@ -172,7 +168,7 @@ describe("Vessel Network", () => {
     const connected = peer("beacon");
     const candidate = { connect: vi.fn(async () => connected) } as unknown as Peer;
     common.createPeer.mockResolvedValue(candidate);
-    const component = await createNetwork("AA==", "alice", options(), createSignals());
+    const component = await createNetwork("AA==", "alice", options());
 
     expect(common.createPeer).not.toHaveBeenCalled();
     await expect(component.connect("/dns4/beacon/tcp/9090/ws", "/dns4/other/tcp/9090/ws"))
@@ -184,40 +180,21 @@ describe("Vessel Network", () => {
     expect(candidate.connect).toHaveBeenCalledOnce();
   });
 
-  it("publishes keyed completed-peer patches and applies option changes", async () => {
-    const signals = createSignals();
-    const component = await createNetwork("AA==", "alice", options(), signals);
-    const updates: NetworkUpdate[] = [];
-    component.updates.subscribe((update) => updates.push(update));
+  it("applies option changes while connected and stops at disconnection", async () => {
+    const component = await createNetwork("AA==", "alice", options());
+    const observed: NetworkUpdate[] = [];
+    component.updates.subscribe((update) => observed.push(update));
     const remote = peer();
 
-    listener?.(remote, "connected");
-    listener?.(remote, "addresses");
-    listener?.(remote, "services");
+    commonUpdates.publish({ type: "connected", peer: remote });
     setOption(remote.id, "messaging", false);
     setOption(remote.id, "registry", false);
-    listener?.(remote, "disconnected");
+    commonUpdates.publish({ type: "disconnected", peerId: remote.id });
     setOption(remote.id, "messaging", true);
 
-    expect(updates).toEqual([
-      { type: "set", peer: remote, changed: "connection" },
-      { type: "set", peer: remote, changed: "addresses" },
-      { type: "set", peer: remote, changed: "services" },
-      {
-        type: "set",
-        peer: remote,
-        changed: "publication",
-        serviceName: "messaging",
-        enabled: false,
-      },
-      {
-        type: "set",
-        peer: remote,
-        changed: "publication",
-        serviceName: "registry",
-        enabled: false,
-      },
-      { type: "remove", peerId: remote.id },
+    expect(observed).toEqual([
+      { type: "connected", peer: remote },
+      { type: "disconnected", peerId: remote.id },
     ]);
     expect(common.publish).toHaveBeenCalledWith(remote, "messaging", false);
     expect(common.publish).toHaveBeenCalledWith(remote, "registry", false);
@@ -225,9 +202,9 @@ describe("Vessel Network", () => {
   });
 
   it("closes the Common Network once and removes option observers", async () => {
-    const component = await createNetwork("AA==", "alice", options(), createSignals());
+    const component = await createNetwork("AA==", "alice", options());
     const remote = peer();
-    listener?.(remote, "connected");
+    commonUpdates.publish({ type: "connected", peer: remote });
 
     await Promise.all([component.close(), component.close()]);
     setOption(remote.id, "identity", false);
@@ -240,7 +217,7 @@ describe("Vessel Network", () => {
     const failure = new Error("Network initialization failed.");
     dependencies.createCommonNetwork.mockRejectedValueOnce(failure);
 
-    await expect(createNetwork("AA==", "alice", options(), createSignals()))
+    await expect(createNetwork("AA==", "alice", options()))
       .rejects.toBe(failure);
   });
 });

@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const initializationMarker = ".i";
 const dependencyFiles = ["package.json", "package-lock.json"];
-const requiredExecutables = ["tsc", "vite", "vitest"];
+const requiredExecutables = ["tsc", "vite", "vitest", "playwright"];
 
 function executablePath(projectRoot: string, executable: string): string {
   return join(projectRoot, "node_modules", ".bin", executable);
@@ -94,6 +94,7 @@ async function initializeProject(projectRoot = projectDirectory): Promise<boolea
   }
 
   await runCommand(npmCommand(), ["install"], projectRoot);
+  await runCommand(installedCommand("playwright"), ["install", "chromium"], projectRoot);
   await writeFile(
     join(projectRoot, initializationMarker),
     `${JSON.stringify({ fingerprint: await dependencyFingerprint(projectRoot) })}\n`,
@@ -118,6 +119,7 @@ async function runProjectCommand(command: string): Promise<void> {
 
   if (command === "test") {
     await runCommand(installedCommand("vitest"), ["run"], projectDirectory);
+    await runCommand(installedCommand("playwright"), ["test"], projectDirectory);
     return;
   }
 

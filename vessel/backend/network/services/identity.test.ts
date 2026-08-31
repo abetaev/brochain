@@ -6,7 +6,7 @@ import {
 } from "./identity.ts";
 
 function remoteIdentity(get: () => Promise<unknown>): Parameters<typeof loadIdentity>[0] {
-  return { get } as Parameters<typeof loadIdentity>[0];
+  return { remote: { get } } as Parameters<typeof loadIdentity>[0];
 }
 
 describe("Identity", () => {

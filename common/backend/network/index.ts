@@ -11,25 +11,21 @@ import {
   type ManagedPeer,
   type Peer,
 } from "./peer.ts";
-import { answerRpc, remoteService, rpcProtocol } from "./rpc.ts";
-import type { Channel } from "../channel.ts";
-import type {
-  HostedNetworkService,
-  NetworkServiceFactories,
-  NetworkServiceFactory,
-} from "./service.ts";
+import { answerRpc, rpcProtocol } from "./rpc.ts";
+import signals from "../signals.ts";
+import type { Channel, Subscription } from "../signals.ts";
+import type { NetworkServiceFactories, NetworkServiceFactory } from "./service.ts";
 import {
   createRegistry,
   registryServiceName,
-  type RegistryMethods,
+  type Registry,
   validateServiceNames,
 } from "./services/registry.ts";
 
 export type { Peer } from "./peer.ts";
 export { createStream } from "./data.ts";
-export type { DataSource, Stream } from "./data.ts";
+export type { DataSource, Stream, Transfer, TransferOptions } from "./data.ts";
 export type {
-  AtLeastOne,
   Methods,
   NetworkService,
   NetworkServiceFactories,
@@ -37,7 +33,13 @@ export type {
   RPC,
 } from "./service.ts";
 
-export type PeerEvent = "connected" | "disconnected" | "addresses" | "services";
+export type NetworkUpdate = Readonly<
+  | { type: "connected"; peer: Peer }
+  | { type: "addresses"; peer: Peer }
+  | { type: "services"; peer: Peer }
+  | { type: "publication"; peer: Peer; serviceName: string; enabled: boolean }
+  | { type: "disconnected"; peerId: string }
+>;
 
 export type NetworkConfiguration = Omit<Libp2pOptions, "start">;
 export type ServicePublication = (peer: Peer, serviceName: string) => boolean;
@@ -49,7 +51,7 @@ export interface Network {
   connectedPeers(): readonly Peer[];
   services(): readonly string[];
   publish(peer: Peer, serviceName: string, enabled: boolean): void;
-  subscribe(listener: (peer: Peer, event: PeerEvent) => void): () => void;
+  readonly updates: Subscription<NetworkUpdate>;
   close(): Promise<void>;
 }
 
@@ -63,14 +65,12 @@ export default async function createNetwork(
   suppliedFactories: NetworkServiceFactories = {},
   shouldPublish: ServicePublication = () => true,
 ): Promise<Network> {
-  validateFactories(suppliedFactories);
-
   const node = await createLibp2p({ ...configuration, start: false });
   const localId = node.peerId.toString();
   const peers = new Map<string, ManagedPeer>();
   const pendingConnections = new Map<string, PendingConnection>();
   const pendingAuthentications = new Map<string, Promise<Peer>>();
-  const peerListeners = new Set<(peer: Peer, event: PeerEvent) => void>();
+  const updates = signals.channel<NetworkUpdate>();
   const lifetime = new AbortController();
   let shutdown: Promise<void> | undefined;
 
@@ -126,20 +126,14 @@ export default async function createNetwork(
     services: () => supportedServices,
     publish(peer, serviceName, enabled) {
       setPublished(requiredPeer(peer), serviceName, enabled);
+      updates.publish({ type: "publication", peer, serviceName, enabled });
     },
-    subscribe(listener) {
-      peerListeners.add(listener);
-      return () => peerListeners.delete(listener);
-    },
+    updates,
     async close() {
       shutdown ??= stopNetwork();
       await shutdown;
     },
   };
-
-  function notifyPeer(peer: Peer, event: PeerEvent): void {
-    for (const listener of peerListeners) listener(peer, event);
-  }
 
   function requiredPeer(peer: Peer): ManagedPeer {
     const managed = peers.get(peer.id);
@@ -166,8 +160,7 @@ export default async function createNetwork(
       managed.remove(name);
       return;
     }
-    if (managed.hosted(name) !== undefined) return;
-    validateService(name, managed.host(name, factory));
+    if (managed.hosted(name) === undefined) managed.host(name, factory);
   }
 
   function initializeConnection(
@@ -203,25 +196,17 @@ export default async function createNetwork(
     }
 
     managed.connected();
-    notifyPeer(managed.peer, "connected");
+    updates.publish({ type: "connected", peer: managed.peer });
     return managed.peer;
-  }
-
-  async function readRemoteServices(id: string): Promise<readonly string[]> {
-    const connection = usableConnection(node, id);
-    if (connection === undefined) throw new Error("This peer is not connected.");
-    const registry = remoteService<RegistryMethods>(registryServiceName, async (signal) =>
-      await connection.newStream(rpcProtocol, { signal })
-    );
-    return validateServiceNames(await registry.list());
   }
 
   async function refreshPeerServices(managed: ManagedPeer): Promise<readonly string[]> {
     requiredPeer(managed.peer);
     if (!managed.peer.isConnected()) throw new Error("This peer is not connected.");
     try {
-      const names = await readRemoteServices(managed.peer.id);
-      if (managed.setServices(names)) notifyPeer(managed.peer, "services");
+      const registry = managed.peer.service<Registry>(registryServiceName);
+      const names = validateServiceNames(await registry.remote.list());
+      if (managed.setServices(names)) updates.publish({ type: "services", peer: managed.peer });
       return managed.peer.services();
     } catch (reason) {
       await closePeerConnections(managed.peer.id);
@@ -231,7 +216,7 @@ export default async function createNetwork(
 
   function updateAddresses(managed: ManagedPeer, addresses: readonly string[]): void {
     if (addAddresses(managed, addresses) && peers.get(managed.peer.id) === managed) {
-      notifyPeer(managed.peer, "addresses");
+      updates.publish({ type: "addresses", peer: managed.peer });
     }
   }
 
@@ -239,7 +224,7 @@ export default async function createNetwork(
     if (peers.get(id) !== managed) return;
     peers.delete(id);
     managed.close(reason);
-    notifyPeer(managed.peer, "disconnected");
+    updates.publish({ type: "disconnected", peerId: id });
   }
 
   function disconnectPeer(id: string): void {
@@ -354,7 +339,6 @@ export default async function createNetwork(
     } finally {
       const reason = new Error("The Network was closed.");
       for (const [id, managed] of [...peers]) deactivatePeer(id, managed, reason);
-      peerListeners.clear();
     }
   }
 
@@ -383,7 +367,7 @@ export default async function createNetwork(
         // A peer may only advertise addresses that identify its authenticated identity.
       }
     }
-    if (changed) notifyPeer(managed.peer, "addresses");
+    if (changed) updates.publish({ type: "addresses", peer: managed.peer });
   }, { signal: lifetime.signal });
   try {
     await node.handle(
@@ -450,55 +434,4 @@ function addAddresses(peer: ManagedPeer, addresses: readonly string[]): boolean 
 
 function isDefined<Value>(value: Value | undefined): value is Value {
   return value !== undefined;
-}
-
-function validateFactories(factories: NetworkServiceFactories): void {
-  for (const [name, factory] of Object.entries(factories)) {
-    if (typeof name !== "string" || name.length === 0) {
-      throw new Error("Every network service must have a name.");
-    }
-    if (typeof factory !== "function") {
-      throw new Error(`The network service factory "${name}" must be a function.`);
-    }
-  }
-}
-
-function validateService(
-  name: string,
-  service: HostedNetworkService,
-): void {
-  if (typeof service !== "object" || service === null || Array.isArray(service)) {
-    throw new Error(`The network service "${name}" must be an object.`);
-  }
-  if (
-    service.remote === undefined &&
-    service.events === undefined &&
-    service.data === undefined
-  ) {
-    throw new Error(`The network service "${name}" must provide an interaction.`);
-  }
-  if (service.remote !== undefined) validateRpcService(name, service.remote);
-  if (
-    service.events !== undefined &&
-    (typeof service.events.publish !== "function" ||
-      typeof service.events.subscribe !== "function")
-  ) {
-    throw new Error(`The events facet of "${name}" must be a Channel.`);
-  }
-  if (
-    service.data !== undefined &&
-    (typeof service.data.accept !== "function" ||
-      typeof service.data.send !== "function")
-  ) {
-    throw new Error(`The data facet of "${name}" must be a Stream.`);
-  }
-}
-
-function validateRpcService(name: string, service: object | undefined): void {
-  if (typeof service !== "object" || service === null || Array.isArray(service)) {
-    throw new Error(`The RPC facet of "${name}" must be a method object.`);
-  }
-  if (Object.values(service).some((member) => typeof member !== "function")) {
-    throw new Error(`The RPC facet of "${name}" may contain only methods.`);
-  }
 }

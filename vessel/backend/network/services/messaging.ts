@@ -1,5 +1,6 @@
-import { createChannel, type Channel } from "@c/backend/channel";
 import type { RPC } from "@c/backend/network";
+import signals from "@c/backend/signals";
+import type { Channel, Subscription } from "@c/backend/signals";
 
 export const messagingServiceName = "messaging";
 
@@ -13,14 +14,14 @@ type Remote = {
 
 export type MessagingService = {
   readonly remote: RPC<Remote>;
-  readonly events: Channel<ReceivedMessage>;
+  readonly events: Subscription<ReceivedMessage>;
 };
 
 export function createMessaging(): {
   readonly remote: Remote;
   readonly events: Channel<ReceivedMessage>;
 } {
-  const events = createChannel<ReceivedMessage>();
+  const events = signals.channel<ReceivedMessage>();
 
   return {
     remote: {

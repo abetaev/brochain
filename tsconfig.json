@@ -21,5 +21,14 @@
     "jsxImportSource": "solid-js",
     "types": ["node", "vite/client"]
   },
-  "include": ["beacon", "common", "vessel", "main.ts", "main.test.ts", "vite.config.ts"]
+  "include": [
+    "beacon",
+    "common",
+    "vessel",
+    "workflows",
+    "main.ts",
+    "main.test.ts",
+    "vite.config.ts",
+    "playwright.config.ts"
+  ]
 }

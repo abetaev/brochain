@@ -42,8 +42,8 @@ export async function createBeacon(configuration: BeaconConfiguration) {
       }),
     },
   }, {
-    [discoveryServiceName]: (peer) => discovery.service(peer),
+    [discoveryServiceName]: discovery.service,
   });
-  network.subscribe(discovery.peerChanged);
+  network.updates.subscribe(discovery.peerChanged);
   return network;
 }

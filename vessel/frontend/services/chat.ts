@@ -10,7 +10,8 @@ import {
   type MessagingService,
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
-import type { Channel } from "@v/backend/signals";
+import signals from "@c/backend/signals";
+import type { Subscription } from "@c/backend/signals";
 import type { FileWriter, StoredFile } from "@v/backend/storage";
 
 export interface ChatFile {
@@ -51,8 +52,8 @@ export interface ChatCapabilities {
 }
 
 export interface Chat {
-  readonly updates: Channel<ChatItem>;
-  readonly reads: Channel<ChatRead>;
+  readonly updates: Subscription<ChatItem>;
+  readonly reads: Subscription<ChatRead>;
   capabilities(peer: Peer): ChatCapabilities;
   history(peerId: string): readonly ChatItem[];
   readCount(peerId: string): number;
@@ -64,22 +65,22 @@ export interface Chat {
 const chatServiceName = "chat";
 
 export function createChat(session: Session): Chat {
-  const signals = session.signals();
-  const updates = signals.channel<ChatItem>({}, "updates");
-  const reads = signals.channel<ChatRead>({}, "reads");
+  const updates = signals.channel<ChatItem>();
+  const reads = signals.channel<ChatRead>();
   const incomingWriters = new Map<string, FileWriter>();
   const network = session.network();
   const serviceSubscriptions = new Map<string, readonly (() => void)[]>();
 
   function attach(peer: Peer): void {
     for (const stop of serviceSubscriptions.get(peer.id) ?? []) stop();
-    const services = peer.services();
     const subscriptions: (() => void)[] = [];
-    if (services.includes(messagingServiceName)) {
+    // Inbound work reaches the instance this peer hosts, which exists before its
+    // remote catalog is known.
+    if (peer.hosts(messagingServiceName)) {
       subscriptions.push(peer.service<MessagingService>(messagingServiceName)
         .events.subscribe(({ message }) => receiveMessage(peer.id, message)));
     }
-    if (services.includes(dataTransferServiceName)) {
+    if (peer.hosts(dataTransferServiceName)) {
       subscriptions.push(peer.service<DataTransferService>(dataTransferServiceName)
         .events.subscribe(receiveTransfer));
     }
@@ -88,10 +89,10 @@ export function createChat(session: Session): Chat {
 
   for (const peer of network.connectedPeers()) attach(peer);
   network.updates.subscribe((update) => {
-    if (update.type === "remove") {
+    if (update.type === "disconnected") {
       for (const stop of serviceSubscriptions.get(update.peerId) ?? []) stop();
       serviceSubscriptions.delete(update.peerId);
-    } else if (update.changed === "connection" || update.changed === "publication") {
+    } else if (update.type === "connected" || update.type === "publication") {
       attach(update.peer);
     }
   });
@@ -158,9 +159,14 @@ export function createChat(session: Session): Chat {
         event.reject("A peer reused an existing chat item identifier.");
         return;
       }
+      const size = event.size;
+      if (size === undefined) {
+        event.reject("A received file must declare its size.");
+        return;
+      }
       let file: ReturnType<typeof validateFileMetadata>;
       try {
-        file = validateFileMetadata(event.metadata, event.size);
+        file = validateFileMetadata(event.metadata, size);
       } catch (reason) {
         event.reject(errorMessage(reason));
         return;
@@ -174,7 +180,7 @@ export function createChat(session: Session): Chat {
         transferred: 0,
         status: "transferring",
       });
-      const writer = fileStorage(event.peerId).create(event.size).then((created) => {
+      const writer = fileStorage(event.peerId).create(size).then((created) => {
         incomingWriters.set(transferKey(event.peerId, event.id), created);
         return created;
       });

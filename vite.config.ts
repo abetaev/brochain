@@ -21,7 +21,8 @@ export default defineConfig(({ command, mode }) => {
   }
 
   return {
-    root: frontendDirectory,
+    root: mode === "test" ? projectDirectory : frontendDirectory,
+    server: { port: Number(process.env.VESSEL_PORT ?? 5173), strictPort: true },
     cacheDir: resolve(projectDirectory, "node_modules/.vite"),
     publicDir: false,
     define: {
@@ -92,6 +93,15 @@ export default defineConfig(({ command, mode }) => {
       }),
     ],
     test: {
+      coverage: {
+        provider: "v8",
+        enabled: true,
+        all: true,
+        reportsDirectory: resolve(projectDirectory, "coverage/unit"),
+        include: ["common/**/*.ts", "vessel/**/*.ts", "beacon/**/*.ts", "main.ts"],
+        exclude: ["**/*.test.ts"],
+        reporter: ["text-summary", "html"],
+      },
       include: [
         resolve(projectDirectory, "common/**/*.test.ts"),
         resolve(vesselDirectory, "backend/**/*.test.ts"),
