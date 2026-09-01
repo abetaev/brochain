@@ -119,6 +119,30 @@ instrumented sources carry their own.
 This measures what the workflows already exercise; it adds no safety, so it
 ranks below work which does.
 
+keyed catalog announcements and event feed recovery
+---------------------------------------------------
+
+type: optimization
+scope: Common Network, Registry, Peer, events transport
+
+Registry announces its whole published catalog when one service changes, so a
+peer reloads a list to learn one name. `reactivity` reserves a snapshot for
+initialization and explicit recovery, and the producing side already holds the
+keyed change: `Network.publish` knows the service and whether it was published.
+
+- Registry MUST announce one service and its publication rather than the catalog.
+- Peer applies that keyed change to its remote catalog instead of replacing it.
+- `list` remains the snapshot, used to initialize a catalog and to recover one.
+
+A keyed change is only safe while a lost announcement can be recovered, and today
+it cannot be. A remote event feed which fails during a connection is closed
+silently and restarted only when a subscriber appears or the catalog changes,
+which is the very announcement that would no longer arrive; one dropped stream
+leaves the feed dead until the peer reconnects. Define and implement the recovery
+protocol before the announcement becomes keyed: a feed which fails while it still
+has subscribers and its peer remains connected MUST be re-established, and a
+consumer whose feed was interrupted MUST recover the state it may have missed.
+
 thoughts
 ========
 
