@@ -11,6 +11,53 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
+development across a local network
+----------------------------------
+
+type: infrastructure
+scope: project commands
+
+The development server listens on the loopback address, so a second machine
+cannot reach a running Vessel and nothing involving two real devices can be
+tried. Bind it to every interface, and document reaching it including the Beacon
+host, which MUST announce an address the other machine can dial.
+
+peer to peer calls
+------------------
+
+type: feature
+scope: network services, frontend services, views, application
+
+Add one to one audio and video calls between two connected peers.
+
+Media cannot travel over the connection a peer already has: the libp2p WebRTC
+transport owns its peer connection, exposes neither it nor a way to renegotiate
+it, and carries data channels alone. A call therefore establishes a second peer
+connection and signals it over the connection which already exists.
+
+- A `calling` Network Service carries that signalling: session descriptions,
+  address candidates, and ending a call. It is published per peer like every
+  other service, so refusing it in Peer refuses calls with that peer.
+- A `call` Frontend Service owns the media. It captures local audio and video,
+  holds the peer connection, and keeps the call for the Session. It is
+  constructed at sign-in beside Roster and Chat, so a call reaches a reader
+  whatever they are looking at.
+- A `Call` view shows local and remote video and offers muting, stopping the
+  camera, and hanging up. Leaving the view MUST NOT end the call, and the
+  application MUST show that a call is running while another view is open.
+- Chat offers a call beside sending text and files, enabled only while that peer
+  publishes the service.
+- An incoming call MUST be accepted before capture begins: a reader consents to
+  their camera and microphone rather than having them taken.
+- A call which cannot establish a media path MUST report that plainly rather
+  than appearing to connect.
+
+One call at a time is enough. A call belongs to the peer it is with, so no call
+identifier is needed until several may run at once.
+
+Calls reach only a local network until the address discovery and relay tasks
+land.
+
 message confirmations
 ---------------------
 
@@ -126,6 +173,29 @@ protocol before the announcement becomes keyed: a feed which fails while it stil
 has subscribers and its peer remains connected MUST be re-established, and a
 consumer whose feed was interrupted MUST recover the state it may have missed.
 
+call address discovery
+----------------------
+
+type: feature
+scope: calls, network, options
+
+A call offers only the addresses a browser sees for itself, which suffices
+inside one network and nowhere beyond it. Configure address discovery servers so
+a peer learns the address it presents to the outside and can offer it as a
+candidate. Refine where those servers are configured, whether Beacon advertises
+its own, and what a reader is told when discovery fails, before implementation.
+
+call relay
+----------
+
+type: feature
+scope: calls, beacon, network
+
+Symmetric address translation defeats address discovery, and such a call can
+only be carried by a relay. Decide whether Beacon relays call media as it
+already relays connection establishment, and refine credentials, capacity, and
+the limits a relay places on call quality before implementation.
+
 thoughts
 ========
 
@@ -180,8 +250,7 @@ implementation.
 calls
 -----
 
-- Add direct voice and video calls.
-- Refine latency-aware routing before designing multi-peer calls.
+Refine latency-aware routing before designing multi-peer calls.
 
 storage
 -------
