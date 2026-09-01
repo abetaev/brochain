@@ -11,17 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-development across a local network
-----------------------------------
-
-type: infrastructure
-scope: project commands
-
-The development server listens on the loopback address, so a second machine
-cannot reach a running Vessel and nothing involving two real devices can be
-tried. Bind it to every interface, and document reaching it including the Beacon
-host, which MUST announce an address the other machine can dial.
-
 peer to peer calls
 ------------------
 
@@ -111,19 +100,18 @@ standalone Beacon process
 type: infrastructure
 scope: beacon, project commands, tests
 
-Beacon has no entry point of its own. The development server imports its plugin
-from the Vite configuration, so the configuration loader bundles `beacon/core.ts`
-and the whole of `common/backend/network` into one temporary module whose scripts
-carry no attributable file names. Nothing can measure what Beacon exercises, and
-no workflow can start or stop one.
+`beacon/main.ts` runs a server which hosts Vessel, provides the relay, or does
+either alone, but development uses none of it. The Vite configuration imports the
+Beacon plugin, so the configuration loader bundles `beacon/core.ts` and the whole
+of `common/backend/network` into one temporary module whose scripts carry no
+attributable file names. Nothing can measure what Beacon exercises, and no
+workflow can stop or restart one.
 
-Give Beacon its own entry point and start it as a process:
+Run the workflows' Beacon as a process of its own:
 
-- Workflows start Beacons directly, so one Vessel development server serves every
-  workflow instead of the second one which exists today only to announce a relay
-  port where nothing listens.
-- A workflow MAY then stop and restart a Beacon, which reconnection behaviour
-  needs.
+- Workflows start `beacon/main.ts` with `VESSEL_HOSTING=off`, so the Beacon they
+  exercise is the one a deployment would run.
+- A workflow MAY then stop and restart it, which reconnection behaviour needs.
 - Collect the process coverage through `NODE_V8_COVERAGE` and merge it into the
   workflow report. Node strips types in place, so recorded lines already match the
   source and no source map is required.

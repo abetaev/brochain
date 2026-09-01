@@ -1,38 +1,47 @@
 import type { Plugin } from "vite";
 import { createBeacon } from "./core.ts";
+import { localHosts } from "../tls.ts";
 
-function configuredRelayPort(): number {
-  const value = Number(process.env.BEACON_RELAY_PORT ?? 9090);
-  if (!Number.isInteger(value) || value < 1 || value > 65_535) {
-    throw new Error("BEACON_RELAY_PORT must be a valid port number.");
-  }
-  return value;
+// A Vessel host without a relay is a deployment of its own: the page finds no
+// Beacon at its own origin and asks for another. Refusing the upgrade says so at
+// once, where an unanswered one would look like a Beacon that is merely slow.
+const providesRelay = process.env.BEACON_RELAY !== "off";
+
+function report(message: string, error: unknown): string {
+  return `${message}: ${error instanceof Error ? error.message : String(error)}`;
 }
 
-export function createBeaconPlugin(): Plugin {
-  let beacon: Awaited<ReturnType<typeof createBeacon>> | undefined;
-
+// Development serves Vessel and the relay from one origin, so the page reaches
+// its Beacon wherever it was opened and one certificate covers both.
+export function createBeaconPlugin(port: number): Plugin {
   return {
     name: "brochain-beacon",
     async configureServer(server) {
+      let relay: Awaited<ReturnType<typeof createBeacon>> | undefined;
       try {
-        beacon = await createBeacon({
-          host: process.env.BEACON_HOST ?? "localhost",
-          relayPort: configuredRelayPort(),
-        });
+        if (providesRelay) relay = await createBeacon({ hosts: localHosts(), port });
       } catch (error) {
-        server.config.logger.error(
-          `Unable to start the beacon: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        server.config.logger.error(report("Unable to start the beacon", error));
+        return;
       }
+
+      server.httpServer?.on("upgrade", (request, socket, head) => {
+        // Vite claims its own development sockets from a listener of its own and
+        // leaves every other upgrade alone.
+        const protocol = request.headers["sec-websocket-protocol"];
+        if (protocol === "vite-hmr" || protocol === "vite-ping") return;
+        if (relay === undefined) {
+          socket.end("HTTP/1.1 501 Not Implemented\r\n\r\n");
+          return;
+        }
+        relay.handleUpgrade(request, socket, head);
+      });
 
       server.httpServer?.once("close", async () => {
         try {
-          await beacon?.close();
+          await relay?.close();
         } catch (error) {
-          server.config.logger.error(
-            `Unable to stop the beacon: ${error instanceof Error ? error.message : String(error)}`,
-          );
+          server.config.logger.error(report("Unable to stop the beacon", error));
         }
       });
     },

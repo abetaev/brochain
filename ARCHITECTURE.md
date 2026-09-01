@@ -354,15 +354,19 @@ Beacon
 
 ### Network
 
-- **dependencies**: configured public relay information, a process identity, and
+- **dependencies**: the address the server answers on, a process identity, and
   Common Network
 - **structure**: one Common Network with the Discovery factory, Identify, and
-  Circuit Relay
+  Circuit Relay, listening privately on loopback
 - **use cases**: accept Vessel bootstrap connections; relay connection
   establishment; advertise connected Peers
 - **behavior**: Beacon retains no application messages and keeps one identity for
-  its process lifetime. Development starts it beside Vessel; production runs it
-  beside the built Vessel in one process. Restart creates a new identity.
+  its process lifetime. A WebSocket is an HTTP upgrade, so the server hosting
+  Vessel hands Beacon the upgrades it does not want and Beacon answers on the one
+  address people already trust. Hosting Vessel and providing the relay are
+  independent and either may be switched off, so a server can host the
+  application for people whose relay is elsewhere, or relay for applications
+  hosted elsewhere. Restart creates a new identity.
 
 runtime and technologies
 ------------------------

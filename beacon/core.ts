@@ -3,7 +3,10 @@ import { yamux } from "@chainsafe/libp2p-yamux";
 import { circuitRelayServer } from "@libp2p/circuit-relay-v2";
 import { identify, identifyPush } from "@libp2p/identify";
 import { webSockets } from "@libp2p/websockets";
-import type { ServerOptions } from "node:https";
+import { once } from "node:events";
+import type { IncomingMessage } from "node:http";
+import { type AddressInfo, connect, createServer } from "node:net";
+import type { Duplex } from "node:stream";
 import createNetwork from "../common/backend/network/index.ts";
 import {
   createDiscoveryHost,
@@ -11,23 +14,72 @@ import {
 } from "../common/backend/network/services/discovery.ts";
 
 interface BeaconConfiguration {
-  host: string;
-  relayPort: number;
-  announcePort?: number;
-  tls?: ServerOptions;
+  hosts: readonly string[];
+  port: number;
+}
+
+// A relay is reached by whichever of its addresses the dialing peer can resolve,
+// so each announced host keeps the form it actually has.
+function hostAddress(host: string): string {
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(host) ? `/ip4/${host}` : `/dns4/${host}`;
+}
+
+// The transport insists on creating its own listener, so the relay is given a
+// private one on loopback and reached through the server people already trust.
+async function privatePort(): Promise<number> {
+  const probe = createServer();
+  probe.listen(0, "127.0.0.1");
+  await once(probe, "listening");
+  const { port } = probe.address() as AddressInfo;
+  probe.close();
+  await once(probe, "close");
+  return port;
+}
+
+function requestLines(request: IncomingMessage): string {
+  const headers: string[] = [];
+  for (let index = 0; index < request.rawHeaders.length; index += 2) {
+    headers.push(`${request.rawHeaders[index]}: ${request.rawHeaders[index + 1]}`);
+  }
+  return `${request.method} ${request.url} HTTP/${request.httpVersion}\r\n${
+    headers.join("\r\n")
+  }\r\n\r\n`;
+}
+
+// A WebSocket is an HTTP upgrade, so the public server hands the ones it does not
+// want to the relay verbatim and then carries bytes between the two.
+function forwardUpgrade(port: number) {
+  return (request: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    const relay = connect(port, "127.0.0.1");
+    const disconnect = () => {
+      relay.destroy();
+      socket.destroy();
+    };
+    relay.once("error", disconnect);
+    relay.once("close", disconnect);
+    socket.once("error", disconnect);
+    socket.once("close", disconnect);
+    relay.once("connect", () => {
+      relay.write(requestLines(request));
+      if (head.length > 0) relay.write(head);
+      relay.pipe(socket);
+      socket.pipe(relay);
+    });
+  };
 }
 
 export async function createBeacon(configuration: BeaconConfiguration) {
-  const announcePort = configuration.announcePort ?? configuration.relayPort;
-  const tlsAddress = configuration.tls === undefined ? "" : "/tls";
+  const relayPort = await privatePort();
   const discovery = createDiscoveryHost();
   const network = await createNetwork({
     addresses: {
-      listen: [`/ip4/0.0.0.0/tcp/${configuration.relayPort}/ws`],
-      announce: [`/dns4/${configuration.host}/tcp/${announcePort}${tlsAddress}/ws`],
+      listen: [`/ip4/127.0.0.1/tcp/${relayPort}/ws`],
+      announce: configuration.hosts.map((host) =>
+        `${hostAddress(host)}/tcp/${configuration.port}/tls/ws`
+      ),
     },
     transports: [
-      webSockets(configuration.tls === undefined ? undefined : { https: configuration.tls }),
+      webSockets(),
     ],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
@@ -45,5 +97,5 @@ export async function createBeacon(configuration: BeaconConfiguration) {
     [discoveryServiceName]: discovery.service,
   });
   network.updates.subscribe(discovery.peerChanged);
-  return network;
+  return { ...network, handleUpgrade: forwardUpgrade(relayPort) };
 }

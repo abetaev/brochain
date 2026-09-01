@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
-import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createServer as createHttpsServer, type ServerOptions } from "node:https";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { dirname, extname, resolve, sep } from "node:path";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { createBeacon } from "./core.ts";
+import { localHosts, tlsOptions } from "../tls.ts";
 
 function configuredPort(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback);
@@ -16,31 +17,15 @@ function configuredPort(name: string, fallback: number): number {
   return value;
 }
 
-async function loadTlsOptions(): Promise<ServerOptions | undefined> {
-  const certificatePath = process.env.TLS_CERT_PATH;
-  const keyPath = process.env.TLS_KEY_PATH;
-
-  if (certificatePath === undefined && keyPath === undefined) {
-    return undefined;
-  }
-
-  if (certificatePath === undefined || keyPath === undefined) {
-    throw new Error("Set both TLS_CERT_PATH and TLS_KEY_PATH to enable HTTPS and WSS.");
-  }
-
-  return {
-    cert: await readFile(certificatePath),
-    key: await readFile(keyPath),
-  };
-}
-
+// The two things this server does are independent: it can host the application
+// for people whose relay is elsewhere, or provide the relay to applications
+// hosted elsewhere. Both are on unless switched off.
+const hostsVessel = process.env.VESSEL_HOSTING !== "off";
+const providesRelay = process.env.BEACON_RELAY !== "off";
 const port = configuredPort("PORT", 4173);
-const relayPort = configuredPort("BEACON_RELAY_PORT", 9090);
-const announcePort = configuredPort("BEACON_PUBLIC_RELAY_PORT", relayPort);
-const beaconHost = process.env.BEACON_HOST ?? "localhost";
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const builtVesselDirectory = resolve(projectDirectory, "dist");
-const tls = await loadTlsOptions();
+const tls = tlsOptions();
 
 const mimeTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -52,6 +37,14 @@ const mimeTypes: Record<string, string> = {
 };
 
 async function serveVessel(pathname: string, response: ServerResponse): Promise<void> {
+  if (!hostsVessel) {
+    response.writeHead(pathname === "/" ? 200 : 404, {
+      "content-type": "text/plain; charset=utf-8",
+    });
+    response.end("brochain relay");
+    return;
+  }
+
   const requestedPath = pathname === "/" ? "/index.html" : pathname;
   const file = resolve(builtVesselDirectory, `.${requestedPath}`);
 
@@ -68,13 +61,6 @@ async function serveVessel(pathname: string, response: ServerResponse): Promise<
   }
 }
 
-const beacon = await createBeacon({
-  host: beaconHost,
-  relayPort,
-  announcePort,
-  tls,
-});
-
 async function serveApplication(request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -85,24 +71,31 @@ async function serveApplication(request: IncomingMessage, response: ServerRespon
   }
 }
 
-const applicationServer = tls === undefined
-  ? createHttpServer(serveApplication)
-  : createHttpsServer(tls, serveApplication);
+const beacon = providesRelay
+  ? await createBeacon({ hosts: localHosts(), port })
+  : undefined;
+
+const applicationServer = createHttpsServer(tls, serveApplication);
+if (beacon !== undefined) applicationServer.on("upgrade", beacon.handleUpgrade);
 
 applicationServer.listen(port, "0.0.0.0");
 try {
   await once(applicationServer, "listening");
 } catch (error) {
-  await beacon.close();
+  await beacon?.close();
   throw error;
 }
 
-console.info(`Vessel available on ${tls === undefined ? "http" : "https"}://localhost:${port}`);
+const provided = [...(hostsVessel ? ["Vessel"] : []), ...(providesRelay ? ["the relay"] : [])];
+console.info(`Serving ${provided.join(" and ") || "nothing"} on https://localhost:${port}`);
+if (process.env.TLS_CERT_PATH === undefined) {
+  console.info("Serving a generated certificate. Set TLS_CERT_PATH and TLS_KEY_PATH to replace it.");
+}
 
 async function stopApplication(): Promise<void> {
   const closed = once(applicationServer, "close");
   applicationServer.close();
-  await beacon.close();
+  await beacon?.close();
   await closed;
 }
 

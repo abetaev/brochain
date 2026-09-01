@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { VitePWA } from "vite-plugin-pwa";
 import solid from "vite-plugin-solid";
 import { createBeaconPlugin } from "./beacon/dev.ts";
+import { tlsOptions } from "./tls.ts";
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const commonDirectory = resolve(projectDirectory, "common");
@@ -12,21 +13,20 @@ const frontendDirectory = resolve(vesselDirectory, "frontend");
 const iconPath = resolve(frontendDirectory, "icon.svg");
 
 export default defineConfig(({ mode }) => {
-  const configuredRelayPort = process.env.BEACON_PUBLIC_RELAY_PORT ??
-    process.env.BEACON_RELAY_PORT ?? "9090";
-  const relayPort = Number(configuredRelayPort);
-  if (!Number.isInteger(relayPort) || relayPort < 1 || relayPort > 65_535) {
-    throw new Error("Beacon relay port must be a valid port number.");
-  }
+  const vesselPort = Number(process.env.VESSEL_PORT ?? 5173);
+  // Tests start no server and need no certificate.
+  const tls = mode === "test" ? undefined : tlsOptions();
 
   return {
     root: mode === "test" ? projectDirectory : frontendDirectory,
-    server: { port: Number(process.env.VESSEL_PORT ?? 5173), strictPort: true },
+    server: {
+      host: true,
+      port: vesselPort,
+      strictPort: true,
+      ...(tls === undefined ? {} : { https: tls }),
+    },
     cacheDir: resolve(projectDirectory, "node_modules/.vite"),
     publicDir: false,
-    define: {
-      "import.meta.env.BEACON_RELAY_PORT": JSON.stringify(String(relayPort)),
-    },
     resolve: {
       alias: {
         "@c": commonDirectory,
@@ -63,9 +63,9 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    plugins: mode === "test" ? [] : [
+    plugins: tls === undefined ? [] : [
       solid(),
-      createBeaconPlugin(),
+      createBeaconPlugin(vesselPort),
       VitePWA({
         registerType: "autoUpdate",
         includeManifestIcons: false,

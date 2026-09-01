@@ -5,6 +5,7 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { followSystemTheme } from "./coverage.ts";
+import { tlsOptions } from "./tls.ts";
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const initializationMarker = ".i";
@@ -114,11 +115,14 @@ async function runProjectCommand(command: string): Promise<void> {
   if (command === "prod") {
     await runCommand(installedCommand("tsc"), ["--noEmit"], projectDirectory);
     await runCommand(installedCommand("vite"), ["build"], projectDirectory);
-    await runCommand(process.execPath, ["beacon/prod.ts"], projectDirectory);
+    await runCommand(process.execPath, ["beacon/main.ts"], projectDirectory);
     return;
   }
 
   if (command === "test") {
+    // Workflows start their servers at once, and each would otherwise generate
+    // the development certificate over the top of the other.
+    tlsOptions();
     await runCommand(installedCommand("vitest"), ["run"], projectDirectory);
     await followSystemTheme(join(projectDirectory, "coverage/unit/base.css"));
     await runCommand(installedCommand("playwright"), ["test"], projectDirectory);

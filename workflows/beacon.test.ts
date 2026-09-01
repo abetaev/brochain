@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import {
   alternativeBeaconAddress,
   alternativeBeaconUrl,
-  unreachableDefaultAddress,
+  relaylessVesselAddress,
 } from "../playwright.config.ts";
 import { expect, peerOffering, test } from "./vessel.ts";
 
@@ -18,13 +18,13 @@ async function connectDirectly(page: Page, address: string): Promise<void> {
   await expect(page.getByRole("listitem").filter({ hasText: "Connected" })).toBeVisible();
 }
 
-test("people whose default Beacon is unreachable reach another and meet there", async ({
+test("people whose Vessel host offers no Beacon reach another and meet there", async ({
   openVessel,
 }) => {
-  const alice = await openVessel("alice", unreachableDefaultAddress);
+  const alice = await openVessel("alice", relaylessVesselAddress);
   await connectDirectly(alice, alternativeBeaconUrl);
 
-  const bob = await openVessel("bob", unreachableDefaultAddress);
+  const bob = await openVessel("bob", relaylessVesselAddress);
   await connectDirectly(bob, alternativeBeaconAddress);
 
   await expect(async () => {

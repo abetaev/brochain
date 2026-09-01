@@ -284,9 +284,10 @@ function peerAddress(entered: string): string {
   return `${hostAddress(url.hostname)}/tcp/${port}${secure ? "/tls" : ""}/ws`;
 }
 
+// Vessel and its Beacon are served from one origin, so the page already knows
+// where its Beacon is.
 function defaultBeaconAddress(): string {
-  const { hostname, protocol } = window.location;
-  return peerAddress(`${protocol}//${hostname}:${import.meta.env.BEACON_RELAY_PORT}`);
+  return peerAddress(window.location.origin);
 }
 
 function hostAddress(hostname: string): string {
