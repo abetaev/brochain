@@ -11,23 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-peer display-name customization
--------------------------------
-
-type: feature
-scope: frontend services, views, roster, options
-
-Extend Peer with editing for `peers/${peerId}.display_name`. A display name is
-arbitrary Unicode text which is trimmed before storage and MUST contain 1–64
-characters. The saved display name is the source of truth for every UI reference
-to that peer in Home, Chat, and Peer, with cached identity name and peer ID as
-fallbacks.
-
-The cached remote Identity remains available in Peer for reference and MUST NOT
-be overwritten by local naming. The option remains absent until the user saves
-a display name; it MUST NOT be initialized from Identity. A saved-name change
-publishes the peer's Roster update so current views use the new name.
-
 message confirmations
 ---------------------
 

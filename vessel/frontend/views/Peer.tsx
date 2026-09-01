@@ -4,6 +4,12 @@ import {
   observeServiceEnabled,
   setServiceEnabled,
 } from "@v/backend/options/network-services";
+import {
+  displayName,
+  observeDisplayName,
+  setDisplayName,
+} from "@v/backend/options/peer-names";
+import { identityServiceName } from "@v/backend/network/services/identity";
 import type { Session } from "@v/backend/session";
 import type { Roster } from "@v/frontend/services/roster";
 
@@ -20,6 +26,7 @@ export function Peer(props: {
   const [published, setPublished] = createSignal<ReadonlyMap<string, boolean>>(
     new Map(services.map((name) => [name, isServiceEnabled(options, props.peerId, name)])),
   );
+  const [chosen, setChosen] = createSignal(displayName(options, props.peerId));
 
   const stops = [
     props.roster.updates.subscribe((update) => {
@@ -29,6 +36,7 @@ export function Peer(props: {
         setEntry(undefined);
       }
     }),
+    observeDisplayName(options, props.peerId, setChosen),
     ...services.map((name) =>
       observeServiceEnabled(options, props.peerId, name, (enabled) => {
         setPublished((current) => new Map(current).set(name, enabled));
@@ -38,6 +46,21 @@ export function Peer(props: {
   onCleanup(() => stops.forEach((stop) => stop()));
 
   const name = () => entry()?.name ?? props.peerId;
+  // A peer which still reports a name can be asked again; one which no longer
+  // does leaves only the choice of forgetting what it last reported.
+  const reports = () => {
+    const peer = entry()?.peer;
+    return peer?.isConnected() === true && peer.services().includes(identityServiceName);
+  };
+
+  async function attempt(operation: () => Promise<void>): Promise<void> {
+    setError(undefined);
+    try {
+      await operation();
+    } catch (reason) {
+      setError(errorMessage(reason));
+    }
+  }
 
   // The observed option drives the control, so a refused write puts it back.
   async function publish(
@@ -45,13 +68,22 @@ export function Peer(props: {
     enabled: boolean,
     control: HTMLInputElement,
   ): Promise<void> {
-    setError(undefined);
-    try {
-      await setServiceEnabled(options, props.peerId, serviceName, enabled);
-    } catch (reason) {
-      control.checked = !enabled;
-      setError(errorMessage(reason));
-    }
+    await attempt(async () => {
+      try {
+        await setServiceEnabled(options, props.peerId, serviceName, enabled);
+      } catch (reason) {
+        control.checked = !enabled;
+        throw reason;
+      }
+    });
+  }
+
+  async function saveName(
+    event: SubmitEvent & { currentTarget: HTMLFormElement },
+  ): Promise<void> {
+    event.preventDefault();
+    const entered = String(new FormData(event.currentTarget).get("display-name") ?? "");
+    await attempt(async () => await setDisplayName(options, props.peerId, entered));
   }
 
   return (
@@ -78,6 +110,45 @@ export function Peer(props: {
           </Show>
         </dd>
       </dl>
+
+      <section aria-labelledby="name-heading">
+        <h3 id="name-heading">Name</h3>
+        <form onSubmit={saveName}>
+          <label for="display-name">
+            Name for this peer
+            <input
+              id="display-name"
+              name="display-name"
+              maxlength="64"
+              required
+              value={chosen() ?? ""}
+            />
+          </label>
+          <button type="submit">Save name</button>
+        </form>
+        <Show when={chosen() !== undefined}>
+          <button
+            class="secondary"
+            type="button"
+            onClick={() =>
+              void attempt(async () => await props.roster.resetDisplayName(props.peerId))}
+          >
+            Reset name
+          </button>{" "}
+        </Show>
+        <Show when={reports() || entry()?.identity !== undefined}>
+          <button
+            class="secondary"
+            type="button"
+            onClick={() => void attempt(async () =>
+              reports()
+                ? await props.roster.refreshIdentity(props.peerId)
+                : await props.roster.clearIdentity(props.peerId))}
+          >
+            {reports() ? "Refresh identity" : "Clear identity"}
+          </button>
+        </Show>
+      </section>
 
       <section aria-labelledby="services-heading">
         <h3 id="services-heading">Services</h3>

@@ -185,8 +185,9 @@ Vessel backend
   TypeScript schema does not validate exact persisted scalar types. Dynamic
   object identifiers are percent-encoded. A missing or true
   `peers/${peerId}/services/${serviceName}.enabled` publishes that service to
-  that peer; false withholds it. Observation is synchronous, ordered,
-  non-retained, and property-specific.
+  that peer; false withholds it. `peers/${peerId}.display_name` names that peer
+  wherever it is shown. Observation is synchronous, ordered, non-retained, and
+  property-specific.
 
 #### Storage
 
@@ -262,17 +263,24 @@ Vessel frontend
 ### Roster
 
 - **dependencies**: Session Network, persistent Storage, and Signals
-- **structure**: one persistent Identity store, one current peer projection, and
-  a keyed update Channel
-- **use cases**: list or get current peers; refresh remote observations; observe
-  one-peer set and remove updates
+- **structure**: one persistent Identity store, the observed display-name Options,
+  one current peer projection, and a keyed update Channel
+- **use cases**: list or get current peers; refresh remote observations; reset a
+  peer's name; read or forget a peer's reported name; observe one-peer set and
+  remove updates
 - **behavior**: construction combines connected, discovered, and remembered
   Peers. Network and Discovery changes update only the affected projection and
   publish that patch. A connection update makes Roster refresh that Peer's
   catalog, and the catalog decides whether Identity and Discovery are queried.
   Provider failures are isolated. Valid Identity is persisted before its peer
-  update, and the display name falls back from cached Identity name to peer ID.
-  Addresses, availability, discovery, and service catalogs remain transient.
+  update, and names the peer the first time one is read, because a name is seeded
+  only while none is held; a chosen name therefore survives every later
+  identification. A peer with no name is shown by its peer ID. Resetting concerns
+  the name alone: it returns to whatever the peer last reported. The reported
+  Identity is read again while the peer publishes one and is forgotten otherwise,
+  so a peer becomes its peer ID only once that report is dropped and the name
+  reset. Addresses, availability, discovery, and service catalogs remain
+  transient.
 
 ### Chat
 
@@ -300,12 +308,16 @@ Vessel frontend
 ### Peer view
 
 - **dependencies**: Session, Roster, and the peer identity being configured
-- **structure**: one Roster-entry signal, a published-service projection observed
-  from Options, and view-local settings errors
-- **use cases**: read a peer's identity, availability, and addresses; publish or
-  refuse each supported service for it
+- **structure**: one Roster-entry signal, the peer's name and published-service
+  projections observed from Options, and view-local settings errors
+- **use cases**: read a peer's identity, availability, and addresses; name it,
+  reset its name, refresh or forget its reported name; publish or refuse each
+  supported service for it
 - **behavior**: the view lists the locally supported services and reflects each
-  peer's Options while open, so a change made elsewhere appears. A refusal takes
+  peer's Options while open, so a change made elsewhere appears. A name is trimmed
+  and must be 1 to 64 characters; the reported Identity stays shown beside it and
+  is never replaced by local naming. One control serves that report, offering to
+  refresh it while the peer publishes Identity and to forget it otherwise. A refusal takes
   effect immediately, including while connected. A refused write restores its
   control and reports the failure. Leaving returns to the view which opened it.
 

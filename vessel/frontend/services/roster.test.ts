@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Peer } from "@c/backend/network";
 import type { DiscoveryUpdate } from "@c/backend/network/services/discovery";
 import type { Network, NetworkUpdate } from "@v/backend/network";
+import { setDisplayName } from "@v/backend/options/peer-names";
+import type { Options } from "@v/backend/options";
 import type { Session } from "@v/backend/session";
 import signals from "@c/backend/signals";
 import type {
@@ -21,9 +23,64 @@ afterEach(async () => {
 });
 
 describe("Roster state", () => {
+  it("names a peer from its reported identity and keeps a chosen name", async () => {
+    const context = testContext(() => [provider(firstId, () => ["registry", "identity"])]);
 
+    const roster = await createRoster(context.session);
+    await vi.waitFor(() => expect(context.names.values.get(firstId)).toBe("peer"));
+    expect(roster.get(firstId)?.name).toBe("peer");
 
+    await setDisplayName(context.session.options(), firstId, "  chosen  ");
+    expect(roster.get(firstId)?.name).toBe("chosen");
 
+    // A later identification must not take a chosen name back.
+    await roster.refresh();
+    expect(roster.get(firstId)?.name).toBe("chosen");
+    expect(roster.get(firstId)?.identity).toEqual({ name: "peer" });
+
+    await roster.resetDisplayName(firstId);
+    expect(roster.get(firstId)?.name).toBe("peer");
+  });
+
+  it("names by the peer ID once a reported name is forgotten", async () => {
+    const context = testContext(
+      () => [provider(firstId, () => ["registry"])],
+      [[`peers/${firstId}.identity`, { name: "ada" }]],
+    );
+
+    const roster = await createRoster(context.session);
+    await vi.waitFor(() => expect(roster.get(firstId)?.name).toBe("ada"));
+
+    // Resetting alone returns to what the peer last reported.
+    await roster.resetDisplayName(firstId);
+    expect(roster.get(firstId)?.name).toBe("ada");
+
+    await roster.clearIdentity(firstId);
+    await roster.resetDisplayName(firstId);
+
+    expect(roster.get(firstId)?.identity).toBeUndefined();
+    expect(roster.get(firstId)?.name).toBe(firstId);
+    await expect(roster.refreshIdentity(firstId)).rejects.toThrow("does not report a name");
+  });
+
+  it("names an unidentified peer by its peer ID", async () => {
+    const context = testContext(() => [provider(firstId, () => ["registry"])]);
+
+    const roster = await createRoster(context.session);
+
+    expect(context.names.values.has(firstId)).toBe(false);
+    expect(roster.get(firstId)?.name).toBe(firstId);
+  });
+
+  it("refuses a name outside one to sixty-four characters", async () => {
+    const context = testContext(() => []);
+    await createRoster(context.session);
+    const options = context.session.options();
+
+    await expect(setDisplayName(options, firstId, "   ")).rejects.toThrow("1 to 64");
+    await expect(setDisplayName(options, firstId, "n".repeat(65))).rejects.toThrow("1 to 64");
+    await expect(setDisplayName(options, firstId, "n".repeat(64))).resolves.toBeUndefined();
+  });
 
   it("keeps the fallback entry when remote data is unavailable", async () => {
     const failed = provider(
@@ -108,6 +165,44 @@ function provider(
   } as unknown as Peer;
 }
 
+// Only the peer object scope Roster reaches is modelled.
+function optionValues() {
+  const values = new Map<string, string>();
+  const listeners = new Map<string, Set<(value: string | undefined) => unknown>>();
+
+  function publish(peerId: string): void {
+    for (const listener of listeners.get(peerId) ?? []) listener(values.get(peerId));
+  }
+
+  return {
+    values,
+    options: {
+      cat: () => ({
+        obj: (peerId: string) => ({
+          get: () => values.get(peerId),
+          set: async (_name: string, value: string) => {
+            values.set(peerId, value);
+            publish(peerId);
+          },
+          unset: async () => {
+            values.delete(peerId);
+            publish(peerId);
+          },
+          observe: (_name: string, listener: (value: string | undefined) => unknown) => {
+            let observers = listeners.get(peerId);
+            if (observers === undefined) {
+              observers = new Set();
+              listeners.set(peerId, observers);
+            }
+            observers.add(listener);
+            return () => observers?.delete(listener);
+          },
+        }),
+      }),
+    } as unknown as Options,
+  };
+}
+
 function persistentValues(
   initial: readonly (readonly [string, unknown])[] = [],
 ) {
@@ -143,8 +238,10 @@ function testContext(
   const persistent = {
     service: vi.fn(() => ({ kv: vi.fn(() => identities) })),
   } as unknown as PersistentStorage;
+  const names = optionValues();
   const session = {
     network: vi.fn(() => network),
+    options: () => names.options,
     storage: (selection?: { readonly persistent?: boolean }) => {
       if (selection?.persistent === true) return persistent;
       throw new Error("Roster requested volatile Storage.");
@@ -154,6 +251,7 @@ function testContext(
   return {
     network,
     session,
+    names,
     identities,
     peerChanged(peer: Peer, type: "connected" | "disconnected" | "addresses" | "services") {
       updates.publish(type === "disconnected"
