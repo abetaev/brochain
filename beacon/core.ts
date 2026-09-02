@@ -55,9 +55,10 @@ function forwardUpgrade(port: number) {
       relay.destroy();
       socket.destroy();
     };
-    relay.once("error", disconnect);
+    // A destroyed socket can report more than once, so these stay attached.
+    relay.on("error", disconnect);
+    socket.on("error", disconnect);
     relay.once("close", disconnect);
-    socket.once("error", disconnect);
     socket.once("close", disconnect);
     relay.once("connect", () => {
       relay.write(requestLines(request));

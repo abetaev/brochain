@@ -21,8 +21,9 @@ The three project commands install or refresh dependencies automatically when ne
 - `npm run prod` validates and builds Vessel, then serves it with the production Beacon.
 - `npm run test` runs the complete project test suite: the lower-level tests
   first, then the browser workflows, which start their own servers on dedicated
-  ports. Each set reports its coverage separately, under `coverage/unit` and
-  `coverage/workflows`.
+  ports and are given a synthetic camera and microphone so a call can be placed
+  without one. Each set reports its coverage separately, under `coverage/unit`
+  and `coverage/workflows`.
 
 another device
 --------------

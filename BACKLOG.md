@@ -11,42 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-peer to peer calls
-------------------
-
-type: feature
-scope: network services, frontend services, views, application
-
-Add one to one audio and video calls between two connected peers.
-
-Media cannot travel over the connection a peer already has: the libp2p WebRTC
-transport owns its peer connection, exposes neither it nor a way to renegotiate
-it, and carries data channels alone. A call therefore establishes a second peer
-connection and signals it over the connection which already exists.
-
-- A `calling` Network Service carries that signalling: session descriptions,
-  address candidates, and ending a call. It is published per peer like every
-  other service, so refusing it in Peer refuses calls with that peer.
-- A `call` Frontend Service owns the media. It captures local audio and video,
-  holds the peer connection, and keeps the call for the Session. It is
-  constructed at sign-in beside Roster and Chat, so a call reaches a reader
-  whatever they are looking at.
-- A `Call` view shows local and remote video and offers muting, stopping the
-  camera, and hanging up. Leaving the view MUST NOT end the call, and the
-  application MUST show that a call is running while another view is open.
-- Chat offers a call beside sending text and files, enabled only while that peer
-  publishes the service.
-- An incoming call MUST be accepted before capture begins: a reader consents to
-  their camera and microphone rather than having them taken.
-- A call which cannot establish a media path MUST report that plainly rather
-  than appearing to connect.
-
-One call at a time is enough. A call belongs to the peer it is with, so no call
-identifier is needed until several may run at once.
-
-Calls reach only a local network until the address discovery and relay tasks
-land.
-
 message confirmations
 ---------------------
 
@@ -63,6 +27,57 @@ subscriber failures. When Chat renders a received message, the recipient sends
 a separate read confirmation for that message ID. Failed read confirmations
 remain queued in transient Session state and retry when the peer reconnects
 during that Session; confirmations are not persisted for offline delivery.
+
+UI refinement
+-------------
+
+type: usability
+scope: frontend views
+state: draft
+
+in order to provide pleasant experience Vessel's views should look good and intuitive.
+currently Vessel's views are just pile of elements bound together.
+
+consistency should be provided with general layout and reusable components:
+- layout should be defined in main.tsx
+
+  possibly there will be multiple layouts in future, but for now it should be simple:
+  - navbar
+  - taskbar (always on top)
+  - toolbar
+  - view
+
+  responsiveness:
+  - general layout: toolbar on the top below status bar
+  - small screen devices: toolbar at the bottom
+
+
+  toolbar provides tool buttons for current view:
+  - home view: lock account, app settings (not yet implemented)
+  - chat view: peer view, start call
+  - peer view: peer settings, start call, back to home
+  - peer settings views: back to previous view
+  - call view: back to previous view
+
+  taskbar show whether there is ongoing call and information about unread messages from peers.
+  clicking on call should open call view.
+  
+
+- components should have their own directory in frontend (vessel/frontend/components)
+
+  TODO(refinement): need to determine reusable components
+
+TODO(refinement): provide mockups
+
+no need in any additional information on home (like Brochain: private communication network) - keep it minimal, only functional data
+
+peer auto-connect
+-----------------
+
+type: feature
+scope: frontend service
+
+implement frontend service that connects to peers which are marked for automatic connection whenever they are discovered. auto connection should be configured on peer view, off by default.
 
 secrecy
 -------
@@ -94,27 +109,32 @@ explicit Session shutdown and execution-context termination. Refine whether a
 SharedWorker, Web Locks, or another browser-wide coordination mechanism owns
 the lock before implementation.
 
-standalone Beacon process
--------------------------
+workflow Beacon process
+-----------------------
 
 type: infrastructure
-scope: beacon, project commands, tests
+scope: tests, coverage
 
-`beacon/main.ts` runs a server which hosts Vessel, provides the relay, or does
-either alone, but development uses none of it. The Vite configuration imports the
-Beacon plugin, so the configuration loader bundles `beacon/core.ts` and the whole
-of `common/backend/network` into one temporary module whose scripts carry no
-attributable file names. Nothing can measure what Beacon exercises, and no
-workflow can stop or restart one.
+`beacon/main.ts` already runs a Beacon of its own, and `VESSEL_HOSTING=off` leaves
+one which only relays. Workflows use none of it: both their servers are Vite, so
+the Beacon they exercise is the one the Vite plugin creates. Vite bundles its
+configuration, so `beacon/core.ts` and the whole of `common/backend/network` reach
+that bundle as scripts carrying no attributable file names. Nothing measures what
+Beacon exercises, and no workflow can stop or start one.
 
-Run the workflows' Beacon as a process of its own:
+Give the workflows a Beacon of their own:
 
-- Workflows start `beacon/main.ts` with `VESSEL_HOSTING=off`, so the Beacon they
-  exercise is the one a deployment would run.
+- The alternative Beacon in `workflows/beacon.test.ts` becomes `beacon/main.ts`
+  with `VESSEL_HOSTING=off`, rather than the Vessel host which also relays, so a
+  workflow meets the Beacon a deployment would run. Workflows then start three
+  servers: a Vessel host with a Beacon, one without, and the Beacon process.
 - A workflow MAY then stop and restart it, which reconnection behaviour needs.
-- Collect the process coverage through `NODE_V8_COVERAGE` and merge it into the
-  workflow report. Node strips types in place, so recorded lines already match the
-  source and no source map is required.
+- Collect its coverage through `NODE_V8_COVERAGE` and merge it into the workflow
+  report. Node strips types in place, so recorded lines already match the source
+  and no source map is required.
+
+The Vite plugin stays either way, because `npm run dev` serves Vessel and its
+Beacon from one origin. Only the Beacon the workflows measure changes.
 
 account service coverage
 ------------------------
@@ -172,6 +192,9 @@ inside one network and nowhere beyond it. Configure address discovery servers so
 a peer learns the address it presents to the outside and can offer it as a
 candidate. Refine where those servers are configured, whether Beacon advertises
 its own, and what a reader is told when discovery fails, before implementation.
+
+ - beacon should implement STUN server with kill-switch that allows to turn it off
+ - in global settings view there should be a list of stun servers that are used to traverse NAT
 
 call relay
 ----------

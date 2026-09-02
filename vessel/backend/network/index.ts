@@ -12,6 +12,10 @@ import createCommonNetwork, {
   type Peer,
 } from "@c/backend/network";
 import {
+  callingServiceName,
+  createCalling,
+} from "@v/backend/network/services/calling";
+import {
   createDataTransfer,
   dataTransferServiceName,
 } from "@v/backend/network/services/data-transfer";
@@ -52,6 +56,7 @@ export async function createNetwork(
     [identityServiceName]: () => createIdentity(username),
     [messagingServiceName]: () => createMessaging(),
     [dataTransferServiceName]: (peer) => createDataTransfer(peer),
+    [callingServiceName]: () => createCalling(),
   };
   const common = await createCommonNetwork({
     privateKey,
