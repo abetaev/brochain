@@ -1,13 +1,16 @@
 import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
+import type { Call } from "@v/frontend/services/call";
 import type { Chat as ChatService, ChatFile, ChatItem } from "@v/frontend/services/chat";
 import type { Roster } from "@v/frontend/services/roster";
 
 export function Chat(props: {
   chat: ChatService;
+  call: Call;
   roster: Roster;
   peerId: string;
   onOpenPeer(): void;
+  onOpenCall(): void;
   onBack(): void;
 }) {
   const [items, setItems] = createSignal(props.chat.history(props.peerId));
@@ -20,6 +23,10 @@ export function Chat(props: {
   const capabilities = () => {
     const peer = connectedPeer();
     return peer === undefined ? undefined : props.chat.capabilities(peer);
+  };
+  const callable = () => {
+    const peer = connectedPeer();
+    return peer !== undefined && props.call.available(peer);
   };
   const name = () => entry()?.name ?? props.peerId;
 
@@ -64,6 +71,19 @@ export function Chat(props: {
         String(new FormData(form).get("message") ?? ""),
       );
       form.reset();
+    });
+  }
+
+  function startCall(): void {
+    attemptSend(() => {
+      const current = connectedPeer();
+      if (current === undefined || !callable()) {
+        throw new Error("Calls are not available.");
+      }
+      // Navigating disposes this view, and with it every prop it could still read,
+      // so the call is placed before the reader is taken to it.
+      void props.call.start(current);
+      props.onOpenCall();
     });
   }
 
@@ -147,6 +167,7 @@ export function Chat(props: {
           onChange={sendFile}
         />
       </label>
+      <button type="button" disabled={!callable()} onClick={startCall}>Call</button>
     </section>
   );
 }

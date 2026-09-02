@@ -31,11 +31,12 @@ Vessel
 │       │   └── persistent root
 │       └── Network
 │           ├── Common Network
-│           └── Identity, Messaging, and DataTransfer factories
+│           └── Identity, Messaging, DataTransfer, and Calling factories
 └── Frontend
     ├── Roster
     ├── Chat
-    └── Account, Home, and Chat views
+    ├── Call
+    └── Account, Home, Chat, Peer, and Call views
 
 Beacon
 └── Common Network
@@ -212,7 +213,7 @@ Vessel backend
 - **dependencies**: the Session identity and account name, Options, browser
   networking, and Common Network
 - **structure**: one Common Network supplied with the fixed Identity, Messaging,
-  and DataTransfer factories
+  DataTransfer, and Calling factories
 - **use cases**: everything Common Network provides, plus connect by address
 - **behavior**: Vessel adds one thing to the Common Network — the account's
   Options decide which services each peer may reach. They are read when a peer
@@ -245,6 +246,20 @@ Vessel backend
   receiver MUST claim that offer during the synchronous publication. Accepted
   content travels on the Stream, which owns identity, size, progress, and
   completion. Content which was never offered is refused.
+
+##### Calling
+
+- **dependencies**: Signals
+- **structure**: `remote.invite`, `remote.accept`, `remote.candidate`,
+  `remote.end`, and an `events` Channel of those signals
+- **use cases**: invite a peer to a call, accept one, offer an address candidate,
+  and report an ending
+- **behavior**: media cannot travel over the connection a peer already has,
+  because the WebRTC transport owns that peer connection, exposes no way to
+  renegotiate it, and carries data channels alone. Calling therefore carries what
+  a second peer connection needs, and holds no call state itself. Each signal is
+  validated before publication, and an ending is one of a closed set so the words
+  a reader sees are never a peer's.
 
 Vessel frontend
 ---------------
@@ -296,6 +311,23 @@ Vessel frontend
   files stream into Chat's file store and an offer without a declared size is
   refused. Conversation state survives view navigation and lasts for the Session.
 
+### Call
+
+- **dependencies**: Network, Signals, browser media capture, and browser peer
+  connections
+- **structure**: one current call, its peer connection and captured media, and a
+  Channel publishing the call
+- **use cases**: report whether a peer can be called; place, accept, decline, and
+  end a call; mute the microphone and stop the camera; dismiss a finished call
+- **behavior**: Call owns one call at a time and keeps it for the Session, so
+  navigation cannot end it. Capture begins only once a reader accepts, and a
+  second invitation arriving during a call is refused as busy. No address server
+  is configured, so a call reaches only a local network. Candidates arriving
+  before their description exists are held and applied with it. Muting and
+  stopping the camera disable tracks rather than renegotiate. A reader's own hang
+  up simply clears the call; what the far side or a failing media path did is
+  reported and stays until dismissed.
+
 ### Account view
 
 - **dependencies**: Account
@@ -336,13 +368,25 @@ Vessel frontend
   remove one keyed row, Peer catalogs provide Chat capabilities, and Chat updates
   maintain unread presentation.
 
+### Call view
+
+- **dependencies**: Roster and Call
+
+- **structure**: one call signal, one Roster-entry signal, both video elements,
+  and the call controls
+- **use cases**: watch a call; accept or decline an incoming one; mute, stop the
+  camera, and hang up
+- **behavior**: streams are attached from an effect, so a reader returning to a
+  running call sees it again. Leaving keeps a running call and acknowledges a
+  finished one, and hanging up returns to the conversation.
+
 ### Chat view
 
-- **dependencies**: Roster and Chat
+- **dependencies**: Roster, Chat, and Call
 - **structure**: one Roster-entry signal, Chat-history projection, text and file
   controls, and file downloads
 - **use cases**: return Home; open Peer; read a conversation; send text or files;
-  download received files
+  download received files; place a call
 - **behavior**: the view initializes from Roster and Chat snapshots, applies
   updates for its peer, derives capabilities from its current Peer catalog, and
   marks existing and new received items read. It retains only interaction errors

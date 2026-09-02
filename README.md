@@ -23,10 +23,17 @@ using brochain
 4. **Talk.** Select **Chat**, enter text, and select **Send message**. Use **Send
    a file** where file sharing is available for that peer; progress and failures
    appear in the conversation. Both people must be connected to send.
-5. **Read.** Home marks conversations holding unread items, and opening one
+5. **Call.** Select **Call** in a conversation to place an audio and video call,
+   available while that peer offers calls. An incoming call is announced wherever
+   you are, and your camera and microphone are only taken once you **Accept**.
+   The Call view shows both pictures and offers muting, stopping your camera, and
+   hanging up; leaving it keeps the call running and a banner offers it back. A
+   call reaches only a peer on the same local network for now, and says so plainly
+   when no media path can be established.
+6. **Read.** Home marks conversations holding unread items, and opening one
    clears its marker. Messages and received files stay available while you are
    signed in and disappear after sign-out or reload.
-6. **Configure.** Select **Settings** beside a peer, or from a conversation, to
+7. **Configure.** Select **Settings** beside a peer, or from a conversation, to
    see what they report about themselves, name them, and choose which services
    they may reach. A peer arrives named by whatever it reports; **Save name**
    replaces that with a name of your own, up to 64 characters, used everywhere it
@@ -35,5 +42,5 @@ using brochain
    share one, after which resetting leaves only their peer ID. Service changes
    apply at once, including while connected. Refusing the registry leaves them no
    way to learn what you support, which bars them entirely.
-7. **Sign out** to return to the account screen, where you can export an account
+8. **Sign out** to return to the account screen, where you can export an account
    or permanently delete it after confirming its password.

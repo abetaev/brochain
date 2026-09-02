@@ -31,6 +31,9 @@ export function createBeaconPlugin(port: number): Plugin {
         const protocol = request.headers["sec-websocket-protocol"];
         if (protocol === "vite-hmr" || protocol === "vite-ping") return;
         if (relay === undefined) {
+          // A socket this server answered is its responsibility until it closes,
+          // and a reset one must not reach the process as an unhandled error.
+          socket.on("error", () => socket.destroy());
           socket.end("HTTP/1.1 501 Not Implemented\r\n\r\n");
           return;
         }

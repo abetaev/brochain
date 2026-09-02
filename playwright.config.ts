@@ -28,6 +28,11 @@ export default defineConfig({
     browserName: "chromium",
     // Development serves a certificate it generated for itself.
     ignoreHTTPSErrors: true,
+    // A call needs a camera and a microphone, which the browser supplies
+    // synthetically and grants without a prompt.
+    launchOptions: {
+      args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+    },
     trace: "retain-on-failure",
   },
   webServer: [
