@@ -7,3 +7,4 @@ playwright-report/
 .i
 *.bkp
 *.dtmp
+.mcp.json
