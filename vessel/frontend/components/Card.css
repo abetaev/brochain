@@ -1,0 +1,9 @@
+.card {
+  padding: var(--brochain-spacing);
+  border-radius: var(--brochain-control-radius);
+  background: var(--brochain-surface);
+  display: flex;
+  flex-direction: column;
+  gap: var(--brochain-spacing);
+  margin: 0;
+}

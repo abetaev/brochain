@@ -15,7 +15,9 @@ async function connectDirectly(page: Page, address: string): Promise<void> {
   await page.getByRole("button", { name: "Connect directly" }).click();
 
   // The Beacon offers no conversation, so it is listed as a plain connected peer.
-  await expect(page.getByRole("listitem").filter({ hasText: "Connected" })).toBeVisible();
+  await expect(
+    page.getByRole("listitem").filter({ has: page.getByLabel("Connected", { exact: true }) }),
+  ).toBeVisible();
 }
 
 test("people whose Vessel host offers no Beacon reach another and meet there", async ({

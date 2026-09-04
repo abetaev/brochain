@@ -1,0 +1,51 @@
+:root {
+  color-scheme: light dark;
+
+  --brochain-control-size: 60px;
+  --brochain-control-size-compact: 44px;
+  --brochain-avatar-tag-size: 40px;
+  --brochain-appbar-height: 64px;
+  --brochain-control-radius: 4px;
+  --brochain-badge-size: 20px;
+  --brochain-list-bottom-padding: calc(var(--brochain-appbar-height) + 1rem);
+  --brochain-spacing: 1rem;
+
+  --brochain-color-primary: #8fa3e0;
+  --brochain-color-secondary: #d3d3d3;
+  /* Non-primary buttons need to read against list rows, which are Secondary.
+     Provisional until the palette pass. */
+  --brochain-color-control: #b8b8b8;
+  --brochain-color-confirmation: #91e383;
+  --brochain-color-rejection: #e38383;
+  --brochain-color-surface: #b1b2b5;
+  --brochain-color-on-surface: #1a1a1a;
+  --brochain-color-border: #a0a0a5;
+  --brochain-color-avatar: #9b8fe0;
+  --brochain-color-peer-a: #6b8fe0;
+  --brochain-color-peer-a-background: #e7ecfa;
+  --brochain-color-peer-b: #e0a05f;
+  --brochain-color-peer-b-background: #faeee1;
+
+  --brochain-background: #ffffff;
+  --brochain-surface: var(--brochain-color-surface);
+  --brochain-text: var(--brochain-color-on-surface);
+  --brochain-muted-text: #5a5a60;
+  --brochain-border: var(--brochain-color-border);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brochain-color-secondary: #4a4a4e;
+    --brochain-color-control: #5c5c62;
+    --brochain-color-surface: #0f172a;
+    --brochain-color-on-surface: #f5f5f7;
+    --brochain-color-border: #33333a;
+    --brochain-color-avatar: #8a7acb;
+    --brochain-color-peer-a: #7c9ae8;
+    --brochain-color-peer-a-background: #232a42;
+    --brochain-color-peer-b-background: #3a2e20;
+
+    --brochain-background: #0a0d14;
+    --brochain-muted-text: #a3a3ab;
+  }
+}

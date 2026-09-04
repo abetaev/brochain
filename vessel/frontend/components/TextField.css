@@ -1,0 +1,47 @@
+/* No fill: the field takes on whatever surface it is placed on, and the
+   underline is what says the text can be edited. */
+.textfield {
+  position: relative;
+  min-height: var(--brochain-control-size);
+  display: flex;
+  align-items: center;
+}
+
+.textfield input {
+  width: 100%;
+  height: var(--brochain-control-size);
+  margin: 0;
+  padding: 1.1rem 0 0.3rem;
+  border: none;
+  border-bottom: 1px solid var(--brochain-color-on-surface);
+  border-radius: 0;
+  background: transparent;
+  color: var(--brochain-color-on-surface);
+  font: inherit;
+}
+
+.textfield input:focus {
+  outline: none;
+  border-bottom-color: var(--brochain-color-primary);
+}
+
+.textfield input:disabled {
+  opacity: 0.5;
+}
+
+.textfield label {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--brochain-muted-text);
+  pointer-events: none;
+  transition: top 0.15s ease, font-size 0.15s ease, transform 0.15s ease;
+}
+
+.textfield input:focus + label,
+.textfield input:not(:placeholder-shown) + label {
+  top: 0.6rem;
+  transform: translateY(0);
+  font-size: 0.75rem;
+}

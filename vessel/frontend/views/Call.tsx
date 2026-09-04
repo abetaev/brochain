@@ -1,4 +1,9 @@
-import { Show, createEffect, createSignal, onCleanup } from "solid-js";
+import { Show, createSignal, onCleanup } from "solid-js";
+import { AppBar } from "@v/frontend/components/AppBar";
+import { Avatar } from "@v/frontend/components/Avatar";
+import { Button } from "@v/frontend/components/Button";
+import { ButtonGroup } from "@v/frontend/components/ButtonGroup";
+import { Conference } from "@v/frontend/components/Conference";
 import type { Call as CallService, CallState } from "@v/frontend/services/call";
 import type { Roster } from "@v/frontend/services/roster";
 
@@ -34,93 +39,85 @@ export function Call(props: {
     props.onBack();
   }
 
+  function hangUp(): void {
+    props.call.end();
+    props.onBack();
+  }
+
   return (
-    <section aria-labelledby="call-heading">
-      <header>
-        <button class="secondary" type="button" onClick={leave}>Back</button>
+    <div class="view">
+      <AppBar position="top">
+        <Avatar seed={props.peerId} name={name()} />
         <h2 id="call-heading">Call with {name()}</h2>
-      </header>
-
-      <Show when={call()} fallback={<p>This call is over.</p>}>
-        {(current) => (
-          <>
-            <p>{statusMessage(current(), name())}</p>
-            <Show when={current().error}>
-              {(message) => <p role="alert">{message()}</p>}
-            </Show>
-
-            <Stream stream={current().remote} label="Remote video" />
-            <Stream stream={current().local} label="Your video" muted />
-
-            <Show when={current().status !== "ended"}>
-              <Show
-                when={current().direction === "incoming" && current().status === "pending"}
-                fallback={
-                  <>
-                    <button
-                      type="button"
-                      class="secondary"
-                      onClick={() => props.call.setMicrophone(!current().microphone)}
+      </AppBar>
+      <main class="view-content">
+        <Show when={call()} fallback={<p>This call is over.</p>}>
+          {(current) => (
+            <>
+              <p>{statusMessage(current(), name())}</p>
+              <Show when={current().error}>
+                {(message) => <p role="alert">{message()}</p>}
+              </Show>
+              <Conference remote={current().remote} local={current().local} />
+            </>
+          )}
+        </Show>
+      </main>
+      <AppBar position="bottom">
+        <Button icon="👈" label="Back" variant="secondary" onClick={leave} />
+        <span class="appbar-end">
+          <Show when={call()}>
+            {(current) => (
+              <Show when={current().status !== "ended"}>
+                <Show
+                  when={current().direction === "incoming" && current().status === "pending"}
+                  fallback={
+                    <Show
+                      when={current().direction === "outgoing" && current().status === "pending"}
+                      fallback={
+                        <ButtonGroup>
+                          <Button
+                            icon="🎤"
+                            label={current().microphone ? "Mute microphone" : "Unmute microphone"}
+                            variant="secondary"
+                            onClick={() => props.call.setMicrophone(!current().microphone)}
+                          />
+                          <Button
+                            icon="📷"
+                            label={current().camera ? "Stop camera" : "Start camera"}
+                            variant="secondary"
+                            onClick={() => props.call.setCamera(!current().camera)}
+                          />
+                          <Button icon="🖕" label="Hang up" variant="rejection" onClick={hangUp} />
+                        </ButtonGroup>
+                      }
                     >
-                      {current().microphone ? "Mute microphone" : "Unmute microphone"}
-                    </button>{" "}
-                    <button
-                      type="button"
-                      class="secondary"
-                      onClick={() => props.call.setCamera(!current().camera)}
-                    >
-                      {current().camera ? "Stop camera" : "Start camera"}
-                    </button>{" "}
-                    <button
-                      type="button"
+                      <ButtonGroup>
+                        <Button icon="🤙" label="Ringing…" variant="secondary" disabled />
+                        <Button icon="🖕" label="Cancel call" variant="rejection" onClick={hangUp} />
+                      </ButtonGroup>
+                    </Show>
+                  }
+                >
+                  <ButtonGroup>
+                    <Button icon="👍" label="Accept" variant="confirmation" onClick={() => void props.call.accept()} />
+                    <Button
+                      icon="🖕"
+                      label="Decline"
+                      variant="rejection"
                       onClick={() => {
-                        props.call.end();
+                        props.call.decline();
                         props.onBack();
                       }}
-                    >
-                      Hang up
-                    </button>
-                  </>
-                }
-              >
-                <button type="button" onClick={() => void props.call.accept()}>Accept</button>
-                {" "}
-                <button
-                  type="button"
-                  class="secondary"
-                  onClick={() => {
-                    props.call.decline();
-                    props.onBack();
-                  }}
-                >
-                  Decline
-                </button>
+                    />
+                  </ButtonGroup>
+                </Show>
               </Show>
-            </Show>
-          </>
-        )}
-      </Show>
-    </section>
-  );
-}
-
-// The element is recreated whenever this view is opened, so the stream is
-// attached from an effect and a reader returning mid-call sees the picture again.
-function Stream(props: { stream?: MediaStream; label: string; muted?: boolean }) {
-  let element: HTMLVideoElement | undefined;
-
-  createEffect(() => {
-    if (element !== undefined) element.srcObject = props.stream ?? null;
-  });
-
-  return (
-    <video
-      ref={element}
-      aria-label={props.label}
-      autoplay
-      playsinline
-      muted={props.muted === true}
-    />
+            )}
+          </Show>
+        </span>
+      </AppBar>
+    </div>
   );
 }
 

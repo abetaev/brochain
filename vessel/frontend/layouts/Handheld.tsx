@@ -1,0 +1,33 @@
+import { Show, type JSX } from "solid-js";
+import { Dynamic } from "solid-js/web";
+import { ActionBar, type Action } from "@v/frontend/components/ActionBar";
+import { StatusBar, type Notification } from "@v/frontend/components/StatusBar";
+import "./Handheld.css";
+
+// The vertical phone layout: a StatusBar naming the view, bottom-aligned content,
+// and an ActionBar generated from the view's actions. A view supplies what goes in
+// each region and never lays the regions out itself.
+export function Handheld(props: {
+  icon?: string;
+  title: string;
+  notifications?: readonly Notification[];
+  actions?: readonly Action[];
+  // When given, the content and the ActionBar share one form, so an action in the
+  // bar can submit a field in the content — or in the bar itself, as Sign In does.
+  onSubmit?: (event: SubmitEvent & { currentTarget: HTMLFormElement }) => void;
+  children: JSX.Element;
+}) {
+  return (
+    <div class="handheld">
+      <StatusBar icon={props.icon} title={props.title} notifications={props.notifications} />
+      <Dynamic
+        component={props.onSubmit === undefined ? "div" : "form"}
+        class="handheld-body"
+        onSubmit={props.onSubmit}
+      >
+        <main class="handheld-content">{props.children}</main>
+        <Show when={props.actions}>{(actions) => <ActionBar actions={actions()} />}</Show>
+      </Dynamic>
+    </div>
+  );
+}

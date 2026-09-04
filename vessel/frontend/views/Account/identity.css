@@ -1,0 +1,17 @@
+/* The account being signed into or deleted, shown centred in the content area
+   as the mockup places it — the flex:1 lets it centre inside the otherwise
+   bottom-aligned content. */
+.identity {
+  flex: 1;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.identity figcaption {
+  font-size: 1.25rem;
+  font-weight: bold;
+}

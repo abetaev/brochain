@@ -1,0 +1,45 @@
+.statusbar {
+  flex: 0 0 auto;
+  height: var(--brochain-appbar-height);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 12px;
+  background: var(--brochain-surface);
+}
+
+.statusbar-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.statusbar-title {
+  margin: 0;
+  font-size: 1.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Notifications sit at the end and scroll sideways once there are more of them
+   than fit, rather than squeezing the view's name. */
+.statusbar-notifications {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.statusbar-notifications::-webkit-scrollbar {
+  display: none;
+}
+
+.statusbar-notifications > li {
+  flex: 0 0 auto;
+}

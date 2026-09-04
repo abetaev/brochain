@@ -3,7 +3,7 @@ import {
   connectToPeer,
   expect,
   password,
-  peerOffering,
+  peerNamed,
   signOut,
   test,
 } from "./vessel.ts";
@@ -13,15 +13,15 @@ test("two people meet through the Beacon, talk, and leave", async ({ openVessel 
   const bob = await openVessel("bob");
 
   await connectToPeer(alice, "bob");
-  await alice.getByLabel("Message").fill("hello from alice");
+  await alice.getByLabel("Message", { exact: true }).fill("hello from alice");
   await alice.getByRole("button", { name: "Send message" }).click();
   await expect(alice.getByText("hello from alice")).toBeVisible();
 
-  await peerOffering(bob, "Chat").getByRole("button", { name: "Chat" }).click();
+  await peerNamed(bob, "alice").getByRole("button", { name: "alice", exact: true }).click();
   await expect(bob.getByRole("heading", { name: "Chat with alice" })).toBeVisible();
   await expect(bob.getByText("hello from alice")).toBeVisible();
 
-  await bob.getByLabel("Message").fill("hello from bob");
+  await bob.getByLabel("Message", { exact: true }).fill("hello from bob");
   await bob.getByRole("button", { name: "Send message" }).click();
   await expect(alice.getByText("hello from bob")).toBeVisible();
 
@@ -35,8 +35,8 @@ test("two people meet through the Beacon, talk, and leave", async ({ openVessel 
     .toMatchObject({ username: "bob" });
 
   await signOut(alice);
-  await alice.locator("summary").filter({ hasText: "Delete" }).click();
+  await alice.getByRole("button", { name: "Delete account" }).click();
   await alice.getByLabel("Password").fill(password);
   await alice.getByRole("button", { name: "Delete account" }).click();
-  await expect(alice.getByRole("heading", { name: "Create an account" })).toBeVisible();
+  await expect(alice.getByRole("heading", { name: "Sign Up" })).toBeVisible();
 });

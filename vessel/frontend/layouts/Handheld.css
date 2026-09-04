@@ -1,0 +1,27 @@
+.handheld {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.handheld-body {
+  display: contents;
+}
+
+.handheld-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--brochain-spacing);
+  padding: var(--brochain-spacing);
+}
+
+/* Content sits at the bottom of the visible area, within finger reach. Pushing
+   the first child down rather than using justify-content keeps overflowing
+   content scrollable — justify-content: flex-end clips its top instead. */
+.handheld-content > :first-child {
+  margin-block-start: auto;
+}

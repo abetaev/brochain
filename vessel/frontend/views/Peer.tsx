@@ -11,12 +11,26 @@ import {
 } from "@v/backend/options/peer-names";
 import { identityServiceName } from "@v/backend/network/services/identity";
 import type { Session } from "@v/backend/session";
+import { AppBar } from "@v/frontend/components/AppBar";
+import { Avatar } from "@v/frontend/components/Avatar";
+import { Button } from "@v/frontend/components/Button";
+import { ButtonGroup } from "@v/frontend/components/ButtonGroup";
+import { Card } from "@v/frontend/components/Card";
+import { EditableLabel } from "@v/frontend/components/EditableLabel";
+import { Badge } from "@v/frontend/components/Badge";
+import { Toggle } from "@v/frontend/components/Toggle";
+import type { Call as CallService, CallState } from "@v/frontend/services/call";
+import type { Chat } from "@v/frontend/services/chat";
 import type { Roster } from "@v/frontend/services/roster";
 
 export function Peer(props: {
   session: Session;
   roster: Roster;
+  chat: Chat;
+  call: CallService;
   peerId: string;
+  onOpenChat(peerId: string): void;
+  onOpenCall(): void;
   onBack(): void;
 }) {
   const options = props.session.options();
@@ -27,6 +41,14 @@ export function Peer(props: {
     new Map(services.map((name) => [name, isServiceEnabled(options, props.peerId, name)])),
   );
   const [chosen, setChosen] = createSignal(displayName(options, props.peerId));
+  const [callState, setCallState] = createSignal<CallState | undefined>(props.call.current());
+  const [hasUnread, setHasUnread] = createSignal(computeUnread());
+
+  function computeUnread(): boolean {
+    const received = props.chat.history(props.peerId)
+      .filter((item) => item.direction === "received").length;
+    return received > props.chat.readCount(props.peerId);
+  }
 
   const stops = [
     props.roster.updates.subscribe((update) => {
@@ -42,6 +64,13 @@ export function Peer(props: {
         setPublished((current) => new Map(current).set(name, enabled));
       })
     ),
+    props.call.updates.subscribe((next) => setCallState(next)),
+    props.chat.updates.subscribe((item) => {
+      if (item.peerId === props.peerId) setHasUnread(computeUnread());
+    }),
+    props.chat.reads.subscribe(({ peerId }) => {
+      if (peerId === props.peerId) setHasUnread(computeUnread());
+    }),
   ];
   onCleanup(() => stops.forEach((stop) => stop()));
 
@@ -51,6 +80,19 @@ export function Peer(props: {
   const reports = () => {
     const peer = entry()?.peer;
     return peer?.isConnected() === true && peer.services().includes(identityServiceName);
+  };
+  const incomingCall = () => {
+    const current = callState();
+    return current?.peerId === props.peerId && current.status === "pending" &&
+      current.direction === "incoming";
+  };
+  const connectedPeer = () => {
+    const peer = entry()?.peer;
+    return peer?.isConnected() === true ? peer : undefined;
+  };
+  const callable = () => {
+    const peer = connectedPeer();
+    return peer !== undefined && props.call.available(peer);
   };
 
   async function attempt(operation: () => Promise<void>): Promise<void> {
@@ -62,118 +104,133 @@ export function Peer(props: {
     }
   }
 
+  function startCall(): void {
+    const current = connectedPeer();
+    if (current === undefined || !callable()) {
+      setError("Calls are not available.");
+      return;
+    }
+    void props.call.start(current);
+    props.onOpenCall();
+  }
+
   // The observed option drives the control, so a refused write puts it back.
-  async function publish(
-    serviceName: string,
-    enabled: boolean,
-    control: HTMLInputElement,
-  ): Promise<void> {
+  async function publish(serviceName: string, enabled: boolean): Promise<void> {
     await attempt(async () => {
       try {
         await setServiceEnabled(options, props.peerId, serviceName, enabled);
       } catch (reason) {
-        control.checked = !enabled;
+        setPublished((current) => new Map(current).set(serviceName, !enabled));
         throw reason;
       }
     });
   }
 
-  async function saveName(
-    event: SubmitEvent & { currentTarget: HTMLFormElement },
-  ): Promise<void> {
-    event.preventDefault();
-    const entered = String(new FormData(event.currentTarget).get("display-name") ?? "");
-    await attempt(async () => await setDisplayName(options, props.peerId, entered));
-  }
-
   return (
-    <section aria-labelledby="peer-heading">
-      <header>
-        <button class="secondary" type="button" onClick={props.onBack}>Back</button>
+    <div class="view">
+      <AppBar position="top">
+        <Avatar seed={props.peerId} name={name()} />
         <h2 id="peer-heading">Peer {name()}</h2>
-      </header>
-      <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
+        <span class="appbar-end">
+          <Avatar
+            seed={props.session.username}
+            name={props.session.username}
+            badges={
+              <>
+                <Show when={incomingCall()}><Badge variant="call" mode="incoming" /></Show>
+                <Show when={hasUnread()}><Badge variant="unread" /></Show>
+              </>
+            }
+            onClick={() => props.onOpenChat(props.peerId)}
+            label="Open chat"
+          />
+        </span>
+      </AppBar>
+      <main class="view-content">
+        <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
 
-      <dl>
-        <dt>Peer ID</dt>
-        <dd>{props.peerId}</dd>
-        <dt>Reported name</dt>
-        <dd>{entry()?.identity?.name ?? "Not yet identified"}</dd>
-        <dt>Availability</dt>
-        <dd>{entry()?.online === true ? "Connected" : "Not connected"}</dd>
-        <dt>Addresses</dt>
-        <dd>
-          <Show when={entry()?.addresses.length} fallback="None known">
-            <ul>
-              <For each={entry()?.addresses}>{(address) => <li>{address}</li>}</For>
-            </ul>
-          </Show>
-        </dd>
-      </dl>
-
-      <section aria-labelledby="name-heading">
-        <h3 id="name-heading">Name</h3>
-        <form onSubmit={saveName}>
-          <label for="display-name">
-            Name for this peer
-            <input
-              id="display-name"
-              name="display-name"
-              maxlength="64"
-              required
-              value={chosen() ?? ""}
-            />
-          </label>
-          <button type="submit">Save name</button>
-        </form>
-        <Show when={chosen() !== undefined}>
-          <button
-            class="secondary"
-            type="button"
-            onClick={() =>
-              void attempt(async () => await props.roster.resetDisplayName(props.peerId))}
-          >
-            Reset name
-          </button>{" "}
-        </Show>
-        <Show when={reports() || entry()?.identity !== undefined}>
-          <button
-            class="secondary"
-            type="button"
-            onClick={() => void attempt(async () =>
-              reports()
-                ? await props.roster.refreshIdentity(props.peerId)
-                : await props.roster.clearIdentity(props.peerId))}
-          >
-            {reports() ? "Refresh identity" : "Clear identity"}
-          </button>
-        </Show>
-      </section>
-
-      <section aria-labelledby="services-heading">
-        <h3 id="services-heading">Services</h3>
-        <p>
-          Refused services are withheld from this peer. Refusing the registry leaves
-          it no way to learn what is supported, which bars it entirely.
-        </p>
-        <fieldset>
+        <section aria-labelledby="services-heading">
+          <h3 id="services-heading">Services</h3>
+          <p>
+            Refused services are withheld from this peer. Refusing the registry leaves
+            it no way to learn what is supported, which bars it entirely.
+          </p>
           <For each={services}>
             {(serviceName) => (
-              <label>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={published().get(serviceName) !== false}
-                  onChange={(event) =>
-                    void publish(serviceName, event.currentTarget.checked, event.currentTarget)}
-                />
-                {serviceName}
-              </label>
+              <Toggle
+                id={`service-${serviceName}`}
+                label={serviceName}
+                checked={published().get(serviceName) !== false}
+                onChange={(checked) => void publish(serviceName, checked)}
+              />
             )}
           </For>
-        </fieldset>
-      </section>
-    </section>
+          <Toggle id="service-auto-connect" label="Auto Connect" checked={false} disabled hint="Coming soon" />
+        </section>
+
+        <Card>
+          <dl class="peer-facts">
+            <dt>Peer ID</dt>
+            <dd>{props.peerId}</dd>
+            <dt>Reported name</dt>
+            <dd>{entry()?.identity?.name ?? "Not yet identified"}</dd>
+            <dt>Availability</dt>
+            <dd>{entry()?.online === true ? "Connected" : "Not connected"}</dd>
+            <dt>Addresses</dt>
+            <dd>
+              <Show when={entry()?.addresses.length} fallback="None known">
+                <ul>
+                  <For each={entry()?.addresses}>{(address) => <li>{address}</li>}</For>
+                </ul>
+              </Show>
+            </dd>
+          </dl>
+        </Card>
+
+        <figure class="identity-figure">
+          <Avatar seed={props.peerId} name={name()} size="lg" />
+          <figcaption>
+            <EditableLabel
+              value={chosen() ?? ""}
+              placeholder={name()}
+              inputLabel="Name for this peer"
+              onSave={(next) => void attempt(async () => await setDisplayName(options, props.peerId, next))}
+            />
+          </figcaption>
+          <Show when={chosen() !== undefined}>
+            <button
+              class="text-button"
+              type="button"
+              onClick={() =>
+                void attempt(async () => await props.roster.resetDisplayName(props.peerId))}
+            >
+              Reset name
+            </button>
+          </Show>
+          <Show when={reports() || entry()?.identity !== undefined}>
+            <button
+              class="text-button"
+              type="button"
+              onClick={() => void attempt(async () =>
+                reports()
+                  ? await props.roster.refreshIdentity(props.peerId)
+                  : await props.roster.clearIdentity(props.peerId))}
+            >
+              {reports() ? "Refresh identity" : "Clear identity"}
+            </button>
+          </Show>
+        </figure>
+      </main>
+      <AppBar position="bottom">
+        <Button icon="👈" label="Back" variant="secondary" onClick={props.onBack} />
+        <span class="appbar-end">
+          <ButtonGroup>
+            <Button icon="🤙" label="Call" variant="secondary" disabled={!callable()} onClick={startCall} />
+            <Button icon="🗨️" label="Chat" variant="secondary" onClick={() => props.onOpenChat(props.peerId)} />
+          </ButtonGroup>
+        </span>
+      </AppBar>
+    </div>
   );
 }
 

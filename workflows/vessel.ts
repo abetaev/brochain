@@ -35,7 +35,7 @@ export const test = base.extend<Fixtures>({
 export { expect };
 
 export async function createAccount(page: Page, username: string): Promise<void> {
-  await page.getByRole("heading", { name: "Create an account" }).waitFor();
+  await page.getByRole("heading", { name: "Sign Up" }).waitFor();
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Confirm password").fill(password);
@@ -45,7 +45,7 @@ export async function createAccount(page: Page, username: string): Promise<void>
 
 export async function unlock(page: Page, username: string): Promise<void> {
   await page.getByRole("listitem").filter({ hasText: username })
-    .getByRole("button", { name: "Use" }).click();
+    .getByRole("button", { name: username, exact: true }).click();
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Unlock account" }).click();
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
@@ -55,7 +55,7 @@ export async function signOut(page: Page): Promise<void> {
   const home = page.getByRole("button", { name: "Back to Home" });
   if (await home.isVisible()) await home.click();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByRole("heading", { name: "Choose an account" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Choose Account" })).toBeVisible();
 }
 
 // A peer is listed by its identified name once known, and by its peer ID until then,
@@ -64,7 +64,7 @@ export function peerNamed(page: Page, name: string) {
   return page.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
 }
 
-export function peerOffering(page: Page, action: "Connect" | "Chat") {
+export function peerOffering(page: Page, action: "Connect") {
   return page.getByRole("listitem")
     .filter({ has: page.getByRole("button", { name: action, exact: true }) });
 }

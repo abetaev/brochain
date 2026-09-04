@@ -1,8 +1,9 @@
-import "@picocss/pico/css/pico.min.css";
 import "./styles.css";
 import { Match, Show, Switch, createSignal, onCleanup } from "solid-js";
 import { render } from "solid-js/web";
 import type { Session } from "@v/backend/session";
+import { Avatar } from "@v/frontend/components/Avatar";
+import { Button } from "@v/frontend/components/Button";
 import type { Call as CallService, CallState } from "./services/call";
 import type { Chat as ChatService } from "./services/chat";
 import type { Roster } from "./services/roster";
@@ -68,14 +69,7 @@ function Vessel() {
   const call = at("call");
 
   return (
-    <main class="container">
-      <header>
-        <hgroup>
-          <h1>brochain</h1>
-          <p>Private peer-to-peer communication.</p>
-        </hgroup>
-      </header>
-
+    <div class="app-shell">
       {/* A call reaches a reader wherever they are, and outlives the view it started in. */}
       <Show when={location().view === "call" ? undefined : active()}>
         {(current) => (
@@ -142,7 +136,13 @@ function Vessel() {
             <Peer
               session={current().session}
               roster={current().roster}
+              chat={current().chat}
+              call={current().call}
               peerId={current().peerId}
+              onOpenChat={(peerId) =>
+                setLocation({ view: "chat", peerId, ...services(current()) })}
+              onOpenCall={() =>
+                setLocation({ view: "call", peerId: current().peerId, ...services(current()) })}
               onBack={() => setLocation({
                 ...services(current()),
                 ...(current().origin === "chat"
@@ -153,7 +153,7 @@ function Vessel() {
           )}
         </Match>
       </Switch>
-    </main>
+    </div>
   );
 }
 
@@ -178,40 +178,40 @@ function CallBanner(props: {
   return (
     <Show when={state()}>
       {(current) => (
-        <aside role="status">
+        <aside role="status" class="taskbar">
+          <Avatar seed={current().peerId} name={name(current().peerId)} size="sm" />
           <Switch>
             <Match when={current().status === "ended"}>
               <p>{current().error ?? "The call ended."}</p>
-              <button type="button" onClick={() => props.call.dismiss()}>Dismiss</button>
+              <Button icon="✖️" label="Dismiss" variant="secondary" onClick={() => props.call.dismiss()} />
             </Match>
             <Match when={current().status === "pending" && current().direction === "incoming"}>
               <p>{name(current().peerId)} is calling.</p>
-              <button
-                type="button"
+              <Button
+                icon="👍"
+                label="Accept call"
+                variant="confirmation"
                 onClick={() => {
                   const peerId = current().peerId;
                   void props.call.accept();
                   props.onOpen(peerId);
                 }}
-              >
-                Accept call
-              </button>{" "}
-              <button type="button" class="secondary" onClick={() => props.call.decline()}>
-                Decline call
-              </button>
+              />
+              <Button
+                icon="🖕"
+                label="Decline call"
+                variant="rejection"
+                onClick={() => props.call.decline()}
+              />
             </Match>
             <Match when={current().status === "pending"}>
               <p>Calling {name(current().peerId)}…</p>
-              <button type="button" onClick={() => props.call.end()}>Hang up</button>
+              <Button icon="🖕" label="Hang up" variant="rejection" onClick={() => props.call.end()} />
             </Match>
             <Match when={true}>
               <p>In a call with {name(current().peerId)}.</p>
-              <button type="button" onClick={() => props.onOpen(current().peerId)}>
-                Open call
-              </button>{" "}
-              <button type="button" class="secondary" onClick={() => props.call.end()}>
-                Hang up
-              </button>
+              <Button icon="📞" label="Open call" variant="primary" onClick={() => props.onOpen(current().peerId)} />
+              <Button icon="🖕" label="Hang up" variant="rejection" onClick={() => props.call.end()} />
             </Match>
           </Switch>
         </aside>

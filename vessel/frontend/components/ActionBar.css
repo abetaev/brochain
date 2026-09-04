@@ -1,0 +1,38 @@
+.actionbar {
+  flex: 0 0 auto;
+  height: var(--brochain-appbar-height);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 12px;
+  background: var(--brochain-surface);
+}
+
+.actionbar-end {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* A grouped run reads as one control: no gap between members, rounded only on
+   the outside. */
+.action-group {
+  display: flex;
+  gap: 0;
+}
+
+.action-group > .button {
+  border-radius: 0;
+}
+
+.action-group > .button:first-child {
+  border-start-start-radius: var(--brochain-control-radius);
+  border-end-start-radius: var(--brochain-control-radius);
+}
+
+.action-group > .button:last-child {
+  border-start-end-radius: var(--brochain-control-radius);
+  border-end-end-radius: var(--brochain-control-radius);
+}

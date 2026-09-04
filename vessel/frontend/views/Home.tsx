@@ -1,5 +1,14 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import type { Session } from "@v/backend/session";
+import { AppBar } from "@v/frontend/components/AppBar";
+import { Avatar } from "@v/frontend/components/Avatar";
+import { Button } from "@v/frontend/components/Button";
+import { ButtonGroup } from "@v/frontend/components/ButtonGroup";
+import { List } from "@v/frontend/components/List";
+import { ListItem } from "@v/frontend/components/ListItem";
+import { Badge } from "@v/frontend/components/Badge";
+import { TextField } from "@v/frontend/components/TextField";
+import { selfAccentColor } from "@v/frontend/components/colors";
 import type { Chat } from "@v/frontend/services/chat";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 
@@ -17,6 +26,7 @@ export function Home(props: {
   const [peers, setPeers] = createSignal(props.roster.list());
   const receivedByPeer = new Map<string, Set<string>>();
   const [unread, setUnread] = createSignal<ReadonlyMap<string, boolean>>(new Map());
+  let detailsElement: HTMLDetailsElement | undefined;
 
   function receivedIds(peerId: string): Set<string> {
     let ids = receivedByPeer.get(peerId);
@@ -116,37 +126,24 @@ export function Home(props: {
   void connectBeacon().catch(() => {});
 
   return (
-    <section aria-labelledby="home-heading">
-      <header>
-        <h2 id="home-heading">Home</h2>
-        <p>Signed in as {props.session.username}.</p>
-      </header>
-      <Show when={beaconError()}>
-        {(message) => <p role="alert">Peer networking is unavailable: {message()}</p>}
-      </Show>
-      <Show when={actionError()}>{(message) => <p role="alert">{message()}</p>}</Show>
+    <div class="view">
+      <AppBar position="top">
+        <Avatar seed={props.session.username} name={props.session.username} color={selfAccentColor} />
+        <h2 id="home-heading" class="sr-only">Home</h2>
+        <span>Brochain</span>
+      </AppBar>
+      <main class="view-content">
+        <Show when={beaconError()}>
+          {(message) => <p role="alert">Peer networking is unavailable: {message()}</p>}
+        </Show>
+        <Show when={actionError()}>{(message) => <p role="alert">{message()}</p>}</Show>
 
-      <button
-        class="secondary"
-        type="button"
-        disabled={unavailable()}
-        onClick={() => void performAction(async () => {
-          await connectBeacon();
-          await props.roster.refresh();
-        })}
-      >
-        Refresh peers
-      </button>
-
-      <section aria-labelledby="peers-heading">
-        <h3 id="peers-heading">Peers</h3>
         <Show when={peers().length > 0} fallback={<p>No peers are currently known.</p>}>
-          <ul>
+          <List>
             <For each={peers()}>
               {(peer) => (
                 <PeerRow
                   listed={peer}
-                  chat={props.chat}
                   unread={hasUnread(peer.peerId)}
                   busy={unavailable()}
                   onConnect={(selected) => void performAction(
@@ -157,97 +154,102 @@ export function Home(props: {
                 />
               )}
             </For>
-          </ul>
+          </List>
         </Show>
-      </section>
 
-      <details>
-        <summary>Connect directly</summary>
-        <form onSubmit={connectDirect}>
-          <label for="direct-address">
-            Peer address or URL
-            <input
+        <button
+          type="button"
+          class="text-button"
+          disabled={unavailable()}
+          onClick={() => void performAction(async () => {
+            await connectBeacon();
+            await props.roster.refresh();
+          })}
+        >
+          Refresh peers
+        </button>
+
+        <details class="panel" ref={detailsElement}>
+          <summary>Connect directly</summary>
+          <form onSubmit={connectDirect}>
+            <TextField
               id="direct-address"
               name="direct-address"
+              label="Peer address or URL"
               required
-              placeholder="https://example.com:9090 or /dns4/example.com/tcp/9090/ws"
             />
-          </label>
-          <button type="submit" disabled={unavailable()}>Connect directly</button>
-        </form>
-      </details>
-
-      <button
-        type="button"
-        class="secondary"
-        disabled={unavailable()}
-        onClick={() => void performAction(signOut)}
-      >
-        Sign out
-      </button>
-    </section>
+            <button type="submit" class="text-button primary" disabled={unavailable()}>
+              Connect directly
+            </button>
+          </form>
+        </details>
+      </main>
+      <AppBar position="bottom">
+        <Button icon="🖐️" label="Sign out" variant="secondary" disabled={unavailable()} onClick={() => void performAction(signOut)} />
+        <span class="appbar-end">
+          <ButtonGroup>
+            <Button icon="⚙️" label="Settings" variant="secondary" disabled />
+            <Button
+              icon="🔗"
+              label="Connect"
+              variant="secondary"
+              onClick={() => {
+                if (detailsElement !== undefined) detailsElement.open = true;
+                detailsElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }}
+            />
+          </ButtonGroup>
+        </span>
+      </AppBar>
+    </div>
   );
 }
 
 function PeerRow(props: {
   listed: RosterEntry;
-  chat: Chat;
   unread: boolean;
   busy: boolean;
   onConnect(peer: RosterEntry): void;
   onOpenChat(peerId: string): void;
   onOpenPeer(peerId: string): void;
 }) {
-  const capabilities = () => props.listed.peer === undefined
-    ? undefined
-    : props.chat.capabilities(props.listed.peer);
-
   return (
-    <li>
-      <span
-        classList={{ "connection-state": true, connected: props.listed.online }}
-        aria-label={props.listed.online ? "Connected" : "Not connected"}
-      />
-      <strong>{props.listed.name}</strong>{" "}
-      <Show when={props.unread}>
-        <span class="unread-state" aria-label="Unread messages" title="Unread messages">
-          ●
-        </span>{" "}
-      </Show>
-      <Show
-        when={props.listed.online}
-        fallback={
-          <Show
-            when={props.listed.addresses.length > 0}
-            fallback={<small>Not currently available</small>}
-          >
-            <button
-              type="button"
-              disabled={props.busy}
-              onClick={() => props.onConnect(props.listed)}
+    <ListItem
+      avatar={
+        <Avatar
+          seed={props.listed.peerId}
+          name={props.listed.name}
+          badges={<Show when={props.unread}><Badge variant="unread" /></Show>}
+          onClick={() => props.onOpenPeer(props.listed.peerId)}
+          label={`${props.listed.name} settings`}
+        />
+      }
+      label={props.listed.name}
+      onClick={() => props.onOpenChat(props.listed.peerId)}
+      actions={
+        <>
+          <span
+            classList={{ "connection-state": true, connected: props.listed.online }}
+            aria-label={props.listed.online ? "Connected" : "Not connected"}
+          />
+          <Show when={!props.listed.online}>
+            <Show
+              when={props.listed.addresses.length > 0}
+              fallback={<small>Not currently available</small>}
             >
-              Connect
-            </button>
+              <button
+                type="button"
+                class="text-button"
+                disabled={props.busy}
+                onClick={() => props.onConnect(props.listed)}
+              >
+                Connect
+              </button>
+            </Show>
           </Show>
-        }
-      >
-        <Show when={capabilities()?.text} fallback={<small>Connected</small>}>
-          <button
-            type="button"
-            onClick={() => props.onOpenChat(props.listed.peerId)}
-          >
-            Chat
-          </button>
-        </Show>
-      </Show>{" "}
-      <button
-        class="secondary"
-        type="button"
-        onClick={() => props.onOpenPeer(props.listed.peerId)}
-      >
-        Settings
-      </button>
-    </li>
+        </>
+      }
+    />
   );
 }
 

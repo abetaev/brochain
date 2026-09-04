@@ -71,6 +71,12 @@ TODO(refinement): provide mockups
 
 no need in any additional information on home (like Brochain: private communication network) - keep it minimal, only functional data
 
+advanced profiles
+-----------------
+
+besides just name profile should contain colors and picture.
+picture should be of square size between 256x256 and 512x512 pixels
+
 peer auto-connect
 -----------------
 

@@ -1,0 +1,43 @@
+.button {
+  width: var(--brochain-control-size);
+  height: var(--brochain-control-size);
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--brochain-control-radius);
+  display: grid;
+  place-items: center;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--brochain-color-on-surface);
+  background: var(--brochain-color-control);
+}
+
+.button.sm {
+  width: 32px;
+  height: 32px;
+  font-size: 0.95rem;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--brochain-color-primary);
+  outline-offset: 2px;
+}
+
+.button.primary {
+  background: var(--brochain-color-primary);
+}
+
+.button.confirmation {
+  background: var(--brochain-color-confirmation);
+}
+
+.button.rejection {
+  background: var(--brochain-color-rejection);
+}

@@ -1,0 +1,46 @@
+.badge {
+  position: absolute;
+  width: var(--brochain-badge-size);
+  height: var(--brochain-badge-size);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 0.7rem;
+  line-height: 1;
+  border: 2px solid var(--brochain-background);
+}
+
+/* 1 o'clock: 30° clockwise from the top of the circle. */
+.badge[data-variant="unread"] {
+  top: 0;
+  right: 0;
+  transform: translate(35%, -35%);
+  background: var(--brochain-color-primary);
+  color: var(--brochain-color-on-surface);
+}
+
+/* 5 o'clock: 150° clockwise from the top. */
+.badge[data-variant="call"] {
+  bottom: 0;
+  right: 0;
+  transform: translate(35%, 35%);
+  background: #3fa34d;
+  color: #fff;
+}
+
+/* An incoming call is still asking; an ongoing one has been answered. */
+.badge[data-variant="call"][data-mode="incoming"] {
+  animation: badge-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge[data-variant="call"][data-mode="incoming"] {
+    animation: none;
+  }
+}
