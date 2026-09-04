@@ -1,0 +1,57 @@
+.peer-identity {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.peer-identity figcaption {
+  width: 100%;
+}
+
+/* Name actions sit together directly under the name they act on. */
+.peer-identity-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.peer-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem var(--brochain-spacing);
+}
+
+.peer-facts dt {
+  font-weight: 600;
+  color: var(--brochain-muted-text);
+}
+
+.peer-facts dd {
+  margin: 0;
+  min-width: 0;
+}
+
+/* Peer IDs and addresses are longer than the box; clip rather than overflow. */
+.peer-facts-clipped {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peer-addresses summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--brochain-muted-text);
+}
+
+.peer-addresses ul {
+  margin: 0.5rem 0 0;
+  padding-inline-start: 1.25rem;
+}
+
+.peer-addresses p {
+  margin: 0.5rem 0 0;
+}

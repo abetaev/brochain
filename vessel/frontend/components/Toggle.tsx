@@ -1,3 +1,5 @@
+import "./Toggle.css";
+
 export function Toggle(props: {
   id: string;
   label: string;

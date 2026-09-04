@@ -14,9 +14,13 @@
   flex: 0 0 auto;
 }
 
+/* A designation as long as a peer ID gives way rather than pushing the
+   notifications off the edge of the bar. */
 .statusbar-title {
   margin: 0;
   font-size: 1.25rem;
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -29,6 +33,10 @@
   margin: 0;
   padding: 0;
   margin-inline-start: auto;
+  /* Never gives up room to the designation — it takes what it needs up to half
+     the bar and scrolls within that once there are too many. */
+  flex: 0 0 auto;
+  max-width: 50%;
   display: flex;
   align-items: center;
   gap: 8px;

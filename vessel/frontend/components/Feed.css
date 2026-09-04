@@ -1,0 +1,45 @@
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The avatar tag keeps its own height at the top of the row; the bubble grows
+   and stretches to whatever height its content needs. */
+.feed-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+}
+
+.feed-entry[data-direction="sent"] {
+  flex-direction: row-reverse;
+}
+
+.bubble {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  min-height: var(--brochain-avatar-tag-size);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 10px 12px;
+  color: var(--brochain-color-on-surface);
+}
+
+.feed-entry[data-direction="received"] .bubble {
+  border-radius: 0 8px 8px 0;
+}
+
+.feed-entry[data-direction="sent"] .bubble {
+  border-radius: 8px 0 0 8px;
+}
+
+.bubble p {
+  margin: 0;
+}

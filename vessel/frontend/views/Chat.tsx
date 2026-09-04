@@ -1,10 +1,10 @@
 import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
-import { AppBar } from "@v/frontend/components/AppBar";
-import { Avatar } from "@v/frontend/components/Avatar";
-import { Button } from "@v/frontend/components/Button";
+import type { Action } from "@v/frontend/components/ActionBar";
 import { selfAccentColor, selfBubbleColor } from "@v/frontend/components/colors";
 import { Feed, FeedEntry } from "@v/frontend/components/Feed";
+import { Handheld } from "@v/frontend/layouts/Handheld";
+import "./Chat.css";
 import type { Call } from "@v/frontend/services/call";
 import type { Chat as ChatService, ChatFile, ChatItem } from "@v/frontend/services/chat";
 import type { Roster } from "@v/frontend/services/roster";
@@ -122,16 +122,64 @@ export function Chat(props: {
     stopRoster();
   });
 
-  return (
-    <div class="view">
-      <AppBar position="top">
-        <button type="button" class="identity-button" aria-label={`${name()} settings`} onClick={props.onOpenPeer}>
-          <Avatar seed={props.peerId} name={name()} />
-          <span>{name()}</span>
+  const actions = (): Action[] => [
+    { side: "start", icon: "👈", label: "Back to Home", onClick: props.onBack },
+    { side: "end", icon: "🤙", label: "Call", disabled: !callable(), onClick: startCall },
+  ];
+
+  const compose = () => (
+    <form id="send-message-form" onSubmit={sendText} class="compose-bar">
+      <div class="pill" style={{ background: selfBubbleColor }}>
+        <label for="message" class="sr-only">Message</label>
+        {/* A textarea so a message can run to several lines, and so the browser
+            keeps no history of what was typed here to offer back later. */}
+        <textarea
+          id="message"
+          name="message"
+          rows={1}
+          placeholder="Type a message…"
+          required
+          autocomplete="off"
+          autocapitalize="sentences"
+          spellcheck={true}
+          disabled={connectedPeer() === undefined || capabilities()?.text !== true}
+        />
+        <button
+          type="button"
+          class="attach-button"
+          aria-label="Attach a file"
+          disabled={connectedPeer() === undefined || capabilities()?.files !== true}
+          onClick={() => fileInput?.click()}
+        >
+          📎
         </button>
-        <h2 id="chat-heading" class="sr-only">Chat with {name()}</h2>
-      </AppBar>
-      <main class="view-content">
+      </div>
+      <button
+        type="submit"
+        class="send-button"
+        style={{ background: selfAccentColor }}
+        aria-label="Send message"
+        disabled={connectedPeer() === undefined || capabilities()?.text !== true}
+      >
+        🚀
+      </button>
+    </form>
+  );
+
+  return (
+    <Handheld
+      avatar={{
+        seed: props.peerId,
+        name: name(),
+        onClick: props.onOpenPeer,
+        label: `${name()} settings`,
+      }}
+      title={name()}
+      heading={`Chat with ${name()}`}
+      actions={actions()}
+      footer={compose()}
+    >
+      <>
         <Show when={actionError() ?? availabilityError()}>
           {(message) => <p role="alert">{message()}</p>}
         </Show>
@@ -155,54 +203,18 @@ export function Chat(props: {
             )}
           </For>
         </Feed>
-      </main>
-      <form id="send-message-form" onSubmit={sendText} class="compose-bar">
-        <div class="pill" style={{ background: selfBubbleColor }}>
-          <label for="message" class="sr-only">Message</label>
+        <label class="sr-only">
+          Send a file
           <input
-            id="message"
-            name="message"
-            placeholder="Type a message…"
-            required
-            disabled={connectedPeer() === undefined || capabilities()?.text !== true}
-          />
-          <button
-            type="button"
-            class="attach-button"
-            aria-label="Attach a file"
+            ref={fileInput}
+            id="file"
+            type="file"
             disabled={connectedPeer() === undefined || capabilities()?.files !== true}
-            onClick={() => fileInput?.click()}
-          >
-            📎
-          </button>
-        </div>
-        <button
-          type="submit"
-          class="send-button"
-          style={{ background: selfAccentColor }}
-          aria-label="Send message"
-          disabled={connectedPeer() === undefined || capabilities()?.text !== true}
-        >
-          🚀
-        </button>
-      </form>
-      <label class="sr-only">
-        Send a file
-        <input
-          ref={fileInput}
-          id="file"
-          type="file"
-          disabled={connectedPeer() === undefined || capabilities()?.files !== true}
-          onChange={sendFile}
-        />
-      </label>
-      <AppBar position="bottom">
-        <Button icon="👈" label="Back to Home" variant="secondary" onClick={props.onBack} />
-        <span class="appbar-end">
-          <Button icon="🤙" label="Call" variant="secondary" disabled={!callable()} onClick={startCall} />
-        </span>
-      </AppBar>
-    </div>
+            onChange={sendFile}
+          />
+        </label>
+      </>
+    </Handheld>
   );
 }
 

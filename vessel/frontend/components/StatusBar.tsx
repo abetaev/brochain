@@ -13,9 +13,20 @@ export interface Notification {
   readonly onClick?: () => void;
 }
 
+// Whose view this is — the local peer on Home, the remote peer on Chat and Peer.
+export interface Designation {
+  readonly seed: string;
+  readonly name: string;
+  readonly onClick?: () => void;
+  readonly label?: string;
+}
+
 export function StatusBar(props: {
   icon?: string;
+  avatar?: Designation;
   title: string;
+  /** Overrides the accessible heading when it differs from the visible title. */
+  heading?: string;
   notifications?: readonly Notification[];
 }) {
   return (
@@ -23,7 +34,17 @@ export function StatusBar(props: {
       <Show when={props.icon}>
         {(icon) => <span class="statusbar-icon" aria-hidden="true">{icon()}</span>}
       </Show>
-      <h2 class="statusbar-title">{props.title}</h2>
+      <Show when={props.avatar}>
+        {(avatar) => (
+          <Avatar
+            seed={avatar().seed}
+            name={avatar().name}
+            onClick={avatar().onClick}
+            label={avatar().label}
+          />
+        )}
+      </Show>
+      <h2 class="statusbar-title" aria-label={props.heading}>{props.title}</h2>
       <Show when={(props.notifications?.length ?? 0) > 0}>
         <ul class="statusbar-notifications">
           <For each={props.notifications}>

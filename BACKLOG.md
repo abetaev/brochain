@@ -11,6 +11,136 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
+multiline messages render as one line
+-------------------------------------
+
+type: bug
+scope: chat, UI
+
+a message typed across several lines arrives and renders as a single run of text — the
+line breaks the sender put in are lost when the bubble is drawn. the text is stored and
+transported intact; it is the rendering that collapses it.
+
+handheld view layout
+--------------------
+
+type: usability
+scope: frontend views
+
+move home, chat and peer onto the Handheld layout the account views already use, so every
+view gets its StatusBar, bottom-aligned content and generated ActionBar from one place.
+content on all three currently sits at the top of the main area instead of within finger
+reach at the bottom.
+
+chat's message avatars should attach to their message the way the mockup draws them: the
+40px avatar tag butts flush against the bubble with no gap and interlocking corner radii,
+top-aligned against a taller bubble — not a detached circle.
+
+peer needs restructuring: avatar, name and info above the service toggles; no explanatory
+prose between the services header and the toggles; peer id must not overflow its box (clip
+with an ellipsis); addresses are long, so collapse them by default; reset name and refresh
+identity belong in one centered row directly under the editable name. auto connect is not a
+service and leaves that list entirely.
+
+the cog in home's action bar goes — local settings are reached by tapping the local peer's
+avatar in the status bar instead.
+
+local peer options
+------------------
+
+type: feature
+scope: options, network
+
+settings that describe this peer's own behaviour, keyed the same way remote peers already
+are: `peers/{localPeerId}.auto_accept_connections`, and `peers/{localPeerId}.display_name`
+reusing the existing peer-names module. the local peer id is `session.network().id`; expose
+it to views. follow the shape of `vessel/backend/options/peer-names.ts` — the options engine
+needs no change.
+
+connection approval
+-------------------
+
+type: feature
+scope: network, options, UI
+
+a peer connecting for the first time is not trusted automatically. until it is approved no
+services are published to it and it shows as requesting a connection; approving publishes
+and remembers the decision, rejecting closes the connection and remembers that too. when
+`auto_accept_connections` is set, requests are approved without asking.
+
+the gate is at the application layer for now: the transport connection still completes and
+rejection means closed-and-refused rather than never-connected. see "inbound connection
+gating" for closing that hole.
+
+chat contextual actions
+-----------------------
+
+type: usability
+scope: chat, UI
+
+chat's action bar reflects what can be done with the peer right now: connect when
+disconnected, 🖕 and 👌 when that peer is requesting a connection and auto accept is off,
+and call when connected. needs mockup frames for the three states.
+
+connection state badges
+-----------------------
+
+type: usability
+scope: roster, UI
+
+connection state becomes a small filled circle at 5 o'clock on the peer's avatar: green
+when connected, blue when the peer is online but not connected, grey when it was known
+before but is not reachable now. the call badge takes that position while a call is in
+progress, since a call implies a connection.
+
+home loses its per-row connect button and its "not currently available" text — the badge
+carries that meaning, and connecting happens from chat. needs the roster mockup updated and
+a new StatusIndicator variant.
+
+local peer settings view
+------------------------
+
+type: feature
+scope: frontend views
+
+a settings view for this peer's own behaviour, reached by tapping the local avatar in home's
+status bar. it mirrors the peer view's structure but holds settings about us rather than
+about them: whether connection requests are accepted automatically, and an editable display
+name overriding the account username, stored under the local peer like any other peer's
+name. needs a new mockup frame.
+
+identity change notification
+----------------------------
+
+type: feature
+scope: network services
+
+the identity service is request/response only, so a display name change reaches a peer no
+earlier than its next connection. give it an events facet that tells already-connected peers
+when the local name changes, following how registry announces its catalog.
+
+peer auto-connect
+-----------------
+
+type: feature
+scope: frontend service, options
+
+connect to peers marked for automatic connection whenever they become reachable, configured
+per peer as `peers/{peerId}.auto_connect`, off by default. the control belongs on the peer
+view but outside the service list — auto connect is a frontend behaviour, not a service that
+is published to that peer.
+
+inbound connection gating
+-------------------------
+
+type: hardening
+scope: network
+
+follow-up to "connection approval": deny unapproved inbound connections at the transport
+instead of after the fact, so an unapproved peer never completes a connection. needs real
+`connectionGater` hooks and a way to carry the decision into `createNetwork`, which today
+takes a synchronous service-publication predicate that cannot wait for a person.
+
 message confirmations
 ---------------------
 
@@ -33,7 +163,9 @@ UI refinement
 
 type: usability
 scope: frontend views
-state: draft
+state: largely delivered — mockups exist in penpot, `vessel/frontend/components` and
+`vessel/frontend/layouts` are built, and the account views run on them. what remains is
+tracked by "handheld view layout" and the tasks after it.
 
 in order to provide pleasant experience Vessel's views should look good and intuitive.
 currently Vessel's views are just pile of elements bound together.
@@ -76,14 +208,6 @@ advanced profiles
 
 besides just name profile should contain colors and picture.
 picture should be of square size between 256x256 and 512x512 pixels
-
-peer auto-connect
------------------
-
-type: feature
-scope: frontend service
-
-implement frontend service that connects to peers which are marked for automatic connection whenever they are discovered. auto connection should be configured on peer view, off by default.
 
 secrecy
 -------

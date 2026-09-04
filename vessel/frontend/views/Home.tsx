@@ -1,14 +1,12 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
 import type { Session } from "@v/backend/session";
-import { AppBar } from "@v/frontend/components/AppBar";
+import type { Action } from "@v/frontend/components/ActionBar";
 import { Avatar } from "@v/frontend/components/Avatar";
-import { Button } from "@v/frontend/components/Button";
-import { ButtonGroup } from "@v/frontend/components/ButtonGroup";
+import { Badge } from "@v/frontend/components/Badge";
 import { List } from "@v/frontend/components/List";
 import { ListItem } from "@v/frontend/components/ListItem";
-import { Badge } from "@v/frontend/components/Badge";
 import { TextField } from "@v/frontend/components/TextField";
-import { selfAccentColor } from "@v/frontend/components/colors";
+import { Handheld } from "@v/frontend/layouts/Handheld";
 import type { Chat } from "@v/frontend/services/chat";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 
@@ -125,14 +123,34 @@ export function Home(props: {
   onCleanup(stopObserving);
   void connectBeacon().catch(() => {});
 
+  const actions = (): Action[] => [
+    {
+      side: "start",
+      icon: "🖐️",
+      label: "Sign out",
+      disabled: unavailable(),
+      onClick: () => void performAction(signOut),
+    },
+    {
+      side: "end",
+      icon: "🔗",
+      label: "Connect",
+      onClick: () => {
+        if (detailsElement !== undefined) detailsElement.open = true;
+        detailsElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+      },
+    },
+  ];
+
   return (
-    <div class="view">
-      <AppBar position="top">
-        <Avatar seed={props.session.username} name={props.session.username} color={selfAccentColor} />
-        <h2 id="home-heading" class="sr-only">Home</h2>
-        <span>Brochain</span>
-      </AppBar>
-      <main class="view-content">
+    // The local avatar opens local settings once that view exists.
+    <Handheld
+      avatar={{ seed: props.session.username, name: props.session.username }}
+      title="Brochain"
+      heading="Home"
+      actions={actions()}
+    >
+      <>
         <Show when={beaconError()}>
           {(message) => <p role="alert">Peer networking is unavailable: {message()}</p>}
         </Show>
@@ -183,25 +201,8 @@ export function Home(props: {
             </button>
           </form>
         </details>
-      </main>
-      <AppBar position="bottom">
-        <Button icon="🖐️" label="Sign out" variant="secondary" disabled={unavailable()} onClick={() => void performAction(signOut)} />
-        <span class="appbar-end">
-          <ButtonGroup>
-            <Button icon="⚙️" label="Settings" variant="secondary" disabled />
-            <Button
-              icon="🔗"
-              label="Connect"
-              variant="secondary"
-              onClick={() => {
-                if (detailsElement !== undefined) detailsElement.open = true;
-                detailsElement?.scrollIntoView({ behavior: "smooth", block: "center" });
-              }}
-            />
-          </ButtonGroup>
-        </span>
-      </AppBar>
-    </div>
+      </>
+    </Handheld>
   );
 }
 

@@ -23,6 +23,28 @@
   font-size: 2rem;
 }
 
+/* A message tag: fills its whole slot (no inset), round on the outer side and
+   square where it meets the bubble it caps. */
+.avatar.tag-start,
+.avatar.tag-end {
+  --avatar-size: var(--brochain-avatar-tag-size);
+  font-size: 0.85rem;
+}
+
+.avatar.tag-start .avatar-circle,
+.avatar.tag-end .avatar-circle {
+  width: 100%;
+  height: 100%;
+}
+
+.avatar.tag-start .avatar-circle {
+  border-radius: 999px 0 0 999px;
+}
+
+.avatar.tag-end .avatar-circle {
+  border-radius: 0 999px 999px 0;
+}
+
 button.avatar {
   cursor: pointer;
 }

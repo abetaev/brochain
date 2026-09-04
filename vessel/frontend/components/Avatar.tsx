@@ -18,6 +18,12 @@ export function Avatar(props: {
   seed: string;
   name: string;
   size?: "sm" | "md" | "lg";
+  /**
+   * A tag caps the end of a message row instead of standing alone, so it is
+   * round on its outer side and square where it meets the bubble. Tags carry
+   * their own fixed size and ignore `size`.
+   */
+  shape?: "circle" | "tag-start" | "tag-end";
   /** Overrides the identity-derived colour. */
   color?: string;
   image?: string;
@@ -28,6 +34,14 @@ export function Avatar(props: {
   label?: string;
 }) {
   const shown = () => props.name.trim().length > 0 ? props.name : props.seed;
+  // One source for both branches below, so a clickable and a plain avatar can
+  // never end up shaped differently.
+  const classes = () => ({
+    sm: props.size === "sm",
+    lg: props.size === "lg",
+    "tag-start": props.shape === "tag-start",
+    "tag-end": props.shape === "tag-end",
+  });
 
   const circle = () => (
     <span class="avatar-circle" style={{ "--avatar-color": props.color ?? peerAccentColor(props.seed) }}>
@@ -41,7 +55,7 @@ export function Avatar(props: {
     <Show
       when={props.onClick}
       fallback={
-        <span class="avatar" classList={{ sm: props.size === "sm", lg: props.size === "lg" }} aria-hidden="true">
+        <span class="avatar" classList={classes()} aria-hidden="true">
           {circle()}
           {props.badges}
         </span>
@@ -51,7 +65,7 @@ export function Avatar(props: {
         <button
           type="button"
           class="avatar"
-          classList={{ sm: props.size === "sm", lg: props.size === "lg" }}
+          classList={classes()}
           aria-label={props.label ?? shown()}
           onClick={onClick()}
         >

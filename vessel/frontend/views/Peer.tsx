@@ -11,14 +11,14 @@ import {
 } from "@v/backend/options/peer-names";
 import { identityServiceName } from "@v/backend/network/services/identity";
 import type { Session } from "@v/backend/session";
-import { AppBar } from "@v/frontend/components/AppBar";
+import type { Action } from "@v/frontend/components/ActionBar";
 import { Avatar } from "@v/frontend/components/Avatar";
-import { Button } from "@v/frontend/components/Button";
-import { ButtonGroup } from "@v/frontend/components/ButtonGroup";
 import { Card } from "@v/frontend/components/Card";
 import { EditableLabel } from "@v/frontend/components/EditableLabel";
-import { Badge } from "@v/frontend/components/Badge";
+import type { Notification } from "@v/frontend/components/StatusBar";
 import { Toggle } from "@v/frontend/components/Toggle";
+import { Handheld } from "@v/frontend/layouts/Handheld";
+import "./Peer.css";
 import type { Call as CallService, CallState } from "@v/frontend/services/call";
 import type { Chat } from "@v/frontend/services/chat";
 import type { Roster } from "@v/frontend/services/roster";
@@ -126,35 +126,107 @@ export function Peer(props: {
     });
   }
 
+  // What is waiting for us while we're looking at this peer, carried by our own
+  // avatar the way the mockup places it.
+  const notifications = (): Notification[] => [{
+    peerId: props.session.username,
+    name: props.session.username,
+    unread: hasUnread(),
+    ...(incomingCall() ? { call: "incoming" as const } : {}),
+    onClick: () => props.onOpenChat(props.peerId),
+  }];
+
+  const actions = (): Action[] => [
+    { side: "start", icon: "👈", label: "Back", onClick: props.onBack },
+    {
+      side: "end",
+      group: "peer",
+      icon: "🤙",
+      label: "Call",
+      disabled: !callable(),
+      onClick: startCall,
+    },
+    {
+      side: "end",
+      group: "peer",
+      icon: "🗨️",
+      label: "Chat",
+      onClick: () => props.onOpenChat(props.peerId),
+    },
+  ];
+
   return (
-    <div class="view">
-      <AppBar position="top">
-        <Avatar seed={props.peerId} name={name()} />
-        <h2 id="peer-heading">Peer {name()}</h2>
-        <span class="appbar-end">
-          <Avatar
-            seed={props.session.username}
-            name={props.session.username}
-            badges={
-              <>
-                <Show when={incomingCall()}><Badge variant="call" mode="incoming" /></Show>
-                <Show when={hasUnread()}><Badge variant="unread" /></Show>
-              </>
-            }
-            onClick={() => props.onOpenChat(props.peerId)}
-            label="Open chat"
-          />
-        </span>
-      </AppBar>
-      <main class="view-content">
+    <Handheld
+      avatar={{ seed: props.peerId, name: name() }}
+      title={name()}
+      heading={`Peer ${name()}`}
+      notifications={notifications()}
+      actions={actions()}
+    >
+      <>
         <Show when={error()}>{(message) => <p role="alert">{message()}</p>}</Show>
+
+        {/* Who this peer is, above what we do with them. */}
+        <figure class="peer-identity">
+          <Avatar seed={props.peerId} name={name()} size="lg" />
+          <figcaption>
+            <EditableLabel
+              value={chosen() ?? ""}
+              placeholder={name()}
+              inputLabel="Name for this peer"
+              onSave={(next) => void attempt(async () => await setDisplayName(options, props.peerId, next))}
+            />
+          </figcaption>
+          <div class="peer-identity-actions">
+            <Show when={chosen() !== undefined}>
+              <button
+                class="text-button"
+                type="button"
+                onClick={() =>
+                  void attempt(async () => await props.roster.resetDisplayName(props.peerId))}
+              >
+                Reset name
+              </button>
+            </Show>
+            <Show when={reports() || entry()?.identity !== undefined}>
+              <button
+                class="text-button"
+                type="button"
+                onClick={() => void attempt(async () =>
+                  reports()
+                    ? await props.roster.refreshIdentity(props.peerId)
+                    : await props.roster.clearIdentity(props.peerId))}
+              >
+                {reports() ? "Refresh identity" : "Clear identity"}
+              </button>
+            </Show>
+          </div>
+        </figure>
+
+        <Card>
+          <dl class="peer-facts">
+            <dt>Peer ID</dt>
+            <dd class="peer-facts-clipped">{props.peerId}</dd>
+            <dt>Reported name</dt>
+            <dd>{entry()?.identity?.name ?? "Not yet identified"}</dd>
+            <dt>Availability</dt>
+            <dd>{entry()?.online === true ? "Connected" : "Not connected"}</dd>
+          </dl>
+          {/* Addresses are long and rarely read, so they stay folded away. */}
+          <details class="peer-addresses">
+            <summary>Addresses</summary>
+            <Show when={entry()?.addresses.length} fallback={<p>None known</p>}>
+              <ul>
+                <For each={entry()?.addresses}>
+                  {(address) => <li class="peer-facts-clipped">{address}</li>}
+                </For>
+              </ul>
+            </Show>
+          </details>
+        </Card>
 
         <section aria-labelledby="services-heading">
           <h3 id="services-heading">Services</h3>
-          <p>
-            Refused services are withheld from this peer. Refusing the registry leaves
-            it no way to learn what is supported, which bars it entirely.
-          </p>
           <For each={services}>
             {(serviceName) => (
               <Toggle
@@ -165,72 +237,9 @@ export function Peer(props: {
               />
             )}
           </For>
-          <Toggle id="service-auto-connect" label="Auto Connect" checked={false} disabled hint="Coming soon" />
         </section>
-
-        <Card>
-          <dl class="peer-facts">
-            <dt>Peer ID</dt>
-            <dd>{props.peerId}</dd>
-            <dt>Reported name</dt>
-            <dd>{entry()?.identity?.name ?? "Not yet identified"}</dd>
-            <dt>Availability</dt>
-            <dd>{entry()?.online === true ? "Connected" : "Not connected"}</dd>
-            <dt>Addresses</dt>
-            <dd>
-              <Show when={entry()?.addresses.length} fallback="None known">
-                <ul>
-                  <For each={entry()?.addresses}>{(address) => <li>{address}</li>}</For>
-                </ul>
-              </Show>
-            </dd>
-          </dl>
-        </Card>
-
-        <figure class="identity-figure">
-          <Avatar seed={props.peerId} name={name()} size="lg" />
-          <figcaption>
-            <EditableLabel
-              value={chosen() ?? ""}
-              placeholder={name()}
-              inputLabel="Name for this peer"
-              onSave={(next) => void attempt(async () => await setDisplayName(options, props.peerId, next))}
-            />
-          </figcaption>
-          <Show when={chosen() !== undefined}>
-            <button
-              class="text-button"
-              type="button"
-              onClick={() =>
-                void attempt(async () => await props.roster.resetDisplayName(props.peerId))}
-            >
-              Reset name
-            </button>
-          </Show>
-          <Show when={reports() || entry()?.identity !== undefined}>
-            <button
-              class="text-button"
-              type="button"
-              onClick={() => void attempt(async () =>
-                reports()
-                  ? await props.roster.refreshIdentity(props.peerId)
-                  : await props.roster.clearIdentity(props.peerId))}
-            >
-              {reports() ? "Refresh identity" : "Clear identity"}
-            </button>
-          </Show>
-        </figure>
-      </main>
-      <AppBar position="bottom">
-        <Button icon="👈" label="Back" variant="secondary" onClick={props.onBack} />
-        <span class="appbar-end">
-          <ButtonGroup>
-            <Button icon="🤙" label="Call" variant="secondary" disabled={!callable()} onClick={startCall} />
-            <Button icon="🗨️" label="Chat" variant="secondary" onClick={() => props.onOpenChat(props.peerId)} />
-          </ButtonGroup>
-        </span>
-      </AppBar>
-    </div>
+      </>
+    </Handheld>
   );
 }
 

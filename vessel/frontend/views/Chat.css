@@ -1,0 +1,82 @@
+/* The compose bar is built exactly like a sent message: the input takes the
+   bubble's shape and the send button caps it the way an avatar tag does —
+   flush, square where they meet, round on the outer edges. Penpot's
+   ComposeMessage literally reuses ContentFeedEntry's ContentColumn + AvatarTag. */
+.compose-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: var(--brochain-spacing);
+  background: var(--brochain-background);
+}
+
+.compose-bar .pill {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  min-height: var(--brochain-avatar-tag-size);
+  gap: 0.5rem;
+  padding-inline: 0.75rem;
+  border-radius: 8px 0 0 8px;
+}
+
+.compose-bar .pill textarea {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--brochain-text);
+  font: inherit;
+  padding: 0;
+  margin-block: 0.6rem;
+  resize: none;
+  overflow-y: auto;
+  /* Grows with the message instead of scrolling a single line, up to a point
+     past which the feed would lose too much room. */
+  field-sizing: content;
+  max-height: 7.5rem;
+}
+
+.compose-bar .pill textarea:focus {
+  outline: none;
+}
+
+.compose-bar .pill textarea::placeholder {
+  color: var(--brochain-muted-text);
+}
+
+/* Sits on the last line with the send button, next to where the caret is, and
+   the mirror of a message's avatar tag which caps the top. */
+.compose-bar .attach-button {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin-block: 0.5rem;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.compose-bar .send-button {
+  flex: 0 0 auto;
+  align-self: flex-end;
+  width: var(--brochain-avatar-tag-size);
+  height: var(--brochain-avatar-tag-size);
+  border: none;
+  border-radius: 0 999px 999px 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.compose-bar .send-button:disabled,
+.compose-bar .attach-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

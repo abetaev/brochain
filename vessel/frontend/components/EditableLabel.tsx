@@ -1,5 +1,6 @@
 import { Show, createSignal } from "solid-js";
 import { Button } from "@v/frontend/components/Button";
+import "./EditableLabel.css";
 
 export function EditableLabel(props: {
   value: string;

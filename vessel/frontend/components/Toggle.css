@@ -1,0 +1,61 @@
+/* Toggle (Peer) */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--brochain-spacing);
+  min-height: var(--brochain-control-size);
+  margin-block-end: 0.5rem;
+  padding-inline: 0.75rem;
+  border-radius: var(--brochain-control-radius);
+  background: var(--brochain-color-secondary);
+}
+
+.toggle-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.toggle-row small {
+  color: var(--brochain-muted-text);
+}
+
+.toggle-row input[type="checkbox"] {
+  appearance: none;
+  width: 2.25rem;
+  height: 1.25rem;
+  border-radius: 1.25rem;
+  background: var(--brochain-background);
+  position: relative;
+  cursor: pointer;
+  margin: 0;
+  flex: 0 0 auto;
+  transition: background 0.15s ease;
+}
+
+.toggle-row input[type="checkbox"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: #fff;
+  transition: left 0.15s ease;
+}
+
+.toggle-row input[type="checkbox"]:checked {
+  background: var(--brochain-color-primary);
+}
+
+.toggle-row input[type="checkbox"]:checked::before {
+  left: calc(100% - 1.125rem);
+}
+
+.toggle-row input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
