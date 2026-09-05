@@ -11,58 +11,18 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-biometric authentication
-------------------------
+screen scroll on android/chrome pwa
+-----------------------------------
 
-type: feature
-scope: account, account view, settings view
+type: bug
+scope: ui
 
-An installed application is evicted like any other: switching away for long enough
-ends the Session, and what returns is the account list. Nothing a page can do
-prevents that, so returning cheaply is the remedy — the reader unlocks by the
-verification their device already performs rather than by typing a password.
+when i reopen installed pwa app on my phone sometimes it makes layout higher than display provoking scrolling
+top bar or bottom bar go offscreen. this is not always happening and seems to happen only after app has been in background for some time, maybe when it was offloaded/stopped -- i.e. when it goes back to account selection.
 
-A passkey's pseudo-random function derives the same secret from an authenticator
-for a given salt, so the key which unwraps an account is re-derived at each unlock
-and stored nowhere. Account keeps a second wrapping of the secrets it already
-holds; the password wrapping is untouched and remains the fallback, because an
-authenticator can be absent, unsupported, or lost.
+also same issue reproduces when i just refresh pwa by pulling it down.
 
-- Enrolment belongs to this peer's own Settings, where the secrets are unlocked
-  already and wrapping them needs no password re-entry. The same control removes
-  it, and deleting an account MUST delete it with the account.
-- The ceremony runs in the window, because credentials are a Window interface. The
-  derived secret reaches the Worker the way a password already does, and the seed
-  stays there.
-- Unlock offers the authenticator to an account which has one and the password to
-  every account, and MUST fall back to the password whenever a ceremony fails or an
-  authenticator declines.
-- Not every authenticator evaluates the function, so support is discovered by
-  asking rather than assumed, and enrolment says so where it cannot be offered.
-- A credential belongs to an origin, so an account enrolled against one is not
-  unlocked by it against another, and the password is what carries an account
-  between them.
-
-Refine the wrapped record's shape, the salt, whether more than one authenticator
-may be enrolled, and what a failed or unenrolled unlock tells a reader before
-implementation. A workflow can drive a virtual authenticator through the browser's
-debugging protocol rather than hardware; whether that authenticator evaluates the
-function is the first thing to establish, because it decides how much of this is
-provable at that level and how much falls to a lower one.
-
-Returning signed in is not returning connected: a rebuilt Session holds no
-conversation history and no connections. Those are peer auto-connect and the feed
-thought below, not this.
-
-identity change notification
-----------------------------
-
-type: feature
-scope: network services
-
-the identity service is request/response only, so a display name change reaches a peer no
-earlier than its next connection. give it an events facet that tells already-connected peers
-when the local name changes, following how registry announces its catalog.
+maybe add some handler which checks this issue and fixes it. worth checking existing bugs, maybe there's less invasive workaround.
 
 persistent Beacon identity
 --------------------------
@@ -118,6 +78,15 @@ invitation notifications should appear in status bar.
 
 invitation should be network and frontend service. if network service is disabled peer will not receive invitations.
 
+identity change notification
+----------------------------
+
+type: feature
+scope: network services
+
+the identity service is request/response only, so a display name change reaches a peer no
+earlier than its next connection. give it an events facet that tells already-connected peers
+when the local name changes, following how registry announces its catalog.
 
 message confirmations
 ---------------------
@@ -270,11 +239,17 @@ call relay
 
 type: feature
 scope: calls, beacon, network
+state: draft/needs refinement
 
 Symmetric address translation defeats address discovery, and such a call can
 only be carried by a relay. Decide whether Beacon relays call media as it
 already relays connection establishment, and refine credentials, capacity, and
 the limits a relay places on call quality before implementation.
+
+beacon becomes turn server if this is implemented.
+this should be feature that provides security:
+- beacon may need to list peers authorized for TURN
+- beacon should have configuration settings (UI?)
 
 thoughts
 ========

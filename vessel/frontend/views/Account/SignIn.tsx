@@ -8,9 +8,12 @@ import "./identity.css";
 
 export function SignIn(props: {
   username: string;
+  /** Whether this device holds a wrapping for the account, and so can be offered. */
+  authenticator: boolean;
   busy: boolean;
   error: string | undefined;
   onSubmit(event: FormSubmitEvent): void;
+  onAuthenticator(): void;
   onBack(): void;
 }) {
   const actions = (): Action[] => [
@@ -35,6 +38,18 @@ export function SignIn(props: {
         <Avatar seed={props.username} name={props.username} size="lg" />
         <figcaption>{props.username}</figcaption>
       </figure>
+      {/* The ceremony already ran when the screen opened; this is what a reader
+          who dismissed it needs to reach it again. */}
+      <Show when={props.authenticator}>
+        <button
+          class="text-button"
+          type="button"
+          disabled={props.busy}
+          onClick={props.onAuthenticator}
+        >
+          Try this device again
+        </button>
+      </Show>
       <TextField
         id="unlock-password"
         name="unlock-password"

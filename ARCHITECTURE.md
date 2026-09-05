@@ -151,16 +151,32 @@ Vessel backend
 
 ### Account
 
-- **dependencies**: browser IndexedDB and Web Crypto, a Worker, and the Session
-  factory
-- **structure**: a Window facade, Worker account service, and private
-  Session-access channel
-- **use cases**: list, create, unlock, export, and delete local accounts
+- **dependencies**: browser IndexedDB, Web Crypto and credentials, a Worker, and
+  the Session factory
+- **structure**: a Window facade holding the credentials ceremony, the Worker
+  account service, and a private Session-access channel
+- **use cases**: list, create, unlock, export, and delete local accounts; enrol an
+  authenticator, remove it, and unlock by it
 - **behavior**: account records contain only versioned encrypted data; passwords,
   decrypted secrets, and the peer identity seed remain in the Worker. Creation
   and unlock create a Session. Deletion password-confirms and removes
   `brochain/<username>` before its account record. Window authentication calls
   execute directly and have no concurrent ordering contract.
+
+  A record MAY hold one further wrapping of the same secrets, keyed by a passkey's
+  pseudo-random function at a stored random salt: that key is re-derived at each
+  unlock and retained nowhere, and the password wrapping is untouched, so a
+  password unlocks an account whatever becomes of the authenticator. Credentials
+  are a Window interface, so the ceremony runs in the facade and only its output
+  crosses to the Worker, which wraps an account it already holds unlocked and so
+  needs no password. The function is bound to the credential as that credential is
+  made, and an authenticator binds it to a passkey it keeps rather than to one it
+  hands back, so enrolment MUST ask for a discoverable credential. Making one still
+  does not establish that the function is evaluated, because a client MAY answer for
+  it only once the credential is used; enrolment therefore uses the credential, and
+  a device which cannot is reported rather than assumed.
+  A credential belongs to one origin, deletion takes the wrapping with the record,
+  and an export omits it because it unlocks nothing elsewhere.
 
 ### Session
 
@@ -388,7 +404,11 @@ Vessel frontend
   controls
 - **use cases**: create, unlock, export, and delete accounts
 - **behavior**: one busy state prevents concurrent mutations; successful
-  authentication hands the Session to Application.
+  authentication hands the Session to Application. Selecting an account which holds
+  an authenticator asks the device as Sign In opens, since returning cheaply is what
+  that wrapping is for. A ceremony which is declined, dismissed or times out reads
+  as one thing, because what differs between them changes nothing a reader can do:
+  the password is still there, and so is a control to ask the device again.
 
 ### Peer view
 
@@ -428,7 +448,11 @@ Vessel frontend
   where their value came from. This peer's own ID and addresses are shown because they are what
   someone else needs for Home's direct connection and appear nowhere else. A
   refused write restores its control and reports the failure. It is reached by this
-  peer's own avatar in Home's status bar, and leaving returns there.
+  peer's own avatar in Home's status bar, and leaving returns there. Unlocking by
+  this device is the one thing here which is neither a name nor a service, and it
+  belongs here because the secrets are unlocked already: one switch wraps them for
+  the device and removes that wrapping, and where the device cannot evaluate the
+  function the switch says so rather than offering it.
 
 ### Home view
 
@@ -509,7 +533,8 @@ runtime and technologies
 
 - **Common Network**: libp2p and typed-rpc
 - **Vessel backend**: browser Worker, Comlink, IndexedDB, OPFS, Web Locks, Web
-  Crypto, libp2p WebSockets, Circuit Relay v2, WebRTC, Noise, Yamux, and Identify
+  Crypto, Web Authentication with the PRF extension, libp2p WebSockets, Circuit
+  Relay v2, WebRTC, Noise, Yamux, and Identify
 - **Vessel frontend**: SolidJS, Pico CSS, and a Vite-generated PWA shell
 - **Beacon**: Node.js, libp2p WebSockets, Circuit Relay v2, Noise, Yamux,
   Identify, and Identify Push

@@ -43,9 +43,15 @@ export async function createAccount(page: Page, username: string): Promise<void>
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 }
 
-export async function unlock(page: Page, username: string): Promise<void> {
+// Selecting an account opens Sign In, which offers this device to an account
+// enrolled against one before it offers anything else.
+export async function selectAccount(page: Page, username: string): Promise<void> {
   await page.getByRole("listitem").filter({ hasText: username })
     .getByRole("button", { name: username, exact: true }).click();
+}
+
+export async function unlock(page: Page, username: string): Promise<void> {
+  await selectAccount(page, username);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Unlock account" }).click();
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
@@ -71,9 +77,11 @@ export function peerDisconnected(page: Page) {
 
 // A peer reaches nothing until it is let in, and the connection profile — this
 // peer's own service list — is what lets in everyone nobody has decided about.
+// Settings holds switches which are not services, so only that list is touched.
 export async function acceptEveryone(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  for (const service of await page.getByRole("switch").all()) await service.check();
+  const services = page.getByRole("region", { name: "Services" }).getByRole("switch");
+  for (const service of await services.all()) await service.check();
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 }

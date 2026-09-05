@@ -32,11 +32,32 @@ interface EncryptedAccountData {
   };
 }
 
+// The same secrets wrapped by an authenticator instead of a password. The key is
+// the pseudo-random function's output for the stored salt, which the authenticator
+// re-derives at each unlock and nothing keeps.
+interface AuthenticatorWrapping {
+  version: 1;
+  credentialId: string;
+  salt: string;
+  cipher: {
+    name: "AES-GCM";
+    iv: string;
+    ciphertext: string;
+  };
+}
+
+// What an authenticator ceremony needs to derive the key again.
+interface AuthenticatorCredential {
+  credentialId: string;
+  salt: string;
+}
+
 interface StoredAccount {
-  version: 2;
+  version: 3;
   username: string;
   createdAt: string;
   encryptedData: EncryptedAccountData;
+  authenticator?: AuthenticatorWrapping;
 }
 
 const applicationDatabaseName = "brochain";
@@ -46,6 +67,7 @@ const usernamePattern = /^[a-z]{1,64}$/;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const incorrectPassword = new Error("The password is incorrect.");
+const authenticatorDidNotUnlock = new Error("This device did not unlock the account.");
 
 export function createAccountService(databaseName = applicationDatabaseName) {
   let active: PeerIdentity | undefined;
@@ -92,7 +114,7 @@ export function createAccountService(databaseName = applicationDatabaseName) {
     assertPassword(password);
     const secrets = createAccountSecrets();
     const account: StoredAccount = {
-      version: 2,
+      version: 3,
       username,
       createdAt: new Date().toISOString(),
       encryptedData: await encryptAccountSecrets(secrets, password),
@@ -109,6 +131,56 @@ export function createAccountService(databaseName = applicationDatabaseName) {
     }
 
     active = { username, ...secrets };
+  }
+
+  function unlockedAccount(): PeerIdentity {
+    if (active === undefined) throw new Error("The account is not unlocked.");
+    return active;
+  }
+
+  async function storedAccount(username: string): Promise<StoredAccount> {
+    const account = await get(username);
+
+    if (account === undefined) {
+      throw new Error("The account is no longer stored by this application.");
+    }
+
+    return account;
+  }
+
+  async function readAuthenticator(
+    username: string,
+  ): Promise<AuthenticatorCredential | undefined> {
+    assertUsername(username);
+    const wrapping = (await get(username))?.authenticator;
+
+    return wrapping === undefined
+      ? undefined
+      : { credentialId: wrapping.credentialId, salt: wrapping.salt };
+  }
+
+  async function enrolAuthenticator(credentialId: string, salt: string, secret: string) {
+    const { username, ...secrets } = unlockedAccount();
+    const account = await storedAccount(username);
+    const authenticator = await wrapWithAuthenticator(secrets, credentialId, salt, secret);
+    await write((accounts) =>
+      accounts.put({ ...account, authenticator } satisfies StoredAccount));
+  }
+
+  async function removeAuthenticator() {
+    const account = await storedAccount(unlockedAccount().username);
+    const { authenticator, ...remaining } = account;
+    await write((accounts) => accounts.put(remaining satisfies StoredAccount));
+  }
+
+  async function unlockWithAuthenticator(username: string, secret: string) {
+    assertUsername(username);
+    const account = await storedAccount(username);
+
+    if (account.authenticator === undefined) throw authenticatorDidNotUnlock;
+
+    const secrets = await unwrapWithAuthenticator(account.authenticator, secret);
+    active = { username: account.username, ...secrets };
   }
 
   async function unlock(username: string, password: string) {
@@ -155,13 +227,10 @@ export function createAccountService(databaseName = applicationDatabaseName) {
 
   async function exportAccount(username: string): Promise<string> {
     assertUsername(username);
-    const account = await get(username);
-
-    if (account === undefined) {
-      throw new Error("The account is no longer stored by this application.");
-    }
-
-    return JSON.stringify(account, null, 2);
+    // A credential belongs to one origin on one device, so its wrapping unlocks
+    // nothing anywhere else and its identifier names that device.
+    const { authenticator, ...portable } = await storedAccount(username);
+    return JSON.stringify(portable, null, 2);
   }
 
   async function deleteStoredAccount(account: StoredAccount): Promise<boolean> {
@@ -206,10 +275,16 @@ export function createAccountService(databaseName = applicationDatabaseName) {
 
   return {
     list,
+    authenticator: readAuthenticator,
     create: (username: string, password: string) =>
       mutate(async () => await create(username, password)),
     unlock: (username: string, password: string) =>
       mutate(async () => await unlock(username, password)),
+    unlockWithAuthenticator: (username: string, secret: string) =>
+      mutate(async () => await unlockWithAuthenticator(username, secret)),
+    enrolAuthenticator: (credentialId: string, salt: string, secret: string) =>
+      mutate(async () => await enrolAuthenticator(credentialId, salt, secret)),
+    removeAuthenticator: () => mutate(removeAuthenticator),
     delete: (username: string, password: string) =>
       mutate(async () => await deleteAccount(username, password)),
     export: exportAccount,
@@ -345,24 +420,93 @@ async function decryptAccountSecrets(
       key,
       toArrayBuffer(ciphertext),
     );
-    const parsed: unknown = JSON.parse(decoder.decode(plaintext));
-
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      (parsed as AccountSecrets).version !== 1 ||
-      typeof (parsed as AccountSecrets).identitySeed !== "string"
-    ) {
-      throw new Error("Unsupported account data.");
-    }
-
-    return parsed as AccountSecrets;
+    return parseAccountSecrets(plaintext);
   } catch (reason) {
     if (reason instanceof Error && reason.message.startsWith("Unsupported")) {
       throw reason;
     }
 
     throw incorrectPassword;
+  }
+}
+
+function parseAccountSecrets(plaintext: ArrayBuffer): AccountSecrets {
+  const parsed: unknown = JSON.parse(decoder.decode(plaintext));
+
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    (parsed as AccountSecrets).version !== 1 ||
+    typeof (parsed as AccountSecrets).identitySeed !== "string"
+  ) {
+    throw new Error("Unsupported account data.");
+  }
+
+  return parsed as AccountSecrets;
+}
+
+// The pseudo-random function's output is already a uniform secret of its own for
+// that salt and credential, so it is the key rather than material for one.
+async function importAuthenticatorKey(secret: string): Promise<CryptoKey> {
+  return await getWebCrypto().subtle.importKey(
+    "raw",
+    toArrayBuffer(base64ToBytes(secret)),
+    { name: "AES-GCM" },
+    false,
+    ["decrypt", "encrypt"],
+  );
+}
+
+async function wrapWithAuthenticator(
+  secrets: AccountSecrets,
+  credentialId: string,
+  salt: string,
+  secret: string,
+): Promise<AuthenticatorWrapping> {
+  const webCrypto = getWebCrypto();
+  const iv = webCrypto.getRandomValues(new Uint8Array(12));
+  const key = await importAuthenticatorKey(secret);
+  const ciphertext = await webCrypto.subtle.encrypt(
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
+    key,
+    toArrayBuffer(encoder.encode(JSON.stringify(secrets))),
+  );
+
+  return {
+    version: 1,
+    credentialId,
+    salt,
+    cipher: {
+      name: "AES-GCM",
+      iv: bytesToBase64(iv),
+      ciphertext: bytesToBase64(new Uint8Array(ciphertext)),
+    },
+  };
+}
+
+async function unwrapWithAuthenticator(
+  wrapping: AuthenticatorWrapping,
+  secret: string,
+): Promise<AccountSecrets> {
+  try {
+    if (wrapping.version !== 1 || wrapping.cipher.name !== "AES-GCM") {
+      throw new Error("Unsupported account encryption format.");
+    }
+
+    const key = await importAuthenticatorKey(secret);
+    const plaintext = await getWebCrypto().subtle.decrypt(
+      { name: "AES-GCM", iv: toArrayBuffer(base64ToBytes(wrapping.cipher.iv)) },
+      key,
+      toArrayBuffer(base64ToBytes(wrapping.cipher.ciphertext)),
+    );
+
+    return parseAccountSecrets(plaintext);
+  } catch (reason) {
+    if (reason instanceof Error && reason.message.startsWith("Unsupported")) {
+      throw reason;
+    }
+
+    throw authenticatorDidNotUnlock;
   }
 }
 

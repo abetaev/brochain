@@ -12,8 +12,11 @@ using brochain
 
 1. **Sign in.** Create an account, or select an existing one and unlock it.
    Account names use 1–64 lowercase English letters, and the password-strength
-   indicator is advice which does not prevent creation. Signing in requires
-   browser support for IndexedDB, private file storage, and Web Locks.
+   indicator is advice which does not prevent creation. An account you have set up
+   to unlock by this device asks the device as you select it; dismiss that and the
+   password is still below it, with **Try this device again** to ask once more.
+   Signing in requires browser support for IndexedDB, private file storage, and Web
+   Locks.
 2. **Find people.** Home connects to the default Beacon in the background; if it
    is unavailable, sign-in still succeeds and Home shows the failure. The list
    updates as people become available through the Beacon or direct connections,
@@ -56,7 +59,14 @@ using brochain
    last choice is your profile, and it is how everyone is treated until you say
    otherwise about them: it starts granting nothing, so turn on what you are happy
    for a stranger to reach. The name is yours alone for now; peers still see the
-   account username until they reconnect.
+   account username until they reconnect. **This device**, under **Unlock**, signs
+   you in by the verification your device already performs rather than by typing
+   your password — which is how you return after the application is closed for you.
+   Setting it up asks the device there and then — twice on a device which answers
+   for a key only once it is used — the same switch removes it, and deleting the
+   account removes it too. A device which cannot do it says so instead,
+   and what you set up belongs to this address on this device alone: your password
+   is what signs you in anywhere else, and it never stops working.
 8. **Configure.** Select **Settings** beside a peer, or from a conversation, to
    see what they report about themselves, name them, and choose which services
    they may reach. A peer arrives named by whatever it reports; **Save name**

@@ -8,9 +8,14 @@ import { SignUp } from "./SignUp";
 
 type AccountScreen =
   | { readonly kind: "signup" | "select" }
-  | { readonly kind: "signin"; readonly username: string }
+  | { readonly kind: "signin"; readonly username: string; readonly authenticator: boolean }
   | { readonly kind: "delete"; readonly username: string };
 export type FormSubmitEvent = SubmitEvent & { currentTarget: HTMLFormElement };
+
+// A ceremony declines, times out or is dismissed alike; what the reader needs is
+// the password, which every account keeps.
+const authenticatorRefused =
+  "That did not unlock the account. Enter your password, or try this device again.";
 
 // The account views share one set of accounts, one busy flag and one error, so
 // that state lives here and each view stays a view.
@@ -35,13 +40,16 @@ export function Account(props: { onSignedIn(session: Session): Promise<void> }) 
   const signingIn = at("signin");
   const deleting = at("delete");
 
-  async function performMutation(operation: () => Promise<void>): Promise<void> {
+  async function performMutation(
+    operation: () => Promise<void>,
+    failure?: string,
+  ): Promise<void> {
     setError(undefined);
     setBusy(true);
     try {
       await operation();
     } catch (reason) {
-      setError(errorMessage(reason));
+      setError(failure ?? errorMessage(reason));
     }
     setBusy(false);
   }
@@ -68,6 +76,21 @@ export function Account(props: { onSignedIn(session: Session): Promise<void> }) 
         await account.create(String(data.get("username") ?? ""), password),
       );
     });
+  }
+
+  // An account which has an authenticator is offered it as the screen opens, since
+  // returning cheaply is the whole point; the password is below it either way.
+  async function signIn(username: string): Promise<void> {
+    const authenticator = await account.hasAuthenticator(username).catch(() => false);
+    show({ kind: "signin", username, authenticator });
+    if (authenticator) await unlockWithAuthenticator(username);
+  }
+
+  async function unlockWithAuthenticator(username: string): Promise<void> {
+    await performMutation(
+      async () => await props.onSignedIn(await account.unlockWithAuthenticator(username)),
+      authenticatorRefused,
+    );
   }
 
   async function unlockAccount(event: FormSubmitEvent, username: string): Promise<void> {
@@ -134,7 +157,7 @@ export function Account(props: { onSignedIn(session: Session): Promise<void> }) 
           accounts={accounts() ?? []}
           busy={busy()}
           error={error()}
-          onSignIn={(username) => show({ kind: "signin", username })}
+          onSignIn={(username) => void signIn(username)}
           onExport={(username) => void exportAccount(username)}
           onDelete={(username) => show({ kind: "delete", username })}
           onCreate={() => show({ kind: "signup" })}
@@ -144,9 +167,11 @@ export function Account(props: { onSignedIn(session: Session): Promise<void> }) 
         {(current) => (
           <SignIn
             username={current().username}
+            authenticator={current().authenticator}
             busy={busy()}
             error={error()}
             onSubmit={(event) => void unlockAccount(event, current().username)}
+            onAuthenticator={() => void unlockWithAuthenticator(current().username)}
             onBack={() => show({ kind: "select" })}
           />
         )}

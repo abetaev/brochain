@@ -9,6 +9,7 @@ import {
   type Remote,
 } from "comlink";
 import { describe, expect, it, vi } from "vitest";
+import { bytesToBase64 } from "@c/base64";
 import {
   createAccountService,
   type AccountService,
@@ -70,6 +71,10 @@ async function expectIdentityIsPrivate(
   }
 }
 
+function authenticatorSecret(): string {
+  return bytesToBase64(crypto.getRandomValues(new Uint8Array(32)));
+}
+
 describe("account operations and access", () => {
   it("persists encrypted accounts while exposing identity only to a Session", async () => {
     const databaseName = `brochain-test-${crypto.randomUUID()}`;
@@ -90,7 +95,7 @@ describe("account operations and access", () => {
       expect(exported).toContain('"username": "ada"');
       expect(exported).not.toContain(password);
       expect(exported).not.toContain("identitySeed");
-      expect(JSON.parse(exported)).toMatchObject({ version: 2, username: "ada" });
+      expect(JSON.parse(exported)).toMatchObject({ version: 3, username: "ada" });
       await beforeReload.session.closeSession();
       await expect(beforeReload.session.activePeerIdentity()).resolves.toBeUndefined();
       await expect(beforeReload.operations.unlock("ada", "wrong password")).rejects.toThrow(
@@ -111,6 +116,54 @@ describe("account operations and access", () => {
       });
     } finally {
       afterReload.close();
+    }
+  });
+
+  // The ceremony belongs to the window; what reaches the service is its output,
+  // so the wrapping is provable here without an authenticator.
+  it("wraps the unlocked secrets for an authenticator and unlocks by them", async () => {
+    const accounts = await openAccountService();
+    const password = "correct horse battery staple";
+    const secret = authenticatorSecret();
+    const anotherSecret = authenticatorSecret();
+
+    try {
+      await accounts.operations.create("ada", password);
+      const identitySeed = (await accounts.session.activePeerIdentity())?.identitySeed;
+      await expect(accounts.operations.authenticator("ada")).resolves.toBeUndefined();
+
+      await accounts.operations.enrolAuthenticator("a credential", "a salt", secret);
+      await expect(accounts.operations.authenticator("ada")).resolves.toEqual({
+        credentialId: "a credential",
+        salt: "a salt",
+      });
+      // A credential belongs to one origin on one device, so an export carries none.
+      await expect(accounts.operations.export("ada")).resolves.not.toContain("a credential");
+
+      await accounts.session.closeSession();
+      await expect(accounts.operations.unlockWithAuthenticator("ada", anotherSecret))
+        .rejects.toThrow("This device did not unlock the account.");
+      await expect(accounts.session.activePeerIdentity()).resolves.toBeUndefined();
+
+      await accounts.operations.unlockWithAuthenticator("ada", secret);
+      await expect(accounts.session.activePeerIdentity()).resolves.toMatchObject({
+        username: "ada",
+        identitySeed,
+      });
+
+      // The same control removes it, and the password was never touched.
+      await accounts.operations.removeAuthenticator();
+      await expect(accounts.operations.authenticator("ada")).resolves.toBeUndefined();
+      await expect(accounts.operations.unlockWithAuthenticator("ada", secret))
+        .rejects.toThrow("This device did not unlock the account.");
+      await expect(accounts.operations.unlock("ada", password)).resolves.toBeUndefined();
+
+      // Deleting the account deletes the wrapping with it.
+      await accounts.operations.enrolAuthenticator("a credential", "a salt", secret);
+      await expect(accounts.operations.delete("ada", password)).resolves.toBe(true);
+      await expect(accounts.operations.authenticator("ada")).resolves.toBeUndefined();
+    } finally {
+      accounts.close();
     }
   });
 
