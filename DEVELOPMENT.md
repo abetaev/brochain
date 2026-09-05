@@ -83,6 +83,20 @@ Both are on by default, which is the single-machine arrangement `npm run dev`
 starts. The browser workflows use the second to meet a Vessel host that offers no
 Beacon of its own.
 
+beacon identity
+---------------
+
+The relay keeps one identity across restarts, so people who met it keep the peer
+they already know. It is a seed generated at the first start and retained in
+`.beacon-identity` beside the project, which `npm run dev` and `npm run prod`
+share because one deployment has one relay.
+
+`BEACON_IDENTITY` names that file, so a deployment supplies its own by pointing at
+one or mounting one there, and replaces an identity by replacing or deleting the
+file. A file which holds no valid seed is refused rather than replaced:
+development then serves Vessel without a relay, and the Beacon process reports the
+error and does not start.
+
 production configuration
 ------------------------
 
@@ -91,7 +105,7 @@ production configuration
 - `PORT` — the port Vessel and the relay share; defaults to `4173`.
 - `BEACON_HOST` — the public host announced by Beacon; defaults to every address
   this machine answers on.
-- `VESSEL_HOSTING` and `BEACON_RELAY`, as above.
+- `BEACON_IDENTITY`, `VESSEL_HOSTING`, and `BEACON_RELAY`, as above.
 
 Vessel connects its default Beacon at its own origin, so a deployment that serves
 the application also provides the relay unless it is told otherwise. It serves

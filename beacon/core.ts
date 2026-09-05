@@ -13,6 +13,7 @@ import {
   createDiscoveryHost,
   discoveryServiceName,
 } from "../common/backend/network/services/discovery.ts";
+import { beaconIdentity } from "./identity.ts";
 
 interface BeaconConfiguration {
   hosts: readonly string[];
@@ -87,6 +88,7 @@ export async function createBeacon(configuration: BeaconConfiguration) {
   const relayPort = await privatePort();
   const discovery = createDiscoveryHost();
   const network = await createNetwork({
+    privateKey: await beaconIdentity(),
     addresses: {
       listen: [`/ip4/127.0.0.1/tcp/${relayPort}/ws`],
       announce: configuration.hosts.map((host) =>

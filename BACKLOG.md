@@ -24,23 +24,6 @@ also same issue reproduces when i just refresh pwa by pulling it down.
 
 maybe add some handler which checks this issue and fixes it. worth checking existing bugs, maybe there's less invasive workaround.
 
-persistent Beacon identity
---------------------------
-
-type: feature
-scope: beacon
-
-Beacon generates an identity at each start, so a restarted Beacon is a different
-peer. Everything keyed by a peer ID is orphaned by that: its roster entry, the
-name it was given, the services decided for it, and any configuration a peer holds
-about it. A relay every peer meets is the last identity which should be disposable.
-
-Beacon MUST keep one identity across restarts: generated once, retained, and used
-thereafter. Refine where it is retained, how a deployment supplies or replaces one,
-and what happens when it cannot be read before implementation. The relay the Vite
-plugin creates and the Beacon process are one deployment's relay and take the same
-identity.
-
 peer auto-connect
 -----------------
 
@@ -56,8 +39,8 @@ The Beacon is the one peer which arrives with it enabled, so the connection Home
 starts today becomes an instance of this rather than a case of its own. Beacon is
 reached by an address derived from this page's origin rather than by a peer ID, so
 the first connection to it is still made from that address and the option governs
-every later one; keying it by peer ID at all requires the identity to survive a
-restart, which is why persistent Beacon identity comes first.
+every later one, which the Beacon's identity surviving a restart is what makes
+possible.
 
 Wanted before the first production version.
 

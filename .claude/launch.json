@@ -5,8 +5,7 @@
       "name": "brochain-dev",
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "VESSEL_PORT=5183 npm run dev"],
-      "port": 5183,
-      "url": "https://localhost:5183"
+      "port": 5183
     }
   ]
 }
