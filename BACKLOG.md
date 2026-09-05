@@ -11,19 +11,17 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-connection state badges
------------------------
+persistent connections from mobile browsers
+-------------------------------------------
 
-type: usability
-scope: roster, UI
+type: bug
+scope: core, frontend services/network services
+state: questionable feasibility? draft, refine
 
-connection state becomes a small filled circle at 5 o'clock on the peer's avatar: green
-when connected, blue when the peer is online but not connected, grey when it was known
-before but is not reachable now. the call badge takes that position while a call is in
-progress, since a call implies a connection.
+on mobile browser (firefox) when i switch between apps connections are lost almost immediately as the whole state.
+i am wondering whether it is possible to enforce application to stay alive for as long as possible with some PWA techniques.
 
-home loses its "not currently available" text — the badge carries that meaning. needs the
-roster mockup updated and a new StatusIndicator variant.
+
 
 identity change notification
 ----------------------------
@@ -58,6 +56,10 @@ invitation contains list of services that one peer asks another peer to provide.
 making an invitation automatically enables listed set of services for target peer when peer accepts invitation and exposes those service from their side.
 invitation can be sent multiple times to adjust set of services that peers expose to each other.
 sending invitation with reduced set of services may be handled automatically 
+
+invitation notifications should appear in status bar.
+
+invitation should be network and frontend service. if network service is disabled peer will not receive invitations.
 
 
 message confirmations

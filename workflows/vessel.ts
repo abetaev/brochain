@@ -66,7 +66,7 @@ export function peerNamed(page: Page, name: string) {
 
 export function peerDisconnected(page: Page) {
   return page.getByRole("listitem")
-    .filter({ has: page.getByLabel("Not connected", { exact: true }) });
+    .filter({ has: page.getByLabel("Disconnected", { exact: true }) });
 }
 
 // A peer reaches nothing until it is let in, and the connection profile — this

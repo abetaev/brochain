@@ -11,7 +11,7 @@
 }
 
 /* A plain text action, for controls the icon-button library doesn't cover
-   (Refresh peers, Reset name…). */
+   (Reset name, Use default…). */
 .text-button {
   align-self: flex-start;
   border: 1px solid var(--brochain-border);
@@ -28,21 +28,6 @@
   cursor: not-allowed;
 }
 
-/* Home's connection-state dot */
-.connection-state {
-  display: inline-block;
-  width: 0.7rem;
-  height: 0.7rem;
-  border-radius: 50%;
-  background: var(--brochain-color-secondary);
-  flex: 0 0 auto;
-}
-
-.connection-state.connected {
-  background: var(--brochain-color-confirmation);
-}
-
-/* Native disclosure sitting in a view's content area (Home) */
 /* Alerts */
 [role="alert"] {
   color: var(--brochain-color-rejection);

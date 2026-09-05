@@ -4,8 +4,9 @@ import type { Call } from "./call";
 import type { Chat } from "./chat";
 import type { Roster } from "./roster";
 
-// What is waiting for a reader, wherever they are. The StatusBar is the only
-// place these appear, so they are gathered once rather than by each view.
+// What is waiting for a reader, wherever they are: the StatusBar carries it into
+// every view, and Home's rows mark the peer it waits on, so it is gathered once
+// rather than counted again by each view.
 export interface Notification {
   readonly peerId: string;
   readonly name: string;

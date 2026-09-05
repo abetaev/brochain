@@ -332,8 +332,9 @@ Vessel frontend
   which has not ended — waiting to be answered, or already running, which is how a call
   a reader navigated away from stays reachable. A call from a peer the Roster does
   not hold is still raised. Notifications are gathered once for the whole
-  application rather than by each view, and republished only when the list actually
-  differs, so unrelated Chat and Roster traffic does not redraw the bar. What
+  application rather than by each view — the status bar carries them into every view
+  and Home's rows mark the peer each one waits on — and republished only when the list
+  actually differs, so unrelated Chat and Roster traffic does not redraw them. What
   opening one leads to is not theirs to say; Application attaches that, because it
   owns navigation.
 
@@ -431,7 +432,7 @@ Vessel frontend
 
 ### Home view
 
-- **dependencies**: Session, Roster, and Chat
+- **dependencies**: Session, Roster, and Notifications' gathered list
 - **structure**: one peer-list signal, peer rows, the direct-connection dialog, and
   view-local action, connection and Beacon errors
 - **use cases**: refresh peers; connect a direct address; open Chat, Peer, or this
@@ -440,13 +441,16 @@ Vessel frontend
   connection in the background, and Refresh retries it and refreshes Roster.
   Selecting a listed Peer opens its conversation whether or not it is connected,
   because reaching a peer belongs to the conversation with it, and a peer which has
-  not yet let us in offers nothing and is not a peer without a conversation. A
-  connected peer holding nothing but Registry is listed as requesting a connection.
+  not yet let us in offers nothing and is not a peer without a conversation. A row is
+  a peer rather than a status report: its only text is that peer's name, and its
+  avatar carries the rest — a circle at 5 o'clock saying connected, disconnected, or
+  unavailable when no address is held, which a call in progress replaces, and unread
+  items at 1 o'clock. What a peer reaches is answered by its own view.
   A direct address completes only the connection procedure, so a peer offering no
   conversation is still reached; it accepts a URL or a multiaddress, and is entered in
   a dialog which keeps its own failure, because that is where the address is. Roster
-  patches replace or remove one keyed row, Peer catalogs provide Chat capabilities, and
-  Chat updates maintain unread presentation.
+  patches replace or remove one keyed row, and Notifications supply what waits on each
+  peer, so Home counts nothing of its own.
 
 ### Call view
 

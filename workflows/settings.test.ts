@@ -14,7 +14,6 @@ test("a peer reaches nothing until it is let in", async ({ openVessel }) => {
   // Bob has decided nothing and grants nothing, so she cannot write to him.
   await connectToPeer(alice);
   await expect(alice.getByLabel("Message", { exact: true })).toBeDisabled();
-  await expect(peerNamed(bob, "alice")).toContainText("Requesting a connection");
 
   await peerSettings(bob, "alice").click();
   await expect(bob.getByText("Requesting a connection")).toBeVisible();
@@ -62,7 +61,7 @@ test("withholding the registry closes that peer's connection", async ({ openVess
   await expect(alice.getByRole("alert")).toContainText("not connected");
 
   await alice.getByRole("button", { name: "Back to Home" }).click();
-  await expect(peerNamed(alice, "bob").getByLabel("Not connected", { exact: true }))
+  await expect(peerNamed(alice, "bob").getByLabel("Disconnected", { exact: true }))
     .toBeVisible();
 });
 

@@ -14,16 +14,18 @@ using brochain
    is unavailable, sign-in still succeeds and Home shows the failure. The list
    updates as people become available through the Beacon or direct connections,
    and **Refresh peers** retries the Beacon and refreshes connected peers. People
-   identified earlier stay listed for that account after a reload, where **Not
-   currently available** means they must be found again.
+   identified earlier stay listed for that account after a reload. A circle on each
+   avatar says where that peer stands — green connected, blue reachable, grey no
+   longer reachable, so they must be found again — and a call in progress takes that
+   place until it ends.
 3. **Connect.** Select a peer to open the conversation with it, then select
    **Connect** there; **Disconnect** in the same place drops that connection, and
    both of you see it go. If someone gave you an address instead, select **Connect
    directly** on Home and paste it into the dialog, which takes either a URL such as
    `https://example.com` or a peer multiaddress. That only connects; the peer
    then appears in the list like any other. Connecting grants nothing by itself:
-   until you have let each other in, both of you appear as **Requesting a
-   connection**, shown by peer ID, and nothing can be exchanged.
+   until you have let each other in, each of you reads as **Requesting a connection**
+   on the other's peer page, shown by peer ID, and nothing can be exchanged.
 4. **Talk.** In a conversation, enter text and select **Send message**. Use **Send
    a file** where file sharing is available for that peer; progress and failures
    appear in the conversation. Both people must be connected, and must have let

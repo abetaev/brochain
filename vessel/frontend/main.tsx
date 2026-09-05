@@ -132,7 +132,6 @@ function Vessel() {
             <Home
               notifications={notifications()}
               session={current().session}
-              chat={current().chat}
               roster={current().roster}
               onOpenChat={(peerId) => setLocation({ view: "chat", peerId, ...services(current()) })}
               onOpenPeer={(peerId) =>

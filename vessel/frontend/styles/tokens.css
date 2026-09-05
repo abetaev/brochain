@@ -17,6 +17,11 @@
   --brochain-color-control: #b8b8b8;
   --brochain-color-confirmation: #91e383;
   --brochain-color-rejection: #e38383;
+  /* Connection state, which is a peer's own condition rather than an answer to
+     anything, so it carries its own colours. */
+  --brochain-color-connected: #91e383;
+  --brochain-color-disconnected: #6b8fe0;
+  --brochain-color-unavailable: #b8b8b8;
   --brochain-color-surface: #b1b2b5;
   --brochain-color-on-surface: #1a1a1a;
   --brochain-color-border: #a0a0a5;
@@ -37,6 +42,7 @@
   :root {
     --brochain-color-secondary: #4a4a4e;
     --brochain-color-control: #5c5c62;
+    --brochain-color-unavailable: #5c5c62;
     --brochain-color-surface: #0f172a;
     --brochain-color-on-surface: #f5f5f7;
     --brochain-color-border: #33333a;

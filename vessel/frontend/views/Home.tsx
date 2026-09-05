@@ -3,7 +3,6 @@ import {
   displayName,
   observeDisplayName,
 } from "@v/backend/options/peer-names";
-import { registryServiceName } from "@c/backend/network/services/registry";
 import type { Session } from "@v/backend/session";
 import type { Action } from "@v/frontend/components/ActionBar";
 import { Avatar } from "@v/frontend/components/Avatar";
@@ -14,12 +13,10 @@ import { ListItem } from "@v/frontend/components/ListItem";
 import { TextField } from "@v/frontend/components/TextField";
 import type { Notification } from "@v/frontend/services/notifications";
 import { Handheld } from "@v/frontend/layouts/Handheld";
-import type { Chat } from "@v/frontend/services/chat";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 
 export function Home(props: {
   session: Session;
-  chat: Chat;
   roster: Roster;
   notifications: readonly Notification[];
   onOpenChat(peerId: string): void;
@@ -33,8 +30,6 @@ export function Home(props: {
   const [connectOpen, setConnectOpen] = createSignal(false);
   const [actionBusy, setActionBusy] = createSignal(false);
   const [peers, setPeers] = createSignal(props.roster.list());
-  const receivedByPeer = new Map<string, Set<string>>();
-  const [unread, setUnread] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   const localId = props.session.network().id;
   const [chosenName, setChosenName] = createSignal(
     displayName(props.session.options(), localId),
@@ -43,41 +38,15 @@ export function Home(props: {
   // names it until a name of its own is chosen.
   const localName = () => chosenName() ?? props.session.username;
 
-  function receivedIds(peerId: string): Set<string> {
-    let ids = receivedByPeer.get(peerId);
-    if (ids === undefined) {
-      ids = new Set(props.chat.history(peerId)
-        .filter((item) => item.direction === "received")
-        .map((item) => item.id));
-      receivedByPeer.set(peerId, ids);
-    }
-    return ids;
-  }
-
-  function updateUnread(peerId: string, read = props.chat.readCount(peerId)): void {
-    const next = receivedIds(peerId).size > read;
-    setUnread((current) => current.get(peerId) === next
-      ? current
-      : new Map(current).set(peerId, next));
-  }
-
-  function hasUnread(peerId: string): boolean {
-    return unread().get(peerId) ??
-      (receivedIds(peerId).size > props.chat.readCount(peerId));
-  }
+  // What waits for a reader is gathered once, for the status bar and for the rows
+  // alike, so Home counts nothing of its own.
+  const waiting = (peerId: string): Notification | undefined =>
+    props.notifications.find((notification) => notification.peerId === peerId);
 
   const stops = [
     observeDisplayName(props.session.options(), localId, setChosenName),
     props.roster.updates.subscribe((update) => {
       setPeers((current) => applyRosterUpdate(current, update));
-    }),
-    props.chat.updates.subscribe((item) => {
-      if (item.direction !== "received") return;
-      receivedIds(item.peerId).add(item.id);
-      updateUnread(item.peerId);
-    }),
-    props.chat.reads.subscribe(({ peerId, count }) => {
-      updateUnread(peerId, count);
     }),
   ];
   const stopObserving = () => stops.forEach((stop) => stop());
@@ -189,9 +158,8 @@ export function Home(props: {
             <For each={peers()}>
               {(peer) => (
                 <PeerRow
-                  services={network.services()}
                   listed={peer}
-                  unread={hasUnread(peer.peerId)}
+                  waiting={waiting(peer.peerId)}
                   onOpenChat={props.onOpenChat}
                   onOpenPeer={props.onOpenPeer}
                 />
@@ -221,18 +189,19 @@ export function Home(props: {
   );
 }
 
+// A row is a peer, not a status report: the name is the only text, and everything
+// else about that peer hangs off its avatar.
 function PeerRow(props: {
-  services: readonly string[];
   listed: RosterEntry;
-  unread: boolean;
+  waiting?: Notification;
   onOpenChat(peerId: string): void;
   onOpenPeer(peerId: string): void;
 }) {
-  // A peer holding nothing but Registry has reached us and reaches nothing yet.
-  const requesting = () => {
-    const peer = props.listed.peer;
-    return peer !== undefined && props.listed.online &&
-      !props.services.some((name) => name !== registryServiceName && peer.hosts(name));
+  // A peer we hold no address for cannot be reached at all; one we do is simply
+  // not connected yet.
+  const connection = () => {
+    if (props.listed.online) return "connected" as const;
+    return props.listed.addresses.length > 0 ? "disconnected" as const : "unavailable" as const;
   };
 
   return (
@@ -241,27 +210,23 @@ function PeerRow(props: {
         <Avatar
           seed={props.listed.peerId}
           name={props.listed.name}
-          badges={<Show when={props.unread}><Badge variant="unread" /></Show>}
+          badges={
+            <>
+              <Show when={props.waiting?.unread}><Badge variant="unread" /></Show>
+              <Show
+                when={props.waiting?.call}
+                fallback={<Badge variant="connection" state={connection()} />}
+              >
+                {(mode) => <Badge variant="call" mode={mode()} />}
+              </Show>
+            </>
+          }
           onClick={() => props.onOpenPeer(props.listed.peerId)}
           label={`${props.listed.name} settings`}
         />
       }
       label={props.listed.name}
       onClick={() => props.onOpenChat(props.listed.peerId)}
-      actions={
-        <>
-          <span
-            classList={{ "connection-state": true, connected: props.listed.online }}
-            aria-label={props.listed.online ? "Connected" : "Not connected"}
-          />
-          <Show when={requesting()}>
-            <small>Requesting a connection</small>
-          </Show>
-          <Show when={!props.listed.online && props.listed.addresses.length === 0}>
-            <small>Not currently available</small>
-          </Show>
-        </>
-      }
     />
   );
 }

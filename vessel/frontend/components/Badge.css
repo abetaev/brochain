@@ -28,6 +28,18 @@
   color: #fff;
 }
 
+/* Connection state shares 5 o'clock with the call it would otherwise contradict,
+   and is a plain circle because it carries no action. */
+.badge[data-variant="connection"] {
+  bottom: 0;
+  right: 0;
+  transform: translate(35%, 35%);
+}
+
+.badge[data-state="connected"] { background: var(--brochain-color-connected); }
+.badge[data-state="disconnected"] { background: var(--brochain-color-disconnected); }
+.badge[data-state="unavailable"] { background: var(--brochain-color-unavailable); }
+
 /* An incoming call is still asking; an ongoing one has been answered. */
 .badge[data-variant="call"][data-mode="incoming"] {
   animation: badge-pulse 1.2s ease-in-out infinite;
