@@ -3,6 +3,10 @@ brochain
 
 Private peer-to-peer communication.
 
+Where a browser offers it, brochain installs as an application of its own and opens
+outside the browser. It is the same application either way, and an installed one is
+signed into the same way.
+
 using brochain
 --------------
 

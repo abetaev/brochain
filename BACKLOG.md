@@ -11,28 +11,48 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-installable application
------------------------
+biometric authentication
+------------------------
 
-type: bug
-scope: unknown until measured
+type: feature
+scope: account, account view, settings view
 
-Every run mode now serves a manifest and a service worker, the manifest names the
-icons a browser requires, and a plain origin reached at a device's own forwarded
-`localhost` is secure enough to install from, so nothing stands between the
-application and a phone but installing it there.
+An installed application is evicted like any other: switching away for long enough
+ends the Session, and what returns is the account list. Nothing a page can do
+prevents that, so returning cheaply is the remedy — the reader unlocks by the
+verification their device already performs rather than by typing a password.
 
-Measure what installation alone changes: whether switching apps still ends the
-Session, and how long one survives. Returning a killed application to its reader is
-a separate concern, refined once that is known. Its Session MUST be
-re-authenticated by password; an unlocked identity is not persisted for a relaunch
-to resume.
+A passkey's pseudo-random function derives the same secret from an authenticator
+for a given salt, so the key which unwraps an account is re-derived at each unlock
+and stored nowhere. Account keeps a second wrapping of the secrets it already
+holds; the password wrapping is untouched and remains the fallback, because an
+authenticator can be absent, unsupported, or lost.
 
-An installed application is a separate task on the device rather than a tab inside
-a backgrounded browser, which is a different eviction class; it is not a guarantee
-of survival. A service worker holds no Session: it is started for an event and
-terminated when idle, and peer connections cannot exist in it. What it holds is the
-precached shell, so a relaunch is immediate and needs no network.
+- Enrolment belongs to this peer's own Settings, where the secrets are unlocked
+  already and wrapping them needs no password re-entry. The same control removes
+  it, and deleting an account MUST delete it with the account.
+- The ceremony runs in the window, because credentials are a Window interface. The
+  derived secret reaches the Worker the way a password already does, and the seed
+  stays there.
+- Unlock offers the authenticator to an account which has one and the password to
+  every account, and MUST fall back to the password whenever a ceremony fails or an
+  authenticator declines.
+- Not every authenticator evaluates the function, so support is discovered by
+  asking rather than assumed, and enrolment says so where it cannot be offered.
+- A credential belongs to an origin, so an account enrolled against one is not
+  unlocked by it against another, and the password is what carries an account
+  between them.
+
+Refine the wrapped record's shape, the salt, whether more than one authenticator
+may be enrolled, and what a failed or unenrolled unlock tells a reader before
+implementation. A workflow can drive a virtual authenticator through the browser's
+debugging protocol rather than hardware; whether that authenticator evaluates the
+function is the first thing to establish, because it decides how much of this is
+provable at that level and how much falls to a lower one.
+
+Returning signed in is not returning connected: a rebuilt Session holds no
+conversation history and no connections. Those are peer auto-connect and the feed
+thought below, not this.
 
 identity change notification
 ----------------------------
@@ -44,6 +64,23 @@ the identity service is request/response only, so a display name change reaches 
 earlier than its next connection. give it an events facet that tells already-connected peers
 when the local name changes, following how registry announces its catalog.
 
+persistent Beacon identity
+--------------------------
+
+type: feature
+scope: beacon
+
+Beacon generates an identity at each start, so a restarted Beacon is a different
+peer. Everything keyed by a peer ID is orphaned by that: its roster entry, the
+name it was given, the services decided for it, and any configuration a peer holds
+about it. A relay every peer meets is the last identity which should be disposable.
+
+Beacon MUST keep one identity across restarts: generated once, retained, and used
+thereafter. Refine where it is retained, how a deployment supplies or replaces one,
+and what happens when it cannot be read before implementation. The relay the Vite
+plugin creates and the Beacon process are one deployment's relay and take the same
+identity.
+
 peer auto-connect
 -----------------
 
@@ -54,6 +91,15 @@ connect to peers marked for automatic connection whenever they become reachable,
 per peer as `peers/{peerId}.auto_connect`, off by default. the control belongs on the peer
 view but outside the service list — auto connect is a frontend behaviour, not a service that
 is published to that peer.
+
+The Beacon is the one peer which arrives with it enabled, so the connection Home
+starts today becomes an instance of this rather than a case of its own. Beacon is
+reached by an address derived from this page's origin rather than by a peer ID, so
+the first connection to it is still made from that address and the option governs
+every later one; keying it by peer ID at all requires the identity to survive a
+restart, which is why persistent Beacon identity comes first.
+
+Wanted before the first production version.
 
 invitation service
 ------------------
