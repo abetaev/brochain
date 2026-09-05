@@ -27,6 +27,8 @@ export function Avatar(props: {
   /** Overrides the identity-derived colour. */
   color?: string;
   image?: string;
+  /** Shown in place of the initials, for a slot standing for a thing rather than a peer. */
+  icon?: string;
   /** Badges to hang off the circle, e.g. <Badge variant="unread" />. */
   badges?: JSX.Element;
   onClick?: () => void;
@@ -45,7 +47,7 @@ export function Avatar(props: {
 
   const circle = () => (
     <span class="avatar-circle" style={{ "--avatar-color": props.color ?? peerAccentColor(props.seed) }}>
-      <Show when={props.image} fallback={initials(shown())}>
+      <Show when={props.image} fallback={props.icon ?? initials(shown())}>
         {(image) => <img src={image()} alt="" />}
       </Show>
     </span>

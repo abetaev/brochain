@@ -11,52 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-multiline messages render as one line
--------------------------------------
-
-type: bug
-scope: chat, UI
-
-a message typed across several lines arrives and renders as a single run of text — the
-line breaks the sender put in are lost when the bubble is drawn. the text is stored and
-transported intact; it is the rendering that collapses it.
-
-handheld view layout
---------------------
-
-type: usability
-scope: frontend views
-
-move home, chat and peer onto the Handheld layout the account views already use, so every
-view gets its StatusBar, bottom-aligned content and generated ActionBar from one place.
-content on all three currently sits at the top of the main area instead of within finger
-reach at the bottom.
-
-chat's message avatars should attach to their message the way the mockup draws them: the
-40px avatar tag butts flush against the bubble with no gap and interlocking corner radii,
-top-aligned against a taller bubble — not a detached circle.
-
-peer needs restructuring: avatar, name and info above the service toggles; no explanatory
-prose between the services header and the toggles; peer id must not overflow its box (clip
-with an ellipsis); addresses are long, so collapse them by default; reset name and refresh
-identity belong in one centered row directly under the editable name. auto connect is not a
-service and leaves that list entirely.
-
-the cog in home's action bar goes — local settings are reached by tapping the local peer's
-avatar in the status bar instead.
-
-local peer options
-------------------
-
-type: feature
-scope: options, network
-
-settings that describe this peer's own behaviour, keyed the same way remote peers already
-are: `peers/{localPeerId}.auto_accept_connections`, and `peers/{localPeerId}.display_name`
-reusing the existing peer-names module. the local peer id is `session.network().id`; expose
-it to views. follow the shape of `vessel/backend/options/peer-names.ts` — the options engine
-needs no change.
-
 connection approval
 -------------------
 
@@ -339,6 +293,28 @@ the limits a relay places on call quality before implementation.
 
 thoughts
 ========
+
+conversation becomes a feed
+---------------------------
+
+Rename Chat to Feed and widen what a conversation holds: messages, transfers and
+calls are already items of one history, and posts join them. A view then shows a
+projection of that history rather than all of it, selected by a filter over item
+kinds. Retention becomes persistent, so a conversation survives a reload rather
+than lasting only for the Session — every item kind is already scalar data except
+a transfer's stored file. Refine what a post is, how a filter is chosen and
+remembered, whether a projection is a Feed concern or a view's, and what
+persistence means for unread counts before implementation.
+
+rich message content
+--------------------
+
+Render message text as rich content rather than one run of characters, most
+likely markdown, of which the line breaks a sender typed are the simplest case
+and today are lost when the bubble is drawn. The text is stored and transported
+intact; it is the rendering that collapses it. Refine which markup is supported,
+how untrusted remote text is sanitised, and what it does to bubble layout before
+implementation.
 
 portable accounts
 -----------------

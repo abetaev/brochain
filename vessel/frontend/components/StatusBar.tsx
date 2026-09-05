@@ -1,16 +1,14 @@
 import { For, Show } from "solid-js";
 import { Avatar } from "@v/frontend/components/Avatar";
 import { Badge } from "@v/frontend/components/Badge";
+import type { Notification } from "@v/frontend/services/notifications";
 import "./StatusBar.css";
 
-// A peer wanting attention: their avatar carries a badge per waiting thing, and
-// tapping it opens that peer.
-export interface Notification {
-  readonly peerId: string;
-  readonly name: string;
-  readonly unread?: boolean;
-  readonly call?: "incoming" | "ongoing";
-  readonly onClick?: () => void;
+// An avatar shows who wants attention; its accessible name has to say what for.
+function waiting(notification: Notification): string {
+  if (notification.call === "incoming") return `${notification.name} is calling`;
+  if (notification.call === "ongoing") return `In a call with ${notification.name}`;
+  return `Unread messages from ${notification.name}`;
 }
 
 // Whose view this is — the local peer on Home, the remote peer on Chat and Peer.
@@ -54,7 +52,7 @@ export function StatusBar(props: {
                   seed={notification.peerId}
                   name={notification.name}
                   size="sm"
-                  label={notification.name}
+                  label={waiting(notification)}
                   onClick={notification.onClick}
                   badges={
                     <>

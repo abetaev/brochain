@@ -17,15 +17,18 @@ export function FeedEntry(props: {
   direction: "sent" | "received";
   avatarSeed: string;
   avatarName: string;
+  /** Stands in for the peer when the entry is not something they said. */
+  icon?: string;
   children: JSX.Element;
 }) {
   const sent = () => props.direction === "sent";
 
   return (
-    <li class="feed-entry" data-direction={props.direction}>
+    <li class="feed-entry" data-direction={props.direction} data-icon={props.icon}>
       <Avatar
         seed={props.avatarSeed}
         name={props.avatarName}
+        icon={props.icon}
         shape={sent() ? "tag-end" : "tag-start"}
       />
       <article

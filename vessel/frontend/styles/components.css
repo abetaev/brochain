@@ -10,26 +10,6 @@
   overflow: hidden;
 }
 
-/* ButtonGroup (Home, Peer, Call) */
-.button-group {
-  display: flex;
-  gap: 0;
-}
-
-.button-group > .button {
-  border-radius: 0;
-}
-
-.button-group > .button:first-child {
-  border-start-start-radius: var(--brochain-control-radius);
-  border-end-start-radius: var(--brochain-control-radius);
-}
-
-.button-group > .button:last-child {
-  border-start-end-radius: var(--brochain-control-radius);
-  border-end-end-radius: var(--brochain-control-radius);
-}
-
 /* A plain text action, for controls the icon-button library doesn't cover
    (Refresh peers, Reset name…). */
 .text-button {
@@ -51,35 +31,6 @@
 .text-button.primary {
   background: var(--brochain-color-primary);
   border-color: var(--brochain-color-primary);
-}
-
-/* Conference (Call) */
-.conference {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  background: #1a1a1a;
-}
-
-.conference video {
-  background: #1a1a1a;
-}
-
-.conference .remote {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.conference .local {
-  position: absolute;
-  bottom: 0.75rem;
-  right: 0.75rem;
-  width: 20%;
-  aspect-ratio: 3 / 4;
-  object-fit: cover;
-  border-radius: var(--brochain-control-radius);
-  border: 2px solid var(--brochain-background);
 }
 
 /* Home's connection-state dot */

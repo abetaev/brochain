@@ -5,7 +5,7 @@ export function Button(props: {
   /** The accessible name — icon-only buttons have no visible text to fall back on. */
   label: string;
   variant?: "primary" | "secondary" | "confirmation" | "rejection";
-  size?: "md" | "sm";
+  size?: "md" | "compact" | "sm";
   type?: "button" | "submit" | "reset";
   disabled?: boolean;
   busy?: boolean;
@@ -22,6 +22,7 @@ export function Button(props: {
         secondary: variant() === "secondary",
         confirmation: variant() === "confirmation",
         rejection: variant() === "rejection",
+        compact: props.size === "compact",
         sm: props.size === "sm",
       }}
       aria-label={props.label}

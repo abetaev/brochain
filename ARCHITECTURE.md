@@ -187,8 +187,11 @@ Vessel backend
   object identifiers are percent-encoded. A missing or true
   `peers/${peerId}/services/${serviceName}.enabled` publishes that service to
   that peer; false withholds it. `peers/${peerId}.display_name` names that peer
-  wherever it is shown. Observation is synchronous, ordered, non-retained, and
-  property-specific.
+  wherever it is shown. This peer is one of them, configured under its own peer ID
+  and read the same way: its `display_name` overrides the account username, and a
+  true `auto_accept_connections` records that connection requests need not be asked
+  about, absent meaning they must. Observation is synchronous, ordered,
+  non-retained, and property-specific.
 
 #### Storage
 
@@ -267,13 +270,19 @@ Vessel frontend
 ### Application
 
 - **dependencies**: Account and, after authentication, an active Session
-- **structure**: Roster and Chat services plus one active Account, Home, or Chat
-  view
+- **structure**: Roster, Chat, Call, and Notifications services plus one active
+  Account, Home, Chat, Peer, or Call view
 - **use cases**: authenticate; sign out; navigate between account, peer list, and
   conversation views
-- **behavior**: after authentication, Application constructs Chat and then Roster
-  before exposing Home, so both subscribe before Home starts an external
-  connection. Initialization failure closes the Session.
+- **behavior**: after authentication, Application constructs Call, Chat, and then
+  Roster before exposing Home, so each subscribes before Home starts an external
+  connection. Initialization failure closes the Session. Application owns
+  navigation, so it is what gives each Notification somewhere to go, deciding where
+  selecting one leads: a running call to the Call view,
+  anything else — a call still ringing included, since that is answered in the
+  conversation — to the conversation. The call being watched is not offered back to
+  itself. The Call view exists only while a call runs: Application opens it when one
+  is answered and returns to the conversation the moment it is over.
 
 ### Roster
 
@@ -297,19 +306,75 @@ Vessel frontend
   reset. Addresses, availability, discovery, and service catalogs remain
   transient.
 
+### Roster
+
+- **dependencies**: Session Network, persistent Storage, and Signals
+- **structure**: one persistent Identity store, the observed display-name Options,
+  one current peer projection, and a keyed update Channel
+- **use cases**: list or get current peers; refresh remote observations; reset a
+  peer's name; read or forget a peer's reported name; observe one-peer set and
+  remove updates
+- **behavior**: construction combines connected, discovered, and remembered
+  Peers. Network and Discovery changes update only the affected projection and
+  publish that patch. A connection update makes Roster refresh that Peer's
+  catalog, and the catalog decides whether Identity and Discovery are queried.
+  Provider failures are isolated. Valid Identity is persisted before its peer
+  update, and names the peer the first time one is read, because a name is seeded
+  only while none is held; a chosen name therefore survives every later
+  identification. A peer with no name is shown by its peer ID. Resetting concerns
+  the name alone: it returns to whatever the peer last reported. The reported
+  Identity is read again while the peer publishes one and is forgotten otherwise,
+  so a peer becomes its peer ID only once that report is dropped and the name
+  reset. Addresses, availability, discovery, and service catalogs remain
+  transient.
+
+### Settings
+
+- **dependencies**: Session Network, Options, and the account username
+- **structure**: the local peer ID and its observed display-name Option
+- **use cases**: read this peer's ID and name; observe name changes
+- **behavior**: Roster holds remote peers only, so this peer is read straight from
+  the Options it is named in, under its own peer ID like any other peer. The
+  account username names it until a name of its own is chosen, and every view
+  showing this peer reads the same one.
+
+### Notifications
+
+- **dependencies**: Roster, Chat, Call, and Signals
+- **structure**: one gathered notification list and a Channel publishing it
+- **use cases**: list what is waiting for a reader; observe changes to it
+- **behavior**: a notification exists for a peer holding unread items or a call
+  which has not ended — waiting to be answered, or already running, which is how a call
+  a reader navigated away from stays reachable. A call from a peer the Roster does
+  not hold is still raised. Notifications are gathered once for the whole
+  application rather than by each view, and republished only when the list actually
+  differs, so unrelated Chat and Roster traffic does not redraw the bar. What
+  opening one leads to is not theirs to say; Application attaches that, because it
+  owns navigation.
+
 ### Chat
 
-- **dependencies**: Session Storage, Network, and Signals
+- **dependencies**: Session Storage, Network, Call, and Signals
 - **structure**: peer-scoped item, order, read, and file stores, item and read
   Channels, and subscriptions to each Peer's published Messaging and DataTransfer
+  and to the current Call
 - **use cases**: inspect history, unread count, and capabilities; mark read; send
-  text or files; observe item and read updates
+  text or files; record a call; observe item and read updates
 - **behavior**: Chat owns conversation identity — it assigns every item's
   identifier and derives sent and failed state from its own remote call. It
   subscribes to the instances a Peer publishes, which exist before that peer's
   catalog is known, while the catalog gates the text and file controls. Incoming
   files stream into Chat's file store and an offer without a declared size is
-  refused. Conversation state survives view navigation and lasts for the Session.
+  refused. A call is the third thing that happens with a peer and is written into
+  the same conversation as the other two: one item raised when the call begins and
+  revised until it is over, holding the call's own states rather than a transfer's.
+  Pending is calling, connecting and active are ongoing, and a cleared call ends
+  like an ended one, because a reader's own hang-up and a decline clear a call
+  rather than end it; revisions the conversation does not show — a stream arriving,
+  a track muted — write nothing. Its identifier is minted per call, so a second
+  call to a peer is a second item. A call takes its place in the conversation's
+  order and an incoming one counts toward what is unread. Conversation state
+  survives view navigation and lasts for the Session.
 
 ### Call
 
@@ -318,7 +383,7 @@ Vessel frontend
 - **structure**: one current call, its peer connection and captured media, and a
   Channel publishing the call
 - **use cases**: report whether a peer can be called; place, accept, decline, and
-  end a call; mute the microphone and stop the camera; dismiss a finished call
+  end a call; mute the microphone and stop the camera
 - **behavior**: Call owns one call at a time and keeps it for the Session, so
   navigation cannot end it. Capture begins only once a reader accepts, and a
   second invitation arriving during a call is refused as busy. No address server
@@ -326,7 +391,7 @@ Vessel frontend
   before their description exists are held and applied with it. Muting and
   stopping the camera disable tracks rather than renegotiate. A reader's own hang
   up simply clears the call; what the far side or a failing media path did is
-  reported and stays until dismissed.
+  reported with the ending, and the conversation's record is what keeps it.
 
 ### Account view
 
@@ -339,19 +404,21 @@ Vessel frontend
 
 ### Peer view
 
-- **dependencies**: Session, Roster, and the peer identity being configured
+- **dependencies**: Session, Roster, Call, and the peer identity being configured
 - **structure**: one Roster-entry signal, the peer's name and published-service
   projections observed from Options, and view-local settings errors
 - **use cases**: read a peer's identity, availability, and addresses; name it,
   reset its name, refresh or forget its reported name; publish or refuse each
-  supported service for it
+  supported service for it; open its conversation, or place a call into it
 - **behavior**: the view lists the locally supported services and reflects each
   peer's Options while open, so a change made elsewhere appears. A name is trimmed
   and must be 1 to 64 characters; the reported Identity stays shown beside it and
   is never replaced by local naming. One control serves that report, offering to
   refresh it while the peer publishes Identity and to forget it otherwise. A refusal takes
   effect immediately, including while connected. A refused write restores its
-  control and reports the failure. Leaving returns to the view which opened it.
+  control and reports the failure. Placing a call opens that peer's conversation,
+  which is where the call's record and its controls live. Leaving returns to the
+  view which opened it.
 
 ### Home view
 
@@ -370,15 +437,17 @@ Vessel frontend
 
 ### Call view
 
-- **dependencies**: Roster and Call
+- **dependencies**: Session, Roster, and Call
 
 - **structure**: one call signal, one Roster-entry signal, both video elements,
-  and the call controls
-- **use cases**: watch a call; accept or decline an incoming one; mute, stop the
-  camera, and hang up
+  and the call controls the current call state generates
+- **use cases**: watch a running call; mute, stop the camera, and hang up; return
+  to the conversation
 - **behavior**: streams are attached from an effect, so a reader returning to a
-  running call sees it again. Leaving keeps a running call and acknowledges a
-  finished one, and hanging up returns to the conversation.
+  running call sees it again. The view is only ever open while the call runs, so it
+  offers nothing for answering or refusing one — that belongs to the conversation —
+  and leaving it simply leaves. What the call is doing is captioned over the
+  conference, which otherwise fills the view.
 
 ### Chat view
 
@@ -386,11 +455,15 @@ Vessel frontend
 - **structure**: one Roster-entry signal, Chat-history projection, text and file
   controls, and file downloads
 - **use cases**: return Home; open Peer; read a conversation; send text or files;
-  download received files; place a call
+  download received files; place a call, and answer, refuse, rejoin or end the one
+  the conversation holds
 - **behavior**: the view initializes from Roster and Chat snapshots, applies
   updates for its peer, derives capabilities from its current Peer catalog, and
-  marks existing and new received items read. It retains only interaction errors
-  and subscription cleanup; Roster owns name and availability while Chat owns
+  marks existing and new received items read. A call in the conversation carries
+  its own controls, which is where a call is answered and refused, so placing one
+  leaves the reader here rather than taking them anywhere; a second call is
+  withheld while one is in progress. It retains only interaction errors and
+  subscription cleanup; Roster owns name and availability while Chat owns
   conversation data.
 
 Beacon

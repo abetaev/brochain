@@ -1,11 +1,10 @@
 import "./styles.css";
-import { Match, Show, Switch, createSignal, onCleanup } from "solid-js";
+import { Match, Switch, createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import type { Session } from "@v/backend/session";
-import { Avatar } from "@v/frontend/components/Avatar";
-import { Button } from "@v/frontend/components/Button";
-import type { Call as CallService, CallState } from "./services/call";
+import type { Call as CallService } from "./services/call";
 import type { Chat as ChatService } from "./services/chat";
+import type { Notification, Notifications } from "./services/notifications";
 import type { Roster } from "./services/roster";
 import { Account } from "./views/Account";
 import { Call } from "./views/Call";
@@ -18,6 +17,7 @@ interface ActiveSession {
   readonly chat: ChatService;
   readonly roster: Roster;
   readonly call: CallService;
+  readonly notifications: Notifications;
 }
 
 type Location =
@@ -33,17 +33,44 @@ type Location =
 
 function Vessel() {
   const [location, setLocation] = createSignal<Location>({ view: "account" });
+  const [waiting, setWaiting] = createSignal<readonly Notification[]>([]);
   async function activate(session: Session): Promise<void> {
     try {
-      const [{ createChat }, { createRoster }, { createCall }] = await Promise.all([
+      const [
+        { createChat },
+        { createRoster },
+        { createCall },
+        { createNotifications },
+      ] = await Promise.all([
         import("./services/chat"),
         import("./services/roster"),
         import("./services/call"),
+        import("./services/notifications"),
       ]);
-      const chat = createChat(session);
-      const roster = await createRoster(session);
+      // Chat records what happens with a peer, a call included, so it subscribes
+      // before anything else can react to one.
       const call = createCall(session);
-      setLocation({ view: "home", session, chat, roster, call });
+      const chat = createChat(session, call);
+      const roster = await createRoster(session);
+      const notifications = createNotifications({ chat, call, roster });
+      notifications.updates.subscribe(setWaiting);
+      setWaiting(notifications.list());
+      // The call view is for a call that is running: it opens when one is answered
+      // and closes the moment it is over.
+      call.updates.subscribe((state) => {
+        const current = location();
+        if (current.view === "account") return;
+        const running = state !== undefined &&
+          (state.status === "connecting" || state.status === "active");
+        if (running) {
+          if (current.view !== "call" || current.peerId !== state.peerId) {
+            setLocation({ view: "call", peerId: state.peerId, ...services(current) });
+          }
+        } else if (current.view === "call") {
+          setLocation({ view: "chat", peerId: current.peerId, ...services(current) });
+        }
+      });
+      setLocation({ view: "home", session, chat, roster, call, notifications });
     } catch (error) {
       await session.close().catch(() => {});
       throw error;
@@ -58,11 +85,34 @@ function Vessel() {
     chat: current.chat,
     roster: current.roster,
     call: current.call,
+    notifications: current.notifications,
   });
   const at = <View extends Location["view"]>(view: View) => () => {
     const current = location();
     return current.view === view ? current as Extract<Location, { view: View }> : undefined;
   };
+  // A call outlives the view it started in and a message arrives wherever the
+  // reader is, so both reach them through the one StatusBar every view carries.
+  function open(peerId: string, mode: Notification["call"]): void {
+    const current = active();
+    if (current === undefined) return;
+    // A call still ringing is answered in the conversation; only a running one
+    // has a call view to reach.
+    setLocation(mode === "ongoing"
+      ? { view: "call", peerId, ...services(current) }
+      : { view: "chat", peerId, ...services(current) });
+  }
+  const notifications = (): readonly Notification[] => {
+    const current = location();
+    const watching = current.view === "call" ? current.peerId : undefined;
+    return waiting().flatMap((held): Notification[] => {
+      // The call being watched is not something waiting elsewhere.
+      const mode = held.peerId === watching ? undefined : held.call;
+      if (!held.unread && mode === undefined) return [];
+      return [{ ...held, call: mode, onClick: () => open(held.peerId, mode) }];
+    });
+  };
+
   const home = at("home");
   const chat = at("chat");
   const peer = at("peer");
@@ -70,17 +120,6 @@ function Vessel() {
 
   return (
     <div class="app-shell">
-      {/* A call reaches a reader wherever they are, and outlives the view it started in. */}
-      <Show when={location().view === "call" ? undefined : active()}>
-        {(current) => (
-          <CallBanner
-            call={current().call}
-            roster={current().roster}
-            onOpen={(peerId) => setLocation({ view: "call", peerId, ...services(current()) })}
-          />
-        )}
-      </Show>
-
       <Switch>
         <Match when={location().view === "account"}>
           <Account onSignedIn={activate} />
@@ -88,6 +127,7 @@ function Vessel() {
         <Match when={home()}>
           {(current) => (
             <Home
+              notifications={notifications()}
               session={current().session}
               chat={current().chat}
               roster={current().roster}
@@ -95,6 +135,7 @@ function Vessel() {
               onOpenPeer={(peerId) =>
                 setLocation({ view: "peer", origin: "home", peerId, ...services(current()) })}
               onSignedOut={() => {
+                setWaiting([]);
                 setLocation({ view: "account" });
               }}
             />
@@ -103,6 +144,7 @@ function Vessel() {
         <Match when={chat()}>
           {(current) => (
             <Chat
+              notifications={notifications()}
               chat={current().chat}
               call={current().call}
               roster={current().roster}
@@ -123,6 +165,8 @@ function Vessel() {
         <Match when={call()}>
           {(current) => (
             <Call
+              notifications={notifications()}
+              session={current().session}
               call={current().call}
               roster={current().roster}
               peerId={current().peerId}
@@ -134,15 +178,13 @@ function Vessel() {
         <Match when={peer()}>
           {(current) => (
             <Peer
+              notifications={notifications()}
               session={current().session}
               roster={current().roster}
-              chat={current().chat}
               call={current().call}
               peerId={current().peerId}
               onOpenChat={(peerId) =>
                 setLocation({ view: "chat", peerId, ...services(current()) })}
-              onOpenCall={() =>
-                setLocation({ view: "call", peerId: current().peerId, ...services(current()) })}
               onBack={() => setLocation({
                 ...services(current()),
                 ...(current().origin === "chat"
@@ -154,69 +196,6 @@ function Vessel() {
         </Match>
       </Switch>
     </div>
-  );
-}
-
-function CallBanner(props: {
-  call: CallService;
-  roster: Roster;
-  onOpen(peerId: string): void;
-}) {
-  const [state, setState] = createSignal<CallState | undefined>(props.call.current());
-  const [names, setNames] = createSignal<ReadonlyMap<string, string>>(new Map());
-  const stops = [
-    props.call.updates.subscribe((next) => setState(next)),
-    props.roster.updates.subscribe((update) => {
-      if (update.type !== "set") return;
-      setNames((current) => new Map(current).set(update.entry.peerId, update.entry.name));
-    }),
-  ];
-  onCleanup(() => stops.forEach((stop) => stop()));
-  const name = (peerId: string) =>
-    names().get(peerId) ?? props.roster.get(peerId)?.name ?? peerId;
-
-  return (
-    <Show when={state()}>
-      {(current) => (
-        <aside role="status" class="taskbar">
-          <Avatar seed={current().peerId} name={name(current().peerId)} size="sm" />
-          <Switch>
-            <Match when={current().status === "ended"}>
-              <p>{current().error ?? "The call ended."}</p>
-              <Button icon="✖️" label="Dismiss" variant="secondary" onClick={() => props.call.dismiss()} />
-            </Match>
-            <Match when={current().status === "pending" && current().direction === "incoming"}>
-              <p>{name(current().peerId)} is calling.</p>
-              <Button
-                icon="👍"
-                label="Accept call"
-                variant="confirmation"
-                onClick={() => {
-                  const peerId = current().peerId;
-                  void props.call.accept();
-                  props.onOpen(peerId);
-                }}
-              />
-              <Button
-                icon="🖕"
-                label="Decline call"
-                variant="rejection"
-                onClick={() => props.call.decline()}
-              />
-            </Match>
-            <Match when={current().status === "pending"}>
-              <p>Calling {name(current().peerId)}…</p>
-              <Button icon="🖕" label="Hang up" variant="rejection" onClick={() => props.call.end()} />
-            </Match>
-            <Match when={true}>
-              <p>In a call with {name(current().peerId)}.</p>
-              <Button icon="📞" label="Open call" variant="primary" onClick={() => props.onOpen(current().peerId)} />
-              <Button icon="🖕" label="Hang up" variant="rejection" onClick={() => props.call.end()} />
-            </Match>
-          </Switch>
-        </aside>
-      )}
-    </Show>
   );
 }
 

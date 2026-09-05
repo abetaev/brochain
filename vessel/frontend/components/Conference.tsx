@@ -1,4 +1,5 @@
 import { createEffect } from "solid-js";
+import "./Conference.css";
 
 // The element is recreated whenever the call view is opened, so the stream is
 // attached from an effect and a reader returning mid-call sees the picture again.

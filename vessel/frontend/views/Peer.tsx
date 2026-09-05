@@ -15,22 +15,20 @@ import type { Action } from "@v/frontend/components/ActionBar";
 import { Avatar } from "@v/frontend/components/Avatar";
 import { Card } from "@v/frontend/components/Card";
 import { EditableLabel } from "@v/frontend/components/EditableLabel";
-import type { Notification } from "@v/frontend/components/StatusBar";
+import type { Notification } from "@v/frontend/services/notifications";
 import { Toggle } from "@v/frontend/components/Toggle";
 import { Handheld } from "@v/frontend/layouts/Handheld";
 import "./Peer.css";
-import type { Call as CallService, CallState } from "@v/frontend/services/call";
-import type { Chat } from "@v/frontend/services/chat";
+import type { Call as CallService } from "@v/frontend/services/call";
 import type { Roster } from "@v/frontend/services/roster";
 
 export function Peer(props: {
   session: Session;
   roster: Roster;
-  chat: Chat;
   call: CallService;
   peerId: string;
+  notifications: readonly Notification[];
   onOpenChat(peerId: string): void;
-  onOpenCall(): void;
   onBack(): void;
 }) {
   const options = props.session.options();
@@ -41,15 +39,6 @@ export function Peer(props: {
     new Map(services.map((name) => [name, isServiceEnabled(options, props.peerId, name)])),
   );
   const [chosen, setChosen] = createSignal(displayName(options, props.peerId));
-  const [callState, setCallState] = createSignal<CallState | undefined>(props.call.current());
-  const [hasUnread, setHasUnread] = createSignal(computeUnread());
-
-  function computeUnread(): boolean {
-    const received = props.chat.history(props.peerId)
-      .filter((item) => item.direction === "received").length;
-    return received > props.chat.readCount(props.peerId);
-  }
-
   const stops = [
     props.roster.updates.subscribe((update) => {
       if (update.type === "set") {
@@ -64,13 +53,6 @@ export function Peer(props: {
         setPublished((current) => new Map(current).set(name, enabled));
       })
     ),
-    props.call.updates.subscribe((next) => setCallState(next)),
-    props.chat.updates.subscribe((item) => {
-      if (item.peerId === props.peerId) setHasUnread(computeUnread());
-    }),
-    props.chat.reads.subscribe(({ peerId }) => {
-      if (peerId === props.peerId) setHasUnread(computeUnread());
-    }),
   ];
   onCleanup(() => stops.forEach((stop) => stop()));
 
@@ -80,11 +62,6 @@ export function Peer(props: {
   const reports = () => {
     const peer = entry()?.peer;
     return peer?.isConnected() === true && peer.services().includes(identityServiceName);
-  };
-  const incomingCall = () => {
-    const current = callState();
-    return current?.peerId === props.peerId && current.status === "pending" &&
-      current.direction === "incoming";
   };
   const connectedPeer = () => {
     const peer = entry()?.peer;
@@ -110,8 +87,10 @@ export function Peer(props: {
       setError("Calls are not available.");
       return;
     }
+    // The call is placed here, but it is the conversation that carries its record
+    // and its controls until it is answered.
     void props.call.start(current);
-    props.onOpenCall();
+    props.onOpenChat(props.peerId);
   }
 
   // The observed option drives the control, so a refused write puts it back.
@@ -125,16 +104,6 @@ export function Peer(props: {
       }
     });
   }
-
-  // What is waiting for us while we're looking at this peer, carried by our own
-  // avatar the way the mockup places it.
-  const notifications = (): Notification[] => [{
-    peerId: props.session.username,
-    name: props.session.username,
-    unread: hasUnread(),
-    ...(incomingCall() ? { call: "incoming" as const } : {}),
-    onClick: () => props.onOpenChat(props.peerId),
-  }];
 
   const actions = (): Action[] => [
     { side: "start", icon: "👈", label: "Back", onClick: props.onBack },
@@ -160,7 +129,7 @@ export function Peer(props: {
       avatar={{ seed: props.peerId, name: name() }}
       title={name()}
       heading={`Peer ${name()}`}
-      notifications={notifications()}
+      notifications={props.notifications}
       actions={actions()}
     >
       <>

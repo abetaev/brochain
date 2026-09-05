@@ -1,3 +1,19 @@
+/* A call record fills its row: what the call is doing on one side, what can be
+   done about it on the other. */
+.call-record {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.call-record-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 /* The compose bar is built exactly like a sent message: the input takes the
    bubble's shape and the send button caps it the way an avatar tag does —
    flush, square where they meet, round on the outer edges. Penpot's

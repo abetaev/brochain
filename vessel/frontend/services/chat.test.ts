@@ -18,6 +18,7 @@ import {
   type StoredFile,
 } from "@v/backend/storage";
 
+import type { Call, CallState } from "./call.ts";
 import { createChat, type ChatItem } from "./chat.ts";
 
 let messagingEvents: Channel<ReceivedMessage>;
@@ -33,6 +34,8 @@ let dataTransfer: {
 let writer: FileWriter;
 let createFile: ReturnType<typeof vi.fn>;
 let session: Session;
+let calls: Channel<CallState | undefined>;
+let call: Call;
 
 function createStorage(createFile: ReturnType<typeof vi.fn>): Storage {
   const events: unknown[] = [];
@@ -70,6 +73,8 @@ function createStorage(createFile: ReturnType<typeof vi.fn>): Storage {
 beforeEach(() => {
   messagingEvents = signals.channel();
   transferEvents = signals.channel();
+  calls = signals.channel();
+  call = { updates: calls } as unknown as Call;
   messaging = {
     events: messagingEvents,
     remote: { send: vi.fn(async () => {}) },
@@ -123,7 +128,7 @@ function remotePeer(services = ["registry", "messaging", "data-transfer"]): Peer
 describe("Chat service", () => {
 
   it("retains text projections before updates and owns unread state", async () => {
-    const chat = await createChat(session);
+    const chat = await createChat(session, call);
     const updates: ChatItem[] = [];
     chat.updates.subscribe((item) => {
       expect(chat.history(item.peerId).find(({ id }) => id === item.id)).toBe(item);
@@ -166,5 +171,57 @@ describe("Chat service", () => {
   });
 
 
+  it("writes a call into the same conversation, one item for the whole call", () => {
+    const chat = createChat(session, call);
+    const outgoing = (
+      status: CallState["status"],
+      error?: string,
+    ): CallState => ({
+      peerId: "remote",
+      direction: "outgoing",
+      status,
+      microphone: true,
+      camera: true,
+      ...(error === undefined ? {} : { error }),
+    });
 
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValue("00000000-0000-4000-8000-00000000000a");
+    calls.publish(outgoing("pending"));
+    expect(chat.history("remote")).toEqual([{
+      id: "00000000-0000-4000-8000-00000000000a",
+      peerId: "remote",
+      direction: "sent",
+      kind: "call",
+      state: "calling",
+    }]);
+
+    calls.publish(outgoing("connecting"));
+    calls.publish(outgoing("active"));
+    // A stream arriving or a track muting is nothing the conversation shows.
+    calls.publish({ ...outgoing("active"), microphone: false });
+    expect(chat.history("remote")).toHaveLength(1);
+    expect(chat.history("remote")[0]).toMatchObject({ state: "ongoing" });
+
+    calls.publish(outgoing("ended", "This peer ended the call."));
+    expect(chat.history("remote")[0]).toMatchObject({
+      state: "ended",
+      error: "This peer ended the call.",
+    });
+    // The call is over, so clearing it afterwards changes nothing.
+    calls.publish(undefined);
+    expect(chat.history("remote")).toHaveLength(1);
+
+    // A second call is a second item, sided by its own direction.
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValue("00000000-0000-4000-8000-00000000000b");
+    calls.publish({ ...outgoing("pending"), direction: "incoming" });
+    calls.publish(undefined);
+    expect(chat.history("remote")).toHaveLength(2);
+    expect(chat.history("remote")[1]).toMatchObject({
+      id: "00000000-0000-4000-8000-00000000000b",
+      direction: "received",
+      state: "ended",
+    });
+  });
 });

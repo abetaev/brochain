@@ -30,7 +30,6 @@ export interface Call {
   end(): void;
   setMicrophone(enabled: boolean): void;
   setCamera(enabled: boolean): void;
-  dismiss(): void;
 }
 
 // A call has nowhere to reach beyond the local network until address discovery
@@ -272,9 +271,6 @@ export function createCall(session: Session): Call {
     setCamera(enabled) {
       for (const track of capture?.getVideoTracks() ?? []) track.enabled = enabled;
       revise({ camera: enabled });
-    },
-    dismiss() {
-      if (state?.status === "ended") clear();
     },
   };
 }

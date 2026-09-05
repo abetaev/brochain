@@ -1,0 +1,29 @@
+/* The remote peer fills the view and the reader's own picture sits in the corner
+   over it, so nothing is taken from the person being spoken to. */
+.conference {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #1a1a1a;
+}
+
+.conference video {
+  background: #1a1a1a;
+}
+
+.conference .remote {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.conference .local {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  width: 20%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: var(--brochain-control-radius);
+  border: 2px solid var(--brochain-background);
+}

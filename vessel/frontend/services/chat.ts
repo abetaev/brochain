@@ -10,6 +10,7 @@ import {
   type MessagingService,
 } from "@v/backend/network/services/messaging";
 import type { Session } from "@v/backend/session";
+import type { Call, CallState } from "./call";
 import signals from "@c/backend/signals";
 import type { Subscription } from "@c/backend/signals";
 import type { FileWriter, StoredFile } from "@v/backend/storage";
@@ -23,13 +24,21 @@ interface ChatItemBase {
   readonly id: string;
   readonly peerId: string;
   readonly direction: "sent" | "received";
+}
+
+// How a thing being carried to or from a peer is faring. A call has states of
+// its own and carries this no more than a message carries a call's.
+interface TransferState {
   readonly status: "transferring" | "complete" | "failed";
   readonly error?: string;
 }
 
+/** Ringing, answered, over — what a call in the conversation is doing. */
+export type CallRecordState = "calling" | "ongoing" | "ended";
+
 export type ChatItem = Readonly<
-  | (ChatItemBase & { kind: "text"; text: string })
-  | (ChatItemBase & {
+  | (ChatItemBase & TransferState & { kind: "text"; text: string })
+  | (ChatItemBase & TransferState & {
     kind: "file";
     name: string;
     mediaType: string;
@@ -37,6 +46,7 @@ export type ChatItem = Readonly<
     transferred: number;
     file?: ChatFile;
   })
+  | (ChatItemBase & { kind: "call"; state: CallRecordState; error?: string })
 >;
 
 interface ChatRead {
@@ -62,7 +72,7 @@ export interface Chat {
 
 const chatServiceName = "chat";
 
-export function createChat(session: Session): Chat {
+export function createChat(session: Session, call: Call): Chat {
   const updates = signals.channel<ChatItem>();
   const reads = signals.channel<ChatRead>();
   const incomingWriters = new Map<string, FileWriter>();
@@ -139,6 +149,78 @@ export function createChat(session: Session): Chat {
   function current(peerId: string, id: string): ChatItem | undefined {
     return itemStorage(peerId).get(id);
   }
+
+  function recordCall(record: {
+    readonly id: string;
+    readonly peerId: string;
+    readonly direction: "sent" | "received";
+    readonly state: CallRecordState;
+    readonly error?: string;
+  }): void {
+    const item: ChatItem = {
+      id: record.id,
+      peerId: record.peerId,
+      direction: record.direction,
+      kind: "call",
+      state: record.state,
+      ...(record.error === undefined ? {} : { error: record.error }),
+    };
+    if (current(record.peerId, record.id) === undefined) retain(item);
+    else update(item);
+  }
+
+  // A call is a third thing that happens with a peer, beside a message and a
+  // transfer, and it is written into the same conversation the same way: one item
+  // raised when the call begins and revised until it is over.
+  let ringing: {
+    readonly id: string;
+    readonly peerId: string;
+    readonly direction: "sent" | "received";
+    written: CallRecordState | undefined;
+    error: string | undefined;
+  } | undefined;
+
+  call.updates.subscribe((state) => {
+    const carried = ringing;
+    // A reader's own hang-up and a decline clear the call rather than ending it,
+    // and either way the conversation has to say the call is over.
+    if (state === undefined) {
+      ringing = undefined;
+      if (carried !== undefined && carried.written !== "ended") {
+        recordCall({
+          id: carried.id,
+          peerId: carried.peerId,
+          direction: carried.direction,
+          state: "ended",
+          ...(carried.error === undefined ? {} : { error: carried.error }),
+        });
+      }
+      return;
+    }
+
+    const next = callState(state.status);
+    const entry = carried ?? {
+      id: crypto.randomUUID(),
+      peerId: state.peerId,
+      direction: state.direction === "outgoing" ? "sent" as const : "received" as const,
+      written: undefined,
+      error: undefined,
+    };
+    // A call publishes on every revision — a stream arriving, a track muted — and
+    // none of that is anything the conversation shows.
+    const unchanged = entry.written === next && entry.error === state.error;
+    entry.written = next;
+    entry.error = state.error;
+    ringing = next === "ended" ? undefined : entry;
+    if (unchanged) return;
+    recordCall({
+      id: entry.id,
+      peerId: entry.peerId,
+      direction: entry.direction,
+      state: next,
+      ...(state.error === undefined ? {} : { error: state.error }),
+    });
+  });
 
   function receiveMessage(peerId: string, text: string): void {
     retain({
@@ -326,6 +408,11 @@ function storedFile(file: StoredFile, name: string, mediaType: string): ChatFile
     name,
     open: async () => new File([await file.blob()], name, { type: mediaType }),
   };
+}
+
+function callState(status: CallState["status"]): CallRecordState {
+  if (status === "pending") return "calling";
+  return status === "ended" ? "ended" : "ongoing";
 }
 
 function transferKey(peerId: string, id: string): string {

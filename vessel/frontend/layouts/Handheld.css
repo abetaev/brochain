@@ -25,3 +25,10 @@
 .handheld-content > :first-child {
   margin-block-start: auto;
 }
+
+/* A view whose content is the whole region — Call's conference reaches every
+   edge in the mockup, so the padding and the gap between children go away. */
+.handheld-content.bleed {
+  padding: 0;
+  gap: 0;
+}

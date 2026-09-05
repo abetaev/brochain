@@ -1,4 +1,8 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
+import {
+  displayName,
+  observeDisplayName,
+} from "@v/backend/options/peer-names";
 import type { Session } from "@v/backend/session";
 import type { Action } from "@v/frontend/components/ActionBar";
 import { Avatar } from "@v/frontend/components/Avatar";
@@ -6,6 +10,7 @@ import { Badge } from "@v/frontend/components/Badge";
 import { List } from "@v/frontend/components/List";
 import { ListItem } from "@v/frontend/components/ListItem";
 import { TextField } from "@v/frontend/components/TextField";
+import type { Notification } from "@v/frontend/services/notifications";
 import { Handheld } from "@v/frontend/layouts/Handheld";
 import type { Chat } from "@v/frontend/services/chat";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
@@ -14,6 +19,7 @@ export function Home(props: {
   session: Session;
   chat: Chat;
   roster: Roster;
+  notifications: readonly Notification[];
   onOpenChat(peerId: string): void;
   onOpenPeer(peerId: string): void;
   onSignedOut(): void;
@@ -24,6 +30,13 @@ export function Home(props: {
   const [peers, setPeers] = createSignal(props.roster.list());
   const receivedByPeer = new Map<string, Set<string>>();
   const [unread, setUnread] = createSignal<ReadonlyMap<string, boolean>>(new Map());
+  const localId = props.session.network().id;
+  const [chosenName, setChosenName] = createSignal(
+    displayName(props.session.options(), localId),
+  );
+  // This peer is named under its own peer ID like any other; the account username
+  // names it until a name of its own is chosen.
+  const localName = () => chosenName() ?? props.session.username;
   let detailsElement: HTMLDetailsElement | undefined;
 
   function receivedIds(peerId: string): Set<string> {
@@ -50,6 +63,7 @@ export function Home(props: {
   }
 
   const stops = [
+    observeDisplayName(props.session.options(), localId, setChosenName),
     props.roster.updates.subscribe((update) => {
       setPeers((current) => applyRosterUpdate(current, update));
     }),
@@ -145,9 +159,10 @@ export function Home(props: {
   return (
     // The local avatar opens local settings once that view exists.
     <Handheld
-      avatar={{ seed: props.session.username, name: props.session.username }}
+      avatar={{ seed: localId, name: localName() }}
       title="Brochain"
       heading="Home"
+      notifications={props.notifications}
       actions={actions()}
     >
       <>

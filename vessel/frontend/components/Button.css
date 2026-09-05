@@ -14,6 +14,14 @@
   background: var(--brochain-color-control);
 }
 
+/* A control inside content rather than in a bar, still large enough to answer a
+   call with. */
+.button.compact {
+  width: var(--brochain-control-size-compact);
+  height: var(--brochain-control-size-compact);
+  font-size: 1.25rem;
+}
+
 .button.sm {
   width: 32px;
   height: 32px;

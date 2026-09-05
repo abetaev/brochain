@@ -24,15 +24,21 @@ using brochain
    a file** where file sharing is available for that peer; progress and failures
    appear in the conversation. Both people must be connected to send.
 5. **Call.** Select **Call** in a conversation to place an audio and video call,
-   available while that peer offers calls. An incoming call is announced wherever
-   you are, and your camera and microphone are only taken once you **Accept**.
-   The Call view shows both pictures and offers muting, stopping your camera, and
-   hanging up; leaving it keeps the call running and a banner offers it back. A
-   call reaches only a peer on the same local network for now, and says so plainly
-   when no media path can be established.
-6. **Read.** Home marks conversations holding unread items, and opening one
-   clears its marker. Messages and received files stay available while you are
-   signed in and disappear after sign-out or reload.
+   available while that peer offers calls. The call appears in the conversation
+   itself as a record you can cancel, and an incoming one reaches you wherever you
+   are as that peer's avatar in the status bar, leading to the conversation where
+   you **Accept call** or **Decline call** — your camera and microphone are only
+   taken once you accept. Answering opens the call, which shows both pictures and
+   offers muting, stopping your camera, and hanging up; leaving it keeps the call
+   running and **Open call** in the conversation leads back. Ending it returns you
+   to the conversation, where the record stays, saying the call ended and why if
+   something went wrong. A call reaches only a peer on the same local network for
+   now, and says so plainly when no media path can be established.
+6. **Read.** Whatever is waiting for you appears as that peer's avatar in the
+   status bar of every view — unread messages and calls — and Home marks
+   conversations holding unread items too. Opening a conversation clears its
+   marker. Messages and received files stay available while you are signed in and
+   disappear after sign-out or reload.
 7. **Configure.** Select **Settings** beside a peer, or from a conversation, to
    see what they report about themselves, name them, and choose which services
    they may reach. A peer arrives named by whatever it reports; **Save name**

@@ -43,3 +43,11 @@
 .bubble p {
   margin: 0;
 }
+
+/* An entry standing for a thing rather than a message — a call — is short enough
+   that a 40px tag against a taller row would read as a bump, so its tag runs the
+   height of the row and the record becomes one shape. */
+.feed-entry[data-icon] .avatar {
+  align-self: stretch;
+  height: auto;
+}

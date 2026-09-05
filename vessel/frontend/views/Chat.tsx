@@ -1,8 +1,10 @@
-import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
+import { For, Match, Show, Switch, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
 import type { Action } from "@v/frontend/components/ActionBar";
+import { Button } from "@v/frontend/components/Button";
 import { selfAccentColor, selfBubbleColor } from "@v/frontend/components/colors";
 import { Feed, FeedEntry } from "@v/frontend/components/Feed";
+import type { Notification } from "@v/frontend/services/notifications";
 import { Handheld } from "@v/frontend/layouts/Handheld";
 import "./Chat.css";
 import type { Call } from "@v/frontend/services/call";
@@ -14,6 +16,7 @@ export function Chat(props: {
   call: Call;
   roster: Roster;
   peerId: string;
+  notifications: readonly Notification[];
   onOpenPeer(): void;
   onOpenCall(): void;
   onBack(): void;
@@ -21,6 +24,7 @@ export function Chat(props: {
   const [items, setItems] = createSignal(props.chat.history(props.peerId));
   const [actionError, setActionError] = createSignal<string>();
   const [entry, setEntry] = createSignal(props.roster.get(props.peerId));
+  const [callState, setCallState] = createSignal(props.call.current());
   let fileInput: HTMLInputElement | undefined;
   const connectedPeer = (): Peer | undefined => {
     const peer = entry()?.peer;
@@ -30,9 +34,13 @@ export function Chat(props: {
     const peer = connectedPeer();
     return peer === undefined ? undefined : props.chat.capabilities(peer);
   };
+  const busy = () => {
+    const current = callState();
+    return current !== undefined && current.status !== "ended";
+  };
   const callable = () => {
     const peer = connectedPeer();
-    return peer !== undefined && props.call.available(peer);
+    return peer !== undefined && props.call.available(peer) && !busy();
   };
   const name = () => entry()?.name ?? props.peerId;
 
@@ -45,6 +53,7 @@ export function Chat(props: {
     setItems((current) => replaceItem(current, item));
     if (received) props.chat.markRead(item.peerId);
   });
+  const stopCall = props.call.updates.subscribe((next) => setCallState(next));
   const stopRoster = props.roster.updates.subscribe((update) => {
     if (update.type === "set") {
       if (update.entry.peerId === props.peerId) setEntry(update.entry);
@@ -86,10 +95,7 @@ export function Chat(props: {
       if (current === undefined || !callable()) {
         throw new Error("Calls are not available.");
       }
-      // Navigating disposes this view, and with it every prop it could still read,
-      // so the call is placed before the reader is taken to it.
       void props.call.start(current);
-      props.onOpenCall();
     });
   }
 
@@ -119,6 +125,7 @@ export function Chat(props: {
 
   onCleanup(() => {
     stopEvents();
+    stopCall();
     stopRoster();
   });
 
@@ -176,6 +183,7 @@ export function Chat(props: {
       }}
       title={name()}
       heading={`Chat with ${name()}`}
+      notifications={props.notifications}
       actions={actions()}
       footer={compose()}
     >
@@ -190,15 +198,41 @@ export function Chat(props: {
                 direction={item.direction}
                 avatarSeed={item.direction === "sent" ? "you" : props.peerId}
                 avatarName={item.direction === "sent" ? "You" : name()}
+                icon={item.kind === "call" ? "\u{1F4DE}" : undefined}
               >
-                {item.kind === "text" ? (
-                  <p>{item.text}</p>
-                ) : (
-                  <FileItem item={item} />
-                )}
-                <Show when={item.status === "failed"}>
-                  <p role="alert">{item.error ?? "Transfer failed."}</p>
-                </Show>
+                <Switch>
+                  <Match when={item.kind === "text" ? item : undefined}>
+                    {(message) => (
+                      <>
+                        <p>{message().text}</p>
+                        <Show when={message().status === "failed"}>
+                          <p role="alert">{message().error ?? "Transfer failed."}</p>
+                        </Show>
+                      </>
+                    )}
+                  </Match>
+                  <Match when={item.kind === "file" ? item : undefined}>
+                    {(file) => (
+                      <>
+                        <FileItem item={file()} />
+                        <Show when={file().status === "failed"}>
+                          <p role="alert">{file().error ?? "Transfer failed."}</p>
+                        </Show>
+                      </>
+                    )}
+                  </Match>
+                  <Match when={item.kind === "call" ? item : undefined}>
+                    {(record) => (
+                      <CallItem
+                        item={record()}
+                        onAccept={() => void props.call.accept()}
+                        onDecline={() => props.call.decline()}
+                        onEnd={() => props.call.end()}
+                        onOpen={props.onOpenCall}
+                      />
+                    )}
+                  </Match>
+                </Switch>
               </FeedEntry>
             )}
           </For>
@@ -215,6 +249,47 @@ export function Chat(props: {
         </label>
       </>
     </Handheld>
+  );
+}
+
+// A call in the conversation: what it is doing, and what can be done about it
+// while it is still doing it.
+function CallItem(props: {
+  item: ChatItem & { kind: "call" };
+  onAccept(): void;
+  onDecline(): void;
+  onEnd(): void;
+  onOpen(): void;
+}) {
+  const incoming = () => props.item.direction === "received";
+  const label = () => {
+    if (props.item.state === "ended") return "call ended";
+    if (props.item.state === "ongoing") return "ongoing call";
+    return incoming() ? "incoming call" : "outgoing call";
+  };
+
+  return (
+    <>
+      <div class="call-record">
+        <span>{label()}</span>
+        <span class="call-record-actions">
+          <Switch>
+            <Match when={props.item.state === "calling" && incoming()}>
+              <Button icon="🖕" label="Decline call" variant="rejection" size="compact" onClick={props.onDecline} />
+              <Button icon="🤙" label="Accept call" variant="confirmation" size="compact" onClick={props.onAccept} />
+            </Match>
+            <Match when={props.item.state === "calling"}>
+              <Button icon="🖕" label="Cancel call" variant="rejection" size="compact" onClick={props.onEnd} />
+            </Match>
+            <Match when={props.item.state === "ongoing"}>
+              <Button icon="🖕" label="End call" variant="rejection" size="compact" onClick={props.onEnd} />
+              <Button icon="🤙" label="Open call" variant="primary" size="compact" onClick={props.onOpen} />
+            </Match>
+          </Switch>
+        </span>
+      </div>
+      <Show when={props.item.error}>{(reason) => <p role="alert">{reason()}</p>}</Show>
+    </>
   );
 }
 

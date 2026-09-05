@@ -1,0 +1,34 @@
+/* The conference is the whole content area in the mockup, so the call's own
+   words are captioned over it rather than given a band of their own. */
+.call-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.call-captions {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: 0;
+  padding: 0.5rem var(--brochain-spacing);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  pointer-events: none;
+  color: #fff;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+
+.call-captions p {
+  margin: 0;
+}
+
+.call-captions [role="alert"] {
+  color: var(--brochain-color-rejection);
+}
+
+.call-ended {
+  padding: var(--brochain-spacing);
+}
