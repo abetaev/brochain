@@ -15,6 +15,10 @@ import type { Notification } from "@v/frontend/services/notifications";
 import { Handheld } from "@v/frontend/layouts/Handheld";
 import type { Roster, RosterEntry, RosterUpdate } from "@v/frontend/services/roster";
 
+// Development installs under a name of its own, and the view says the same one,
+// because two installed applications are told apart by what they are called.
+const applicationName = import.meta.env.DEV ? "brochain [dev]" : "brochain";
+
 export function Home(props: {
   session: Session;
   roster: Roster;
@@ -142,7 +146,7 @@ export function Home(props: {
         onClick: props.onOpenSettings,
         label: "Settings",
       }}
-      title="Brochain"
+      title={applicationName}
       heading="Home"
       notifications={props.notifications}
       actions={actions()}

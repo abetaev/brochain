@@ -499,7 +499,7 @@ Beacon
 - **behavior**: Beacon retains no application messages and keeps one identity for
   its process lifetime. A WebSocket is an HTTP upgrade, so the server hosting
   Vessel hands Beacon the upgrades it does not want and Beacon answers on the one
-  address people already trust. Hosting Vessel and providing the relay are
+  address people already opened. Hosting Vessel and providing the relay are
   independent and either may be switched off, so a server can host the
   application for people whose relay is elsewhere, or relay for applications
   hosted elsewhere. Restart creates a new identity.

@@ -17,7 +17,7 @@ commands
 
 The three project commands install or refresh dependencies automatically when needed.
 
-- `npm run dev` starts Vessel and its default Beacon over HTTPS on one port, generating a certificate for this machine into `dev` on first run. Open an address printed by the command and accept that certificate. The server listens on every interface, so the network address it prints reaches another device.
+- `npm run dev` starts Vessel and its default Beacon on one port. Open `http://localhost` at that port; reaching it from another device is below.
 - `npm run prod` validates and builds Vessel, then serves it with the production Beacon.
 - `npm run test` runs the complete project test suite: the lower-level tests
   first, then the browser workflows, which start their own servers on dedicated
@@ -28,23 +28,46 @@ The three project commands install or refresh dependencies automatically when ne
 another device
 --------------
 
-Vessel is served over HTTPS in every run mode, because a browser withholds
-`crypto.subtle`, Web Locks and private file storage from anything less and an
-account cannot even be created without them. `http://localhost` would count as
-secure and a network address never does, so one mode covers both.
+A browser withholds `crypto.subtle`, Web Locks and private file storage from a
+page it does not consider secure, and an account cannot be created without them.
+`http://localhost` counts as secure wherever it is opened and a network address
+never does, so another device reaches Vessel at its own `localhost`, forwarded to
+this machine, rather than at this machine's address.
 
-Development generates its own certificate with `openssl`, covering loopback and
-every address this machine answers on, and keeps it in `dev` until those
-addresses change. Set `TLS_CERT_PATH` and `TLS_KEY_PATH` to use a certificate of
-your own instead.
+Android does that through the debugging bridge, which forwards a port on the
+device to one here:
 
-Open the printed network address on the other device and accept the certificate
-once. Vessel and its Beacon answer on the same port, so there is one origin to
-trust and one exception to grant.
+```sh
+adb reverse tcp:5173 tcp:5173
+```
 
-Beacon announces loopback together with every address of the machine, so both
-devices find one they can dial. `BEACON_HOST` replaces that list when set, for
-the certificate and the announcement alike.
+The device then opens `http://localhost:5173` and reaches this server, one
+browser or all of them, because the forward belongs to the device rather than to
+a browser. Vessel and its Beacon answer on the same port, so one forward carries
+both.
+
+`BEACON_HOST` sets the host Beacon announces, which a forwarded device needs
+pointed at the name it dials:
+
+```sh
+BEACON_HOST=localhost npm run dev
+```
+
+installing on another device
+----------------------------
+
+Every run mode serves the web app manifest and the service worker an installation
+needs, development included. A browser that accepts them offers to install the
+application rather than to bookmark it, and the installed application opens on
+its own instead of in a browser. A forwarded `localhost` is secure enough to be
+installed from; this machine's network address is not.
+
+Which browser offers it is the browser's own decision, and two of them decline
+whatever the manifest says. Desktop Firefox supports no installation at all.
+Firefox for Android does, but requires HTTPS and refuses a plain origin even
+where the browser itself treats it as secure, so a forwarded `localhost` is
+installable in Chrome and not in Firefox. A manifest is therefore confirmed in
+Chrome, and neither Firefox says anything about it.
 
 capabilities
 ------------
@@ -68,9 +91,9 @@ production configuration
 - `PORT` — the port Vessel and the relay share; defaults to `4173`.
 - `BEACON_HOST` — the public host announced by Beacon; defaults to every address
   this machine answers on.
-- `TLS_CERT_PATH` and `TLS_KEY_PATH` — the certificate to serve. A certificate is
-  generated into `dev` when they are unset, which is meant for development only.
 - `VESSEL_HOSTING` and `BEACON_RELAY`, as above.
 
 Vessel connects its default Beacon at its own origin, so a deployment that serves
-the application also provides the relay unless it is told otherwise.
+the application also provides the relay unless it is told otherwise. It serves
+plain HTTP, so a deployment reached by anything but `localhost` terminates TLS in
+front of it — a browser withholds from an insecure page what an account needs.

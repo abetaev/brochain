@@ -11,17 +11,28 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-persistent connections from mobile browsers
--------------------------------------------
+installable application
+-----------------------
 
 type: bug
-scope: core, frontend services/network services
-state: questionable feasibility? draft, refine
+scope: unknown until measured
 
-on mobile browser (firefox) when i switch between apps connections are lost almost immediately as the whole state.
-i am wondering whether it is possible to enforce application to stay alive for as long as possible with some PWA techniques.
+Every run mode now serves a manifest and a service worker, the manifest names the
+icons a browser requires, and a plain origin reached at a device's own forwarded
+`localhost` is secure enough to install from, so nothing stands between the
+application and a phone but installing it there.
 
+Measure what installation alone changes: whether switching apps still ends the
+Session, and how long one survives. Returning a killed application to its reader is
+a separate concern, refined once that is known. Its Session MUST be
+re-authenticated by password; an unlocked identity is not persisted for a relaunch
+to resume.
 
+An installed application is a separate task on the device rather than a tab inside
+a backgrounded browser, which is a different eviction class; it is not a guarantee
+of survival. A service worker holds no Session: it is started for an event and
+terminated when idle, and peer connections cannot exist in it. What it holds is the
+precached shell, so a relaunch is immediate and needs no network.
 
 identity change notification
 ----------------------------

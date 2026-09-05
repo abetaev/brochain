@@ -1,6 +1,5 @@
 import type { Plugin } from "vite";
-import { createBeacon } from "./core.ts";
-import { localHosts } from "../tls.ts";
+import { createBeacon, localHosts } from "./core.ts";
 
 // A Vessel host without a relay is a deployment of its own: the page finds no
 // Beacon at its own origin and asks for another. Refusing the upgrade says so at
@@ -12,7 +11,7 @@ function report(message: string, error: unknown): string {
 }
 
 // Development serves Vessel and the relay from one origin, so the page reaches
-// its Beacon wherever it was opened and one certificate covers both.
+// its Beacon wherever it was opened and one forwarded port carries both.
 export function createBeaconPlugin(port: number): Plugin {
   return {
     name: "brochain-beacon",

@@ -4,18 +4,17 @@ import { fileURLToPath } from "node:url";
 import { VitePWA } from "vite-plugin-pwa";
 import solid from "vite-plugin-solid";
 import { createBeaconPlugin } from "./beacon/dev.ts";
-import { tlsOptions } from "./tls.ts";
 
 const projectDirectory = dirname(fileURLToPath(import.meta.url));
 const commonDirectory = resolve(projectDirectory, "common");
 const vesselDirectory = resolve(projectDirectory, "vessel");
 const frontendDirectory = resolve(vesselDirectory, "frontend");
-const iconPath = resolve(frontendDirectory, "icon.svg");
 
 export default defineConfig(({ mode }) => {
   const vesselPort = Number(process.env.VESSEL_PORT ?? 5173);
-  // Tests start no server and need no certificate.
-  const tls = mode === "test" ? undefined : tlsOptions();
+  // A development build installs like any other, so its name says which of the
+  // two an installed application is.
+  const applicationName = mode === "development" ? "brochain [dev]" : "brochain";
 
   return {
     root: mode === "test" ? projectDirectory : frontendDirectory,
@@ -23,10 +22,11 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: vesselPort,
       strictPort: true,
-      ...(tls === undefined ? {} : { https: tls }),
     },
     cacheDir: resolve(projectDirectory, "node_modules/.vite"),
-    publicDir: false,
+    // The icons a manifest names must keep the names it names them by, and the
+    // root a public directory would default to differs under test.
+    publicDir: resolve(frontendDirectory, "public"),
     resolve: {
       alias: {
         "@c": commonDirectory,
@@ -36,13 +36,9 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: resolve(projectDirectory, "dist"),
       emptyOutDir: true,
-      assetsInlineLimit: (filePath) => filePath === iconPath ? false : undefined,
       rolldownOptions: {
         output: {
           strictExecutionOrder: true,
-          assetFileNames: (asset) => asset.names.includes("icon.svg")
-            ? "icon.svg"
-            : "assets/[name]-[hash][extname]",
           codeSplitting: {
             includeDependenciesRecursively: true,
             groups: [
@@ -63,31 +59,42 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    plugins: tls === undefined ? [] : [
+    plugins: mode === "test" ? [] : [
       solid(),
       createBeaconPlugin(vesselPort),
       VitePWA({
         registerType: "autoUpdate",
         includeManifestIcons: false,
         manifest: {
-          name: "brochain",
-          short_name: "brochain",
+          name: applicationName,
+          short_name: applicationName,
           description: "Private peer-to-peer communication.",
           display: "standalone",
           theme_color: "#0f172a",
           background_color: "#ffffff",
+          // A browser offers installation only for an application whose icons it
+          // can raster at both sizes it needs.
           icons: [
-            {
-              src: "icon.svg",
-              sizes: "any",
-              type: "image/svg+xml",
-              purpose: "any",
-            },
+            { src: "icon-192.png", sizes: "192x192", type: "image/png" },
+            { src: "icon-512.png", sizes: "512x512", type: "image/png" },
+            { src: "icon.svg", sizes: "any", type: "image/svg+xml" },
           ],
         },
         workbox: {
-          globPatterns: ["**/*.{js,wasm,css,html,svg}"],
+          globPatterns: ["**/*.{js,wasm,css,html,svg,png}"],
           maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        },
+        // Development serves what an installation needs, because the address
+        // another device opens is the development one. Its worker is registered
+        // rather than used: development globs run over the folder below, and a
+        // navigation fallback would answer every reload from the install.
+        devOptions: {
+          enabled: true,
+          suppressWarnings: true,
+          navigateFallbackAllowlist: [],
+          // Workflows run two servers at once, and a shared worker folder is
+          // written and read by both.
+          resolveTempFolder: () => resolve(projectDirectory, "dev", `pwa-${vesselPort}`),
         },
       }),
     ],

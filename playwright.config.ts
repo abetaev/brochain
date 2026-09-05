@@ -6,13 +6,13 @@ const projectDirectory = dirname(fileURLToPath(import.meta.url));
 // Workflows run their own servers on dedicated ports, so a peer left connected to
 // a development server can never join the mesh under test.
 const vesselPort = "5273";
-const address = `https://localhost:${vesselPort}`;
+const address = `http://localhost:${vesselPort}`;
 
 // A second Vessel is hosted without a relay, so a workflow can meet a default
 // Beacon that answers nothing and reach the working one by address instead.
-export const relaylessVesselAddress = "https://localhost:5373";
+export const relaylessVesselAddress = "http://localhost:5373";
 export const alternativeBeaconUrl = address;
-export const alternativeBeaconAddress = `/dns4/localhost/tcp/${vesselPort}/tls/ws`;
+export const alternativeBeaconAddress = `/dns4/localhost/tcp/${vesselPort}/ws`;
 
 export default defineConfig({
   testDir: resolve(projectDirectory, "workflows"),
@@ -26,8 +26,6 @@ export default defineConfig({
   use: {
     baseURL: address,
     browserName: "chromium",
-    // Development serves a certificate it generated for itself.
-    ignoreHTTPSErrors: true,
     // A call needs a camera and a microphone, which the browser supplies
     // synthetically and grants without a prompt.
     launchOptions: {
@@ -40,7 +38,6 @@ export default defineConfig({
       command: "node main.ts dev",
       env: { VESSEL_PORT: vesselPort },
       url: address,
-      ignoreHTTPSErrors: true,
       reuseExistingServer: false,
       timeout: 180_000,
     },
@@ -48,7 +45,6 @@ export default defineConfig({
       command: "node main.ts dev",
       env: { VESSEL_PORT: "5373", BEACON_RELAY: "off" },
       url: relaylessVesselAddress,
-      ignoreHTTPSErrors: true,
       reuseExistingServer: false,
       timeout: 180_000,
     },

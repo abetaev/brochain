@@ -1,11 +1,9 @@
 import { readFile } from "node:fs/promises";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { createServer as createHttpsServer } from "node:https";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, resolve, sep } from "node:path";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { createBeacon } from "./core.ts";
-import { localHosts, tlsOptions } from "../tls.ts";
+import { createBeacon, localHosts } from "./core.ts";
 
 function configuredPort(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback);
@@ -25,13 +23,13 @@ const providesRelay = process.env.BEACON_RELAY !== "off";
 const port = configuredPort("PORT", 4173);
 const projectDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const builtVesselDirectory = resolve(projectDirectory, "dist");
-const tls = tlsOptions();
 
 const mimeTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
   ".svg": "image/svg+xml",
   ".webmanifest": "application/manifest+json; charset=utf-8",
 };
@@ -75,7 +73,7 @@ const beacon = providesRelay
   ? await createBeacon({ hosts: localHosts(), port })
   : undefined;
 
-const applicationServer = createHttpsServer(tls, serveApplication);
+const applicationServer = createServer(serveApplication);
 if (beacon !== undefined) applicationServer.on("upgrade", beacon.handleUpgrade);
 
 applicationServer.listen(port, "0.0.0.0");
@@ -87,10 +85,7 @@ try {
 }
 
 const provided = [...(hostsVessel ? ["Vessel"] : []), ...(providesRelay ? ["the relay"] : [])];
-console.info(`Serving ${provided.join(" and ") || "nothing"} on https://localhost:${port}`);
-if (process.env.TLS_CERT_PATH === undefined) {
-  console.info("Serving a generated certificate. Set TLS_CERT_PATH and TLS_KEY_PATH to replace it.");
-}
+console.info(`Serving ${provided.join(" and ") || "nothing"} on http://localhost:${port}`);
 
 async function stopApplication(): Promise<void> {
   const closed = once(applicationServer, "close");

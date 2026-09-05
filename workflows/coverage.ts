@@ -26,6 +26,8 @@ const options = {
   entryFilter: (entry: { url: string }) =>
     !entry.url.includes("node_modules") &&
     !entry.url.includes("/@vite/") &&
+    !entry.url.includes("/@vite-plugin-pwa/") &&
+    !entry.url.includes("/registerSW.js") &&
     !entry.url.includes("/@solid-refresh"),
   sourceFilter: (path: string) =>
     !path.includes("node_modules") && !path.endsWith(".test.ts"),
