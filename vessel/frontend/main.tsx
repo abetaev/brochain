@@ -11,6 +11,7 @@ import { Call } from "./views/Call";
 import { Chat } from "./views/Chat";
 import { Home } from "./views/Home";
 import { Peer } from "./views/Peer";
+import { Settings } from "./views/Settings";
 
 interface ActiveSession {
   readonly session: Session;
@@ -23,6 +24,7 @@ interface ActiveSession {
 type Location =
   | { readonly view: "account" }
   | ({ readonly view: "home" } & ActiveSession)
+  | ({ readonly view: "settings" } & ActiveSession)
   | ({ readonly view: "chat"; readonly peerId: string } & ActiveSession)
   | ({ readonly view: "call"; readonly peerId: string } & ActiveSession)
   | ({
@@ -114,6 +116,7 @@ function Vessel() {
   };
 
   const home = at("home");
+  const settings = at("settings");
   const chat = at("chat");
   const peer = at("peer");
   const call = at("call");
@@ -134,10 +137,20 @@ function Vessel() {
               onOpenChat={(peerId) => setLocation({ view: "chat", peerId, ...services(current()) })}
               onOpenPeer={(peerId) =>
                 setLocation({ view: "peer", origin: "home", peerId, ...services(current()) })}
+              onOpenSettings={() => setLocation({ view: "settings", ...services(current()) })}
               onSignedOut={() => {
                 setWaiting([]);
                 setLocation({ view: "account" });
               }}
+            />
+          )}
+        </Match>
+        <Match when={settings()}>
+          {(current) => (
+            <Settings
+              notifications={notifications()}
+              session={current().session}
+              onBack={() => setLocation({ view: "home", ...services(current()) })}
             />
           )}
         </Match>

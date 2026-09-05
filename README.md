@@ -39,7 +39,11 @@ using brochain
    conversations holding unread items too. Opening a conversation clears its
    marker. Messages and received files stay available while you are signed in and
    disappear after sign-out or reload.
-7. **Configure.** Select **Settings** beside a peer, or from a conversation, to
+7. **Yourself.** Select your own avatar in the top bar on Home to name yourself,
+   read the peer ID and addresses someone else needs to reach you, and choose
+   whether connection requests are accepted without asking. The name is yours
+   alone for now; peers still see the account username until they reconnect.
+8. **Configure.** Select **Settings** beside a peer, or from a conversation, to
    see what they report about themselves, name them, and choose which services
    they may reach. A peer arrives named by whatever it reports; **Save name**
    replaces that with a name of your own, up to 64 characters, used everywhere it
@@ -48,5 +52,5 @@ using brochain
    share one, after which resetting leaves only their peer ID. Service changes
    apply at once, including while connected. Refusing the registry leaves them no
    way to learn what you support, which bars them entirely.
-8. **Sign out** to return to the account screen, where you can export an account
+9. **Sign out** to return to the account screen, where you can export an account
    or permanently delete it after confirming its password.

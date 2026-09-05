@@ -22,6 +22,7 @@ export function Home(props: {
   notifications: readonly Notification[];
   onOpenChat(peerId: string): void;
   onOpenPeer(peerId: string): void;
+  onOpenSettings(): void;
   onSignedOut(): void;
 }) {
   const [actionError, setActionError] = createSignal<string>();
@@ -157,9 +158,14 @@ export function Home(props: {
   ];
 
   return (
-    // The local avatar opens local settings once that view exists.
+    // This peer's own avatar is the way to this peer's own settings.
     <Handheld
-      avatar={{ seed: localId, name: localName() }}
+      avatar={{
+        seed: localId,
+        name: localName(),
+        onClick: props.onOpenSettings,
+        label: "Settings",
+      }}
       title="Brochain"
       heading="Home"
       notifications={props.notifications}

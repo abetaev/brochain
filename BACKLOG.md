@@ -51,18 +51,6 @@ home loses its per-row connect button and its "not currently available" text —
 carries that meaning, and connecting happens from chat. needs the roster mockup updated and
 a new StatusIndicator variant.
 
-local peer settings view
-------------------------
-
-type: feature
-scope: frontend views
-
-a settings view for this peer's own behaviour, reached by tapping the local avatar in home's
-status bar. it mirrors the peer view's structure but holds settings about us rather than
-about them: whether connection requests are accepted automatically, and an editable display
-name overriding the account username, stored under the local peer like any other peer's
-name. needs a new mockup frame.
-
 identity change notification
 ----------------------------
 

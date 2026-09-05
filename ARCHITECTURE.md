@@ -271,7 +271,7 @@ Vessel frontend
 
 - **dependencies**: Account and, after authentication, an active Session
 - **structure**: Roster, Chat, Call, and Notifications services plus one active
-  Account, Home, Chat, Peer, or Call view
+  Account, Home, Settings, Chat, Peer, or Call view
 - **use cases**: authenticate; sign out; navigate between account, peer list, and
   conversation views
 - **behavior**: after authentication, Application constructs Call, Chat, and then
@@ -405,8 +405,9 @@ Vessel frontend
 ### Peer view
 
 - **dependencies**: Session, Roster, Call, and the peer identity being configured
-- **structure**: one Roster-entry signal, the peer's name and published-service
-  projections observed from Options, and view-local settings errors
+- **structure**: one Roster-entry signal, the published-service projections
+  observed from Options, and view-local settings errors; the peer's name belongs
+  to the identity block, which owns naming for whichever peer it shows
 - **use cases**: read a peer's identity, availability, and addresses; name it,
   reset its name, refresh or forget its reported name; publish or refuse each
   supported service for it; open its conversation, or place a call into it
@@ -420,13 +421,29 @@ Vessel frontend
   which is where the call's record and its controls live. Leaving returns to the
   view which opened it.
 
+### Settings view
+
+- **dependencies**: Session
+- **structure**: the automatic-acceptance projection observed from Options and
+  view-local settings errors; this peer's name belongs to the identity block, the
+  same one the Peer view uses
+- **use cases**: read this peer's ID and addresses; name it and reset that name;
+  decide whether connection requests are accepted without asking
+- **behavior**: Options keys this peer the way it keys any other, so the view is
+  the Peer view turned on ourselves and hands the same identity block the same
+  `display_name`, differing only in what names us while none is chosen — the
+  account username, which resetting returns to. This peer's own ID and addresses are shown because they are what
+  someone else needs for Home's direct connection and appear nowhere else. A
+  refused write restores its control and reports the failure. It is reached by this
+  peer's own avatar in Home's status bar, and leaving returns there.
+
 ### Home view
 
 - **dependencies**: Session, Roster, and Chat
 - **structure**: one peer-list signal, peer rows, direct-connection controls, and
   view-local action and Beacon errors
 - **use cases**: refresh peers; connect a listed Peer or a direct address; open
-  Chat or Peer; sign out
+  Chat, Peer, or this peer's own Settings; sign out
 - **behavior**: once subscriptions exist, Home starts the default Beacon
   connection in the background, and Refresh retries it and refreshes Roster.
   Selecting a listed Peer connects and opens its conversation. A direct address

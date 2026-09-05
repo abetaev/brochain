@@ -51,3 +51,39 @@ test("a peer arrives named by its identity and can be renamed locally", async ({
   await alice.getByRole("button", { name: "Back" }).click();
   await expect(peerNamed(alice, "bob")).toHaveCount(0);
 });
+
+test("a person names themselves, and decides how connections reach them", async ({
+  openVessel,
+}) => {
+  const alice = await openVessel("alice");
+
+  // This peer's own avatar is the way to this peer's own settings.
+  await alice.getByRole("button", { name: "Settings", exact: true }).click();
+  const heading = alice.getByRole("heading", { name: "Settings" });
+  await expect(heading).toBeVisible();
+  await expect(heading).toHaveText("alice");
+
+  // The address someone else needs to reach us is here, and nowhere else.
+  await expect(alice.getByText("Peer ID")).toBeVisible();
+
+  await alice.getByRole("button", { name: "Edit" }).click();
+  await expect(alice.getByLabel("Name for this peer")).toHaveValue("");
+  await alice.getByLabel("Name for this peer").fill("alice of the north");
+  await alice.getByRole("button", { name: "Save name" }).click();
+  await expect(heading).toHaveText("alice of the north");
+
+  // Resetting returns us to the account username, which named us to begin with.
+  await alice.getByRole("button", { name: "Reset name" }).click();
+  await expect(heading).toHaveText("alice");
+  await expect(alice.getByRole("button", { name: "Reset name" })).toBeHidden();
+
+  // The decision about connections is remembered, though nothing acts on it yet.
+  const accept = alice.getByRole("switch", { name: "Accept connections" });
+  await expect(accept).not.toBeChecked();
+  await accept.check();
+
+  await alice.getByRole("button", { name: "Back" }).click();
+  await expect(alice.getByRole("heading", { name: "Home" })).toBeVisible();
+  await alice.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(alice.getByRole("switch", { name: "Accept connections" })).toBeChecked();
+});
