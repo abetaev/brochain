@@ -28,11 +28,6 @@
   cursor: not-allowed;
 }
 
-.text-button.primary {
-  background: var(--brochain-color-primary);
-  border-color: var(--brochain-color-primary);
-}
-
 /* Home's connection-state dot */
 .connection-state {
   display: inline-block;
@@ -48,24 +43,6 @@
 }
 
 /* Native disclosure sitting in a view's content area (Home) */
-details.panel {
-  border: 1px solid var(--brochain-border);
-  border-radius: var(--brochain-control-radius);
-  padding: 0.5rem var(--brochain-spacing);
-}
-
-details.panel summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-
-details.panel form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--brochain-spacing);
-  margin-block-start: var(--brochain-spacing);
-}
-
 /* Alerts */
 [role="alert"] {
   color: var(--brochain-color-rejection);

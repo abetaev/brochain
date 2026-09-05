@@ -30,3 +30,27 @@ test("a returning person is remembered by name while the other stays online", as
   await expect(peerNamed(bob, "alice")).toBeVisible();
   await expect(peerNamed(bob, "alice").getByLabel("Connected", { exact: true })).toBeHidden();
 });
+
+test("a person drops a connection from the conversation and reaches it again", async ({
+  openVessel,
+}) => {
+  const alice = await openVessel("alice");
+  const bob = await openVessel("bob");
+  await acceptEveryone(alice);
+  await acceptEveryone(bob);
+
+  await connectToPeer(alice);
+  await expect(alice.getByLabel("Message", { exact: true })).toBeEnabled();
+
+  // Leaving a conversation drops the connection for both, and the roster says so.
+  await alice.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(alice.getByLabel("Message", { exact: true })).toBeDisabled();
+  await expect(peerNamed(bob, "alice").getByLabel("Not connected", { exact: true }))
+    .toBeVisible();
+
+  // The addresses the Beacon advertises are still known, so the conversation reaches
+  // that peer again on its own.
+  await alice.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(alice.getByLabel("Message", { exact: true })).toBeEnabled();
+  await expect(peerNamed(bob, "alice").getByLabel("Connected", { exact: true })).toBeVisible();
+});

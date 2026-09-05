@@ -11,17 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-chat contextual actions
------------------------
-
-type: usability
-scope: chat, UI
-
-chat's action bar reflects what can be done with the peer right now: connect when
-disconnected, 🖕 and 👌 when that peer reaches nothing of ours yet, and call when
-connected. refine what 👌 grants and 🖕 withholds, since the connection profile already
-answers for every peer nobody has decided about. needs mockup frames for the three states.
-
 connection state badges
 -----------------------
 
@@ -33,9 +22,8 @@ when connected, blue when the peer is online but not connected, grey when it was
 before but is not reachable now. the call badge takes that position while a call is in
 progress, since a call implies a connection.
 
-home loses its per-row connect button and its "not currently available" text — the badge
-carries that meaning, and connecting happens from chat. needs the roster mockup updated and
-a new StatusIndicator variant.
+home loses its "not currently available" text — the badge carries that meaning. needs the
+roster mockup updated and a new StatusIndicator variant.
 
 identity change notification
 ----------------------------

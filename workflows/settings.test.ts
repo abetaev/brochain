@@ -59,7 +59,7 @@ test("withholding the registry closes that peer's connection", async ({ openVess
 
   // A peer left no way to learn what it may reach is barred, so its connection goes.
   await expect(bob.getByText("Not connected")).toBeVisible();
-  await expect(alice.getByRole("alert")).toContainText("not currently available");
+  await expect(alice.getByRole("alert")).toContainText("not connected");
 
   await alice.getByRole("button", { name: "Back to Home" }).click();
   await expect(peerNamed(alice, "bob").getByLabel("Not connected", { exact: true }))

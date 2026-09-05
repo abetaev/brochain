@@ -1,5 +1,6 @@
 import { For, Match, Show, Switch, createResource, createSignal, onCleanup } from "solid-js";
 import type { Peer } from "@c/backend/network";
+import type { Session } from "@v/backend/session";
 import type { Action } from "@v/frontend/components/ActionBar";
 import { Button } from "@v/frontend/components/Button";
 import { selfAccentColor, selfBubbleColor } from "@v/frontend/components/colors";
@@ -12,6 +13,7 @@ import type { Chat as ChatService, ChatFile, ChatItem } from "@v/frontend/servic
 import type { Roster } from "@v/frontend/services/roster";
 
 export function Chat(props: {
+  session: Session;
   chat: ChatService;
   call: Call;
   roster: Roster;
@@ -23,8 +25,10 @@ export function Chat(props: {
 }) {
   const [items, setItems] = createSignal(props.chat.history(props.peerId));
   const [actionError, setActionError] = createSignal<string>();
+  const [connecting, setConnecting] = createSignal(false);
   const [entry, setEntry] = createSignal(props.roster.get(props.peerId));
   const [callState, setCallState] = createSignal(props.call.current());
+  const network = props.session.network();
   let fileInput: HTMLInputElement | undefined;
   const connectedPeer = (): Peer | undefined => {
     const peer = entry()?.peer;
@@ -99,6 +103,36 @@ export function Chat(props: {
     });
   }
 
+  // Reaching a peer belongs to the conversation with it, so the addresses Roster
+  // holds are dialled here and the catalog is read once the connection stands.
+  async function connect(): Promise<void> {
+    const [address, ...alternates] = entry()?.addresses ?? [];
+    if (address === undefined) {
+      setActionError("This peer has no known address.");
+      return;
+    }
+    setActionError(undefined);
+    setConnecting(true);
+    try {
+      await (await network.connect(address, ...alternates)).refreshServices();
+    } catch (reason) {
+      setActionError(errorMessage(reason));
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  async function disconnect(): Promise<void> {
+    const peer = connectedPeer();
+    if (peer === undefined) return;
+    setActionError(undefined);
+    try {
+      await peer.disconnect();
+    } catch (reason) {
+      setActionError(errorMessage(reason));
+    }
+  }
+
   function sendFile(event: Event & { currentTarget: HTMLInputElement }): void {
     const file = event.currentTarget.files?.[0];
     if (file === undefined) return;
@@ -112,11 +146,12 @@ export function Chat(props: {
     });
   }
 
+  // A peer which is merely not connected is one the bar offers to reach, so the
+  // reason says that much and no more; one Roster no longer holds cannot be reached.
   function availabilityError(): string | undefined {
     const current = entry();
     if (current === undefined) return "This peer is no longer available.";
-    if (current.peer === undefined) return "This peer is not currently available.";
-    if (!current.peer.isConnected()) return "This peer is not connected.";
+    if (connectedPeer() === undefined) return "This peer is not connected.";
     if (capabilities()?.text === false) {
       return "This peer does not provide messaging.";
     }
@@ -129,9 +164,41 @@ export function Chat(props: {
     stopRoster();
   });
 
+  // What can be done with this peer right now: reach one which is not connected,
+  // and drop or call one which is. Leaving is offered whatever it is doing.
+  const peerActions = (): Action[] =>
+    connectedPeer() === undefined
+      ? [{
+        side: "end",
+        icon: "🤝",
+        label: "Connect",
+        variant: "primary",
+        disabled: (entry()?.addresses.length ?? 0) === 0 || connecting(),
+        busy: connecting(),
+        onClick: () => void connect(),
+      }]
+      : [
+        {
+          side: "end",
+          group: "peer",
+          icon: "🖕",
+          label: "Disconnect",
+          variant: "rejection",
+          onClick: () => void disconnect(),
+        },
+        {
+          side: "end",
+          group: "peer",
+          icon: "🤙",
+          label: "Call",
+          disabled: !callable(),
+          onClick: startCall,
+        },
+      ];
+
   const actions = (): Action[] => [
     { side: "start", icon: "👈", label: "Back to Home", onClick: props.onBack },
-    { side: "end", icon: "🤙", label: "Call", disabled: !callable(), onClick: startCall },
+    ...peerActions(),
   ];
 
   const compose = () => (

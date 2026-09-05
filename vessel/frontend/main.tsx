@@ -158,6 +158,7 @@ function Vessel() {
           {(current) => (
             <Chat
               notifications={notifications()}
+              session={current().session}
               chat={current().chat}
               call={current().call}
               roster={current().roster}

@@ -59,14 +59,14 @@ export async function signOut(page: Page): Promise<void> {
 }
 
 // A peer is listed by its identified name once known, and by its peer ID until then,
-// so a workflow finds it either by that name or by the action offered.
+// so a workflow finds it either by that name or by the connection state it shows.
 export function peerNamed(page: Page, name: string) {
   return page.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
 }
 
-export function peerOffering(page: Page, action: "Connect") {
+export function peerDisconnected(page: Page) {
   return page.getByRole("listitem")
-    .filter({ has: page.getByRole("button", { name: action, exact: true }) });
+    .filter({ has: page.getByLabel("Not connected", { exact: true }) });
 }
 
 // A peer reaches nothing until it is let in, and the connection profile — this
@@ -78,14 +78,17 @@ export async function acceptEveryone(page: Page): Promise<void> {
   await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
 }
 
-// Connecting reaches a peer and opens its conversation. The peer is named only
-// once it publishes its Identity to us, so until then the conversation is headed
-// by its peer ID.
+// A peer is reached from its conversation. It is named only once it publishes its
+// Identity to us, so until then the conversation is headed by its peer ID and the
+// row is opened through the avatar, which names itself whatever the peer is called.
 export async function connectToPeer(page: Page): Promise<void> {
   await expect(async () => {
     await page.getByRole("button", { name: "Refresh peers" }).click();
-    await expect(peerOffering(page, "Connect")).toBeVisible({ timeout: 5_000 });
+    await expect(peerDisconnected(page)).toBeVisible({ timeout: 5_000 });
   }).toPass();
-  await peerOffering(page, "Connect").getByRole("button", { name: "Connect" }).click();
+  await peerDisconnected(page).getByRole("button", { name: /settings$/ }).click();
+  await page.getByRole("button", { name: "Chat", exact: true }).click();
   await expect(page.getByRole("heading", { name: /^Chat with / })).toBeVisible();
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toBeVisible();
 }

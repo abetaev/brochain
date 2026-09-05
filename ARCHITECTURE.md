@@ -432,20 +432,21 @@ Vessel frontend
 ### Home view
 
 - **dependencies**: Session, Roster, and Chat
-- **structure**: one peer-list signal, peer rows, direct-connection controls, and
-  view-local action and Beacon errors
-- **use cases**: refresh peers; connect a listed Peer or a direct address; open
-  Chat, Peer, or this peer's own Settings; sign out
+- **structure**: one peer-list signal, peer rows, the direct-connection dialog, and
+  view-local action, connection and Beacon errors
+- **use cases**: refresh peers; connect a direct address; open Chat, Peer, or this
+  peer's own Settings; sign out
 - **behavior**: once subscriptions exist, Home starts the default Beacon
   connection in the background, and Refresh retries it and refreshes Roster.
-  Selecting a listed Peer connects and opens its conversation, whatever that peer
-  turns out to offer, because a peer which has not yet let us in offers nothing and
-  is not a peer without a conversation. A connected peer holding nothing but
-  Registry is listed as requesting a connection. A direct address
-  completes only the connection procedure, so a peer offering no conversation is
-  still reached; it accepts a URL or a multiaddress. Roster patches replace or
-  remove one keyed row, Peer catalogs provide Chat capabilities, and Chat updates
-  maintain unread presentation.
+  Selecting a listed Peer opens its conversation whether or not it is connected,
+  because reaching a peer belongs to the conversation with it, and a peer which has
+  not yet let us in offers nothing and is not a peer without a conversation. A
+  connected peer holding nothing but Registry is listed as requesting a connection.
+  A direct address completes only the connection procedure, so a peer offering no
+  conversation is still reached; it accepts a URL or a multiaddress, and is entered in
+  a dialog which keeps its own failure, because that is where the address is. Roster
+  patches replace or remove one keyed row, Peer catalogs provide Chat capabilities, and
+  Chat updates maintain unread presentation.
 
 ### Call view
 
@@ -463,20 +464,22 @@ Vessel frontend
 
 ### Chat view
 
-- **dependencies**: Roster, Chat, and Call
+- **dependencies**: Session, Roster, Chat, and Call
 - **structure**: one Roster-entry signal, Chat-history projection, text and file
   controls, and file downloads
-- **use cases**: return Home; open Peer; read a conversation; send text or files;
-  download received files; place a call, and answer, refuse, rejoin or end the one
-  the conversation holds
+- **use cases**: return Home; open Peer; connect that peer or drop its connection;
+  read a conversation; send text or files; download received files; place a call,
+  and answer, refuse, rejoin or end the one the conversation holds
 - **behavior**: the view initializes from Roster and Chat snapshots, applies
   updates for its peer, derives capabilities from its current Peer catalog, and
-  marks existing and new received items read. A call in the conversation carries
-  its own controls, which is where a call is answered and refused, so placing one
-  leaves the reader here rather than taking them anywhere; a second call is
-  withheld while one is in progress. It retains only interaction errors and
-  subscription cleanup; Roster owns name and availability while Chat owns
-  conversation data.
+  marks existing and new received items read. Its action bar offers what that peer
+  allows right now — reaching one which is not connected, using the addresses Roster
+  holds, and dropping or calling one which is — while leaving is offered throughout.
+  A call in the conversation carries its own controls, which is where a call is
+  answered and refused, so placing one leaves the reader here rather than taking them
+  anywhere; a second call is withheld while one is in progress. It retains only
+  interaction errors and subscription cleanup; Roster owns name and availability
+  while Chat owns conversation data.
 
 Beacon
 ------

@@ -16,13 +16,15 @@ using brochain
    and **Refresh peers** retries the Beacon and refreshes connected peers. People
    identified earlier stay listed for that account after a reload, where **Not
    currently available** means they must be found again.
-3. **Connect.** Select **Connect** beside a peer. If someone gave you an address
-   instead, paste it under **Connect directly**, which takes either a URL such as
+3. **Connect.** Select a peer to open the conversation with it, then select
+   **Connect** there; **Disconnect** in the same place drops that connection, and
+   both of you see it go. If someone gave you an address instead, select **Connect
+   directly** on Home and paste it into the dialog, which takes either a URL such as
    `https://example.com` or a peer multiaddress. That only connects; the peer
    then appears in the list like any other. Connecting grants nothing by itself:
    until you have let each other in, both of you appear as **Requesting a
    connection**, shown by peer ID, and nothing can be exchanged.
-4. **Talk.** Select **Chat**, enter text, and select **Send message**. Use **Send
+4. **Talk.** In a conversation, enter text and select **Send message**. Use **Send
    a file** where file sharing is available for that peer; progress and failures
    appear in the conversation. Both people must be connected, and must have let
    each other in, to send.

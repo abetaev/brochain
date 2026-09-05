@@ -8,6 +8,7 @@ import type { Session } from "@v/backend/session";
 import type { Action } from "@v/frontend/components/ActionBar";
 import { Avatar } from "@v/frontend/components/Avatar";
 import { Badge } from "@v/frontend/components/Badge";
+import { Dialog } from "@v/frontend/components/Dialog";
 import { List } from "@v/frontend/components/List";
 import { ListItem } from "@v/frontend/components/ListItem";
 import { TextField } from "@v/frontend/components/TextField";
@@ -28,6 +29,8 @@ export function Home(props: {
 }) {
   const [actionError, setActionError] = createSignal<string>();
   const [beaconError, setBeaconError] = createSignal<string>();
+  const [connectError, setConnectError] = createSignal<string>();
+  const [connectOpen, setConnectOpen] = createSignal(false);
   const [actionBusy, setActionBusy] = createSignal(false);
   const [peers, setPeers] = createSignal(props.roster.list());
   const receivedByPeer = new Map<string, Set<string>>();
@@ -39,7 +42,6 @@ export function Home(props: {
   // This peer is named under its own peer ID like any other; the account username
   // names it until a name of its own is chosen.
   const localName = () => chosenName() ?? props.session.username;
-  let detailsElement: HTMLDetailsElement | undefined;
 
   function receivedIds(peerId: string): Set<string> {
     let ids = receivedByPeer.get(peerId);
@@ -93,38 +95,31 @@ export function Home(props: {
     }
   }
 
-  async function performAction(operation: () => Promise<void>): Promise<void> {
-    setActionError(undefined);
+  async function performAction(
+    operation: () => Promise<void>,
+    report = setActionError,
+  ): Promise<void> {
+    report(undefined);
     setActionBusy(true);
     try {
       await operation();
     } catch (reason) {
-      setActionError(errorMessage(reason));
+      report(errorMessage(reason));
     } finally {
       setActionBusy(false);
     }
   }
 
-  async function connectAndOpen(addresses: readonly string[]): Promise<void> {
-    const [address, ...alternates] = addresses;
-    if (address === undefined) throw new Error("This peer has no known address.");
-    const connected = await network.connect(address, ...alternates);
-    await connected.refreshServices();
-    props.onOpenChat(connected.id);
-  }
-
   // A direct connection only completes the connection procedure; the peer then
   // appears in the list like any other, whatever services it turns out to offer.
-  async function connectDirect(
-    event: SubmitEvent & { currentTarget: HTMLFormElement },
-  ): Promise<void> {
-    event.preventDefault();
-    const form = event.currentTarget;
+  // The dialog stays open while it fails, because that is where the address is.
+  async function connectDirect(form: HTMLFormElement): Promise<void> {
     const entered = String(new FormData(form).get("direct-address") ?? "");
     await performAction(async () => {
       await network.connect(peerAddress(entered));
       form.reset();
-    });
+      setConnectOpen(false);
+    }, setConnectError);
   }
 
   async function signOut(): Promise<void> {
@@ -136,6 +131,8 @@ export function Home(props: {
   onCleanup(stopObserving);
   void connectBeacon().catch(() => {});
 
+  // Both ways of reaching people sit together at the end of the bar: looking again
+  // for those the Beacon knows, and going straight to an address.
   const actions = (): Action[] => [
     {
       side: "start",
@@ -146,11 +143,23 @@ export function Home(props: {
     },
     {
       side: "end",
+      group: "peers",
+      icon: "🤌",
+      label: "Refresh peers",
+      disabled: unavailable(),
+      onClick: () => void performAction(async () => {
+        await connectBeacon();
+        await props.roster.refresh();
+      }),
+    },
+    {
+      side: "end",
+      group: "peers",
       icon: "🔗",
-      label: "Connect",
+      label: "Connect directly",
       onClick: () => {
-        if (detailsElement !== undefined) detailsElement.open = true;
-        detailsElement?.scrollIntoView({ behavior: "smooth", block: "center" });
+        setConnectError(undefined);
+        setConnectOpen(true);
       },
     },
   ];
@@ -183,10 +192,6 @@ export function Home(props: {
                   services={network.services()}
                   listed={peer}
                   unread={hasUnread(peer.peerId)}
-                  busy={unavailable()}
-                  onConnect={(selected) => void performAction(
-                    () => connectAndOpen(selected.addresses),
-                  )}
                   onOpenChat={props.onOpenChat}
                   onOpenPeer={props.onOpenPeer}
                 />
@@ -195,32 +200,22 @@ export function Home(props: {
           </List>
         </Show>
 
-        <button
-          type="button"
-          class="text-button"
+        <Dialog
+          open={connectOpen()}
+          title="Connect"
+          confirmLabel="Connect"
           disabled={unavailable()}
-          onClick={() => void performAction(async () => {
-            await connectBeacon();
-            await props.roster.refresh();
-          })}
+          onCancel={() => setConnectOpen(false)}
+          onConfirm={(form) => void connectDirect(form)}
         >
-          Refresh peers
-        </button>
-
-        <details class="panel" ref={detailsElement}>
-          <summary>Connect directly</summary>
-          <form onSubmit={connectDirect}>
-            <TextField
-              id="direct-address"
-              name="direct-address"
-              label="Peer address or URL"
-              required
-            />
-            <button type="submit" class="text-button primary" disabled={unavailable()}>
-              Connect directly
-            </button>
-          </form>
-        </details>
+          <TextField
+            id="direct-address"
+            name="direct-address"
+            label="Peer address"
+            required
+          />
+          <Show when={connectError()}>{(message) => <p role="alert">{message()}</p>}</Show>
+        </Dialog>
       </>
     </Handheld>
   );
@@ -230,8 +225,6 @@ function PeerRow(props: {
   services: readonly string[];
   listed: RosterEntry;
   unread: boolean;
-  busy: boolean;
-  onConnect(peer: RosterEntry): void;
   onOpenChat(peerId: string): void;
   onOpenPeer(peerId: string): void;
 }) {
@@ -264,20 +257,8 @@ function PeerRow(props: {
           <Show when={requesting()}>
             <small>Requesting a connection</small>
           </Show>
-          <Show when={!props.listed.online}>
-            <Show
-              when={props.listed.addresses.length > 0}
-              fallback={<small>Not currently available</small>}
-            >
-              <button
-                type="button"
-                class="text-button"
-                disabled={props.busy}
-                onClick={() => props.onConnect(props.listed)}
-              >
-                Connect
-              </button>
-            </Show>
+          <Show when={!props.listed.online && props.listed.addresses.length === 0}>
+            <small>Not currently available</small>
           </Show>
         </>
       }
