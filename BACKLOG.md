@@ -11,21 +11,6 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
-connection approval
--------------------
-
-type: feature
-scope: network, options, UI
-
-a peer connecting for the first time is not trusted automatically. until it is approved no
-services are published to it and it shows as requesting a connection; approving publishes
-and remembers the decision, rejecting closes the connection and remembers that too. when
-`auto_accept_connections` is set, requests are approved without asking.
-
-the gate is at the application layer for now: the transport connection still completes and
-rejection means closed-and-refused rather than never-connected. see "inbound connection
-gating" for closing that hole.
-
 chat contextual actions
 -----------------------
 
@@ -33,8 +18,9 @@ type: usability
 scope: chat, UI
 
 chat's action bar reflects what can be done with the peer right now: connect when
-disconnected, 🖕 and 👌 when that peer is requesting a connection and auto accept is off,
-and call when connected. needs mockup frames for the three states.
+disconnected, 🖕 and 👌 when that peer reaches nothing of ours yet, and call when
+connected. refine what 👌 grants and 🖕 withholds, since the connection profile already
+answers for every peer nobody has decided about. needs mockup frames for the three states.
 
 connection state badges
 -----------------------
@@ -72,16 +58,19 @@ per peer as `peers/{peerId}.auto_connect`, off by default. the control belongs o
 view but outside the service list — auto connect is a frontend behaviour, not a service that
 is published to that peer.
 
-inbound connection gating
--------------------------
+invitation service
+------------------
 
-type: hardening
-scope: network
+type: feature
+scope: network service, frontend service, feed entry, invitation view
 
-follow-up to "connection approval": deny unapproved inbound connections at the transport
-instead of after the fact, so an unapproved peer never completes a connection. needs real
-`connectionGater` hooks and a way to carry the decision into `createNetwork`, which today
-takes a synchronous service-publication predicate that cannot wait for a person.
+
+new feature to send invitation from peer to peer enabled by default in connection profile.
+invitation contains list of services that one peer asks another peer to provide.
+making an invitation automatically enables listed set of services for target peer when peer accepts invitation and exposes those service from their side.
+invitation can be sent multiple times to adjust set of services that peers expose to each other.
+sending invitation with reduced set of services may be handled automatically 
+
 
 message confirmations
 ---------------------
@@ -100,56 +89,17 @@ a separate read confirmation for that message ID. Failed read confirmations
 remain queued in transient Session state and retry when the peer reconnects
 during that Session; confirmations are not persisted for offline delivery.
 
-UI refinement
--------------
-
-type: usability
-scope: frontend views
-state: largely delivered — mockups exist in penpot, `vessel/frontend/components` and
-`vessel/frontend/layouts` are built, and the account views run on them. what remains is
-tracked by "handheld view layout" and the tasks after it.
-
-in order to provide pleasant experience Vessel's views should look good and intuitive.
-currently Vessel's views are just pile of elements bound together.
-
-consistency should be provided with general layout and reusable components:
-- layout should be defined in main.tsx
-
-  possibly there will be multiple layouts in future, but for now it should be simple:
-  - navbar
-  - taskbar (always on top)
-  - toolbar
-  - view
-
-  responsiveness:
-  - general layout: toolbar on the top below status bar
-  - small screen devices: toolbar at the bottom
-
-
-  toolbar provides tool buttons for current view:
-  - home view: lock account, app settings (not yet implemented)
-  - chat view: peer view, start call
-  - peer view: peer settings, start call, back to home
-  - peer settings views: back to previous view
-  - call view: back to previous view
-
-  taskbar show whether there is ongoing call and information about unread messages from peers.
-  clicking on call should open call view.
-  
-
-- components should have their own directory in frontend (vessel/frontend/components)
-
-  TODO(refinement): need to determine reusable components
-
-TODO(refinement): provide mockups
-
-no need in any additional information on home (like Brochain: private communication network) - keep it minimal, only functional data
-
 advanced profiles
 -----------------
 
+type: feature
+scope: frontend
+
 besides just name profile should contain colors and picture.
-picture should be of square size between 256x256 and 512x512 pixels
+picture should be of square size between 256x256 and 1024x1024 pixels
+
+also profiles may contain information about desired color how peer appears in chat
+
 
 secrecy
 -------

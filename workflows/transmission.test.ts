@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
-import { connectToPeer, expect, peerNamed, test } from "./vessel.ts";
+import { acceptEveryone, connectToPeer, expect, peerNamed, test } from "./vessel.ts";
 
 const fileName = "notes.txt";
 const fileContents = "bytes bob shared with alice";
@@ -8,8 +8,10 @@ const fileContents = "bytes bob shared with alice";
 test("one person sends a file and the other downloads it", async ({ openVessel }) => {
   const alice = await openVessel("alice");
   const bob = await openVessel("bob");
+  await acceptEveryone(alice);
+  await acceptEveryone(bob);
 
-  await connectToPeer(alice, "bob");
+  await connectToPeer(alice);
   await peerNamed(bob, "alice").getByRole("button", { name: "alice", exact: true }).click();
   await expect(bob.getByRole("heading", { name: "Chat with alice" })).toBeVisible();
 

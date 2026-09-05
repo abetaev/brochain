@@ -3,6 +3,7 @@ import {
   displayName,
   observeDisplayName,
 } from "@v/backend/options/peer-names";
+import { registryServiceName } from "@c/backend/network/services/registry";
 import type { Session } from "@v/backend/session";
 import type { Action } from "@v/frontend/components/ActionBar";
 import { Avatar } from "@v/frontend/components/Avatar";
@@ -109,9 +110,6 @@ export function Home(props: {
     if (address === undefined) throw new Error("This peer has no known address.");
     const connected = await network.connect(address, ...alternates);
     await connected.refreshServices();
-    if (!props.chat.capabilities(connected).text) {
-      throw new Error("This peer does not provide messaging.");
-    }
     props.onOpenChat(connected.id);
   }
 
@@ -182,6 +180,7 @@ export function Home(props: {
             <For each={peers()}>
               {(peer) => (
                 <PeerRow
+                  services={network.services()}
                   listed={peer}
                   unread={hasUnread(peer.peerId)}
                   busy={unavailable()}
@@ -228,6 +227,7 @@ export function Home(props: {
 }
 
 function PeerRow(props: {
+  services: readonly string[];
   listed: RosterEntry;
   unread: boolean;
   busy: boolean;
@@ -235,6 +235,13 @@ function PeerRow(props: {
   onOpenChat(peerId: string): void;
   onOpenPeer(peerId: string): void;
 }) {
+  // A peer holding nothing but Registry has reached us and reaches nothing yet.
+  const requesting = () => {
+    const peer = props.listed.peer;
+    return peer !== undefined && props.listed.online &&
+      !props.services.some((name) => name !== registryServiceName && peer.hosts(name));
+  };
+
   return (
     <ListItem
       avatar={
@@ -254,6 +261,9 @@ function PeerRow(props: {
             classList={{ "connection-state": true, connected: props.listed.online }}
             aria-label={props.listed.online ? "Connected" : "Not connected"}
           />
+          <Show when={requesting()}>
+            <small>Requesting a connection</small>
+          </Show>
           <Show when={!props.listed.online}>
             <Show
               when={props.listed.addresses.length > 0}

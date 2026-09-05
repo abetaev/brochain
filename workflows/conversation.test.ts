@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import {
+  acceptEveryone,
   connectToPeer,
   expect,
   password,
@@ -11,8 +12,10 @@ import {
 test("two people meet through the Beacon, talk, and leave", async ({ openVessel }) => {
   const alice = await openVessel("alice");
   const bob = await openVessel("bob");
+  await acceptEveryone(alice);
+  await acceptEveryone(bob);
 
-  await connectToPeer(alice, "bob");
+  await connectToPeer(alice);
   await alice.getByLabel("Message", { exact: true }).fill("hello from alice");
   await alice.getByRole("button", { name: "Send message" }).click();
   await expect(alice.getByText("hello from alice")).toBeVisible();

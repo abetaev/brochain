@@ -1,3 +1,4 @@
+import type { JSX } from "solid-js";
 import "./Toggle.css";
 
 export function Toggle(props: {
@@ -7,6 +8,8 @@ export function Toggle(props: {
   onChange?: (checked: boolean) => void;
   disabled?: boolean;
   hint?: string;
+  /** What the row says about itself beyond the switch, such as where its value came from. */
+  actions?: JSX.Element;
 }) {
   return (
     <div class="toggle-row">
@@ -22,6 +25,7 @@ export function Toggle(props: {
         {props.label}
       </label>
       {props.hint !== undefined ? <small>{props.hint}</small> : null}
+      {props.actions}
     </div>
   );
 }

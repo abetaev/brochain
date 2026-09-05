@@ -306,7 +306,10 @@ export function createChat(session: Session, call: Call): Chat {
       const services = peer.services();
       return {
         text: services.includes(messagingServiceName),
-        files: services.includes(dataTransferServiceName),
+        // Offering a transfer needs the local instance which tracks it, so a peer
+        // this one publishes nothing to cannot be sent a file whatever it offers.
+        files: services.includes(dataTransferServiceName) &&
+          peer.hosts(dataTransferServiceName),
       };
     },
     history,

@@ -7,8 +7,11 @@ import type {
   PersistentServiceStorage,
 } from "@v/backend/storage";
 import {
+  clearServiceEnabled,
   isServiceEnabled,
   observeServiceEnabled,
+  overridesService,
+  setServiceEnabled,
 } from "./network-services";
 
 async function testOptions() {
@@ -29,27 +32,59 @@ async function testOptions() {
   return { options: await createOptions(storage), values };
 }
 
+const local = "this-peer";
+
 describe("network service Options", () => {
-  it("defaults to enabled and isolates peer and service settings", async () => {
-    const { options, values } = await testOptions();
-    const configured = options.cat("peers").obj("peer-one")
-      .cat("services").obj("messaging");
+  // Registry is the only thing a peer nobody has configured reaches, so a stranger
+  // can read an empty catalog and stay connected while someone decides about it.
+  it("grants an unconfigured peer nothing but Registry", async () => {
+    const { options } = await testOptions();
 
-    expect(isServiceEnabled(options, "peer-one", "messaging")).toBe(true);
-    await configured.set("enabled", false);
-
-    expect(values.get("peers/peer-one/services/messaging.enabled")).toBe(false);
-    expect(isServiceEnabled(options, "peer-one", "messaging")).toBe(false);
-    expect(isServiceEnabled(options, "peer-one", "identity")).toBe(true);
-    expect(isServiceEnabled(options, "peer-two", "messaging")).toBe(true);
-
-    await configured.set("enabled", true);
-    expect(isServiceEnabled(options, "peer-one", "messaging")).toBe(true);
+    expect(isServiceEnabled(options, local, "peer-one", "registry")).toBe(true);
+    expect(isServiceEnabled(options, local, "peer-one", "messaging")).toBe(false);
+    expect(isServiceEnabled(options, local, local, "registry")).toBe(true);
+    expect(isServiceEnabled(options, local, local, "messaging")).toBe(false);
   });
 
-  it("observes only the selected peer and service", async () => {
+  it("answers for every peer which decides nothing of its own", async () => {
+    const { options, values } = await testOptions();
+
+    await setServiceEnabled(options, local, "messaging", true);
+
+    expect(values.get(`peers/${local}/services/messaging.enabled`)).toBe(true);
+    expect(isServiceEnabled(options, local, "peer-one", "messaging")).toBe(true);
+    expect(isServiceEnabled(options, local, "peer-two", "messaging")).toBe(true);
+    expect(isServiceEnabled(options, local, "peer-one", "calling")).toBe(false);
+
+    await setServiceEnabled(options, local, "registry", false);
+    expect(isServiceEnabled(options, local, "peer-one", "registry")).toBe(false);
+  });
+
+  it("lets a peer decide for itself, and follow the profile again", async () => {
     const { options } = await testOptions();
-    const observed: boolean[] = [];
+    await setServiceEnabled(options, local, "messaging", true);
+
+    await setServiceEnabled(options, "peer-one", "messaging", false);
+
+    expect(overridesService(options, "peer-one", "messaging")).toBe(true);
+    expect(isServiceEnabled(options, local, "peer-one", "messaging")).toBe(false);
+    expect(isServiceEnabled(options, local, "peer-two", "messaging")).toBe(true);
+
+    // The profile moves on without it while the peer holds a value of its own.
+    await setServiceEnabled(options, local, "messaging", false);
+    expect(isServiceEnabled(options, local, "peer-one", "messaging")).toBe(false);
+
+    await clearServiceEnabled(options, "peer-one", "messaging");
+    expect(overridesService(options, "peer-one", "messaging")).toBe(false);
+    expect(isServiceEnabled(options, local, "peer-one", "messaging")).toBe(false);
+
+    await setServiceEnabled(options, local, "messaging", true);
+    expect(isServiceEnabled(options, local, "peer-one", "messaging")).toBe(true);
+  });
+
+  it("observes only the selected peer and service, and reports a value withdrawn", async () => {
+    const { options } = await testOptions();
+    const observed: (boolean | undefined)[] = [];
     const stop = observeServiceEnabled(
       options,
       "peer-one",
@@ -57,16 +92,13 @@ describe("network service Options", () => {
       (enabled) => observed.push(enabled),
     );
 
-    await options.cat("peers").obj("peer-one")
-      .cat("services").obj("identity").set("enabled", false);
-    await options.cat("peers").obj("peer-two")
-      .cat("services").obj("messaging").set("enabled", false);
-    await options.cat("peers").obj("peer-one")
-      .cat("services").obj("messaging").set("enabled", false);
-    await options.cat("peers").obj("peer-one")
-      .cat("services").obj("messaging").unset("enabled");
+    await setServiceEnabled(options, "peer-one", "identity", false);
+    await setServiceEnabled(options, "peer-two", "messaging", false);
+    await setServiceEnabled(options, local, "messaging", false);
+    await setServiceEnabled(options, "peer-one", "messaging", false);
+    await clearServiceEnabled(options, "peer-one", "messaging");
     stop();
 
-    expect(observed).toEqual([false, true]);
+    expect(observed).toEqual([false, undefined]);
   });
 });

@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { connectToPeer, expect, test } from "./vessel.ts";
+import { acceptEveryone, connectToPeer, expect, test } from "./vessel.ts";
 
 // A call is proven by frames arriving, not by the words on the page.
 async function expectVideo(page: Page, label: string): Promise<void> {
@@ -20,9 +20,11 @@ function notice(page: Page, waiting: string): Locator {
 test("two people call each other, and the call outlives the view", async ({ openVessel }) => {
   const alice = await openVessel("alice");
   const bob = await openVessel("bob");
+  await acceptEveryone(alice);
+  await acceptEveryone(bob);
 
   // A call is placed from the conversation and stays there until it is answered.
-  await connectToPeer(alice, "bob");
+  await connectToPeer(alice);
   await alice.getByRole("button", { name: "Call", exact: true }).click();
   await expect(alice.getByText("outgoing call")).toBeVisible();
   await expect(alice.getByRole("button", { name: "Cancel call" })).toBeVisible();

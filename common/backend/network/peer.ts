@@ -12,6 +12,7 @@ export interface Peer {
   services(): readonly string[];
   isConnected(): boolean;
   connect(): Promise<Peer>;
+  disconnect(): Promise<void>;
   refreshServices(): Promise<readonly string[]>;
   hosts(name: string): boolean;
   service<Service extends object>(name: string): Service;
@@ -35,6 +36,7 @@ export function createPeer(
   node: Libp2p,
   id: string,
   connect: (peer: ManagedPeer) => Promise<Peer>,
+  disconnect: (peer: ManagedPeer) => Promise<void>,
   refreshServices: (peer: ManagedPeer) => Promise<readonly string[]>,
 ): ManagedPeer {
   const addresses = new Set<string>();
@@ -100,6 +102,9 @@ export function createPeer(
     isConnected,
     async connect() {
       return await connect(managed);
+    },
+    async disconnect() {
+      await disconnect(managed);
     },
     async refreshServices() {
       return await refreshServices(managed);

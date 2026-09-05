@@ -194,6 +194,21 @@ describe("Network and Peer identity", () => {
     expect(local.network.connectedPeers()).toEqual([]);
   });
 
+  it("closes a Peer's connections and removes it when it is disconnected", async () => {
+    const remote = await localNetwork();
+    const local = await localNetwork();
+    const peer = await (await local.network.createPeer(remote.address)).connect();
+    const events: string[] = [];
+    local.network.updates.subscribe(({ type }) => events.push(type));
+
+    await peer.disconnect();
+
+    expect(peer.isConnected()).toBe(false);
+    expect(events).toEqual(["disconnected"]);
+    expect(local.network.connectedPeers()).toEqual([]);
+    await vi.waitFor(() => expect(remote.network.connectedPeers()).toEqual([]));
+  });
+
   it("delivers Discovery snapshots and patches over its peer-bound instance", async () => {
     const discovery = createDiscoveryHost();
     const beacon = await localNetwork({

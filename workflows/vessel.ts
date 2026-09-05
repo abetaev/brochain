@@ -69,11 +69,23 @@ export function peerOffering(page: Page, action: "Connect") {
     .filter({ has: page.getByRole("button", { name: action, exact: true }) });
 }
 
-export async function connectToPeer(page: Page, name: string): Promise<void> {
+// A peer reaches nothing until it is let in, and the connection profile — this
+// peer's own service list — is what lets in everyone nobody has decided about.
+export async function acceptEveryone(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  for (const service of await page.getByRole("switch").all()) await service.check();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+}
+
+// Connecting reaches a peer and opens its conversation. The peer is named only
+// once it publishes its Identity to us, so until then the conversation is headed
+// by its peer ID.
+export async function connectToPeer(page: Page): Promise<void> {
   await expect(async () => {
     await page.getByRole("button", { name: "Refresh peers" }).click();
     await expect(peerOffering(page, "Connect")).toBeVisible({ timeout: 5_000 });
   }).toPass();
   await peerOffering(page, "Connect").getByRole("button", { name: "Connect" }).click();
-  await expect(page.getByRole("heading", { name: `Chat with ${name}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Chat with / })).toBeVisible();
 }

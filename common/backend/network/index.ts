@@ -151,6 +151,7 @@ export default async function createNetwork(
       node,
       id,
       connectManagedPeer,
+      disconnectManagedPeer,
       refreshPeerServices,
     );
   }
@@ -219,6 +220,10 @@ export default async function createNetwork(
     managed.connected();
     updates.publish({ type: "connected", peer: managed.peer });
     return managed.peer;
+  }
+
+  async function disconnectManagedPeer(managed: ManagedPeer): Promise<void> {
+    await closePeerConnections(managed.peer.id);
   }
 
   async function refreshPeerServices(managed: ManagedPeer): Promise<readonly string[]> {

@@ -19,10 +19,13 @@ using brochain
 3. **Connect.** Select **Connect** beside a peer. If someone gave you an address
    instead, paste it under **Connect directly**, which takes either a URL such as
    `https://example.com` or a peer multiaddress. That only connects; the peer
-   then appears in the list like any other.
+   then appears in the list like any other. Connecting grants nothing by itself:
+   until you have let each other in, both of you appear as **Requesting a
+   connection**, shown by peer ID, and nothing can be exchanged.
 4. **Talk.** Select **Chat**, enter text, and select **Send message**. Use **Send
    a file** where file sharing is available for that peer; progress and failures
-   appear in the conversation. Both people must be connected to send.
+   appear in the conversation. Both people must be connected, and must have let
+   each other in, to send.
 5. **Call.** Select **Call** in a conversation to place an audio and video call,
    available while that peer offers calls. The call appears in the conversation
    itself as a record you can cancel, and an incoming one reaches you wherever you
@@ -41,16 +44,22 @@ using brochain
    disappear after sign-out or reload.
 7. **Yourself.** Select your own avatar in the top bar on Home to name yourself,
    read the peer ID and addresses someone else needs to reach you, and choose
-   whether connection requests are accepted without asking. The name is yours
-   alone for now; peers still see the account username until they reconnect.
+   which of your services a peer you have decided nothing about reaches. That
+   last choice is your profile, and it is how everyone is treated until you say
+   otherwise about them: it starts granting nothing, so turn on what you are happy
+   for a stranger to reach. The name is yours alone for now; peers still see the
+   account username until they reconnect.
 8. **Configure.** Select **Settings** beside a peer, or from a conversation, to
    see what they report about themselves, name them, and choose which services
    they may reach. A peer arrives named by whatever it reports; **Save name**
    replaces that with a name of your own, up to 64 characters, used everywhere it
    appears, and **Reset name** returns to what the peer last reported. **Refresh
    identity** asks them again, and becomes **Clear identity** when they no longer
-   share one, after which resetting leaves only their peer ID. Service changes
-   apply at once, including while connected. Refusing the registry leaves them no
-   way to learn what you support, which bars them entirely.
+   share one, after which resetting leaves only their peer ID. Their services are
+   the same list your own Settings hold, and each follows your profile — saying
+   **Default** — until you decide about it here, after which **Use default** hands
+   it back. Changes apply at once, including while connected. Refusing the registry
+   leaves them no way to learn what you support, which bars them entirely and
+   closes the connection, and they stay barred whenever they return.
 9. **Sign out** to return to the account screen, where you can export an account
    or permanently delete it after confirming its password.

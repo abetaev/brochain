@@ -26,6 +26,9 @@ vi.mock("@libp2p/circuit-relay-v2", () => ({
 vi.mock("@libp2p/crypto/keys", () => ({
   generateKeyPairFromSeed: dependencies.generateKeyPairFromSeed,
 }));
+vi.mock("@libp2p/peer-id", () => ({
+  peerIdFromPrivateKey: () => ({ toString: () => localPeerId }),
+}));
 vi.mock("@libp2p/identify", () => ({
   identify: () => ({ type: "identify" }),
   identifyPush: () => ({ type: "identify-push" }),
@@ -49,65 +52,96 @@ let factories: NetworkServiceFactories;
 let publication: ServicePublication;
 let optionValues: Map<string, boolean>;
 let optionListeners: Map<string, Set<(value: boolean | undefined) => unknown>>;
+let connected: TestPeer[];
 
-function peer(id = "remote"): Peer {
+// This peer, which the connection profile is configured under like any other.
+const localPeerId = "local";
+
+// The published instances are what a publication decision produces, so the fake
+// Peer holds them and the fake Network maintains them.
+type TestPeer = Peer & { readonly hosted: Set<string> };
+
+function peer(id = "remote"): TestPeer {
+  const hosted = new Set<string>();
   return {
     id,
+    hosted,
     addresses: () => [],
     services: () => ["registry", "identity", "messaging", "data-transfer"],
     isConnected: () => true,
     connect: vi.fn(),
+    disconnect: vi.fn(async () => {}),
     refreshServices: vi.fn(),
     subscribe: vi.fn(() => () => {}),
-    hosts: vi.fn(() => true),
+    hosts: (name: string) => hosted.has(name),
     service: vi.fn(),
-  } as unknown as Peer;
+  } as unknown as TestPeer;
+}
+
+// Connection publishes whatever the decision permits, the way Common Network does.
+function connect(remote: TestPeer): void {
+  for (const serviceName of common.services()) {
+    if (publication(remote, serviceName)) remote.hosted.add(serviceName);
+  }
+  connected.push(remote);
+  commonUpdates.publish({ type: "connected", peer: remote });
+}
+
+function optionCategory(path: string) {
+  return { obj: (identifier: string) => optionObject(`${path}/${identifier}`) };
+}
+
+function optionObject(path: string) {
+  return {
+    get: (name: string) => optionValues.get(`${path}.${name}`),
+    set: async (name: string, value: boolean) => setOption(`${path}.${name}`, value),
+    observe: (name: string, listener: (value: boolean | undefined) => unknown) => {
+      const key = `${path}.${name}`;
+      let observers = optionListeners.get(key);
+      if (observers === undefined) {
+        observers = new Set();
+        optionListeners.set(key, observers);
+      }
+      observers.add(listener);
+      return () => observers?.delete(listener);
+    },
+    cat: (name: string) => optionCategory(`${path}/${name}`),
+  };
 }
 
 function options(): Options {
-  return {
-    cat: () => ({
-      obj: (peerId: string) => ({
-        cat: () => ({
-          obj: (serviceName: string) => {
-            const key = `${peerId}/${serviceName}`;
-            return {
-              get: () => optionValues.get(key),
-              observe: (_name: string, current: (value: boolean | undefined) => unknown) => {
-                let observers = optionListeners.get(key);
-                if (observers === undefined) {
-                  observers = new Set();
-                  optionListeners.set(key, observers);
-                }
-                observers.add(current);
-                return () => observers?.delete(current);
-              },
-            };
-          },
-        }),
-      }),
-    }),
-  } as unknown as Options;
+  return { cat: optionCategory } as unknown as Options;
 }
 
-function setOption(peerId: string, serviceName: string, value: boolean): void {
-  const key = `${peerId}/${serviceName}`;
+function setOption(key: string, value: boolean): void {
   optionValues.set(key, value);
   for (const observer of optionListeners.get(key) ?? []) observer(value);
+}
+
+function serviceKey(peerId: string, serviceName: string): string {
+  return `peers/${peerId}/services/${serviceName}.enabled`;
+}
+
+function profileKey(serviceName: string): string {
+  return serviceKey(localPeerId, serviceName);
 }
 
 beforeEach(() => {
   optionValues = new Map();
   optionListeners = new Map();
+  connected = [];
   commonUpdates = signals.channel<NetworkUpdate>();
   factories = {};
   publication = () => true;
   common = {
-    id: "local",
+    id: localPeerId,
     createPeer: vi.fn(),
-    connectedPeers: vi.fn(() => []),
+    connectedPeers: vi.fn(() => connected),
     services: vi.fn(() => ["registry", ...Object.keys(factories)]),
-    publish: vi.fn(),
+    publish: vi.fn((target: TestPeer, serviceName: string, enabled: boolean) => {
+      if (enabled) target.hosted.add(serviceName);
+      else target.hosted.delete(serviceName);
+    }),
     updates: commonUpdates,
     close: vi.fn(async () => {}),
   } as unknown as TestNetwork;
@@ -131,46 +165,99 @@ afterEach(() => {
 
 describe("Vessel Network", () => {
 
-  it("reads publication centrally for every service", async () => {
-    optionValues.set("first/messaging", false);
-    optionValues.set("first/registry", false);
+  // Registry alone keeps a stranger connected long enough to be decided about.
+  it("grants a peer nothing but Registry while the profile grants nothing", async () => {
     await createNetwork("AA==", "alice", options());
 
-    expect(publication(peer("first"), "identity")).toBe(true);
+    expect(publication(peer("first"), "registry")).toBe(true);
     expect(publication(peer("first"), "messaging")).toBe(false);
-    expect(publication(peer("first"), "registry")).toBe(false);
-    expect(publication(peer("second"), "messaging")).toBe(true);
+    expect(publication(peer("first"), "identity")).toBe(false);
   });
 
+  it("reads the profile for every peer, and a peer's own decision before it", async () => {
+    optionValues.set(profileKey("messaging"), true);
+    optionValues.set(serviceKey("first", "messaging"), false);
+    optionValues.set(serviceKey("second", "calling"), true);
+    await createNetwork("AA==", "alice", options());
+
+    expect(publication(peer("first"), "messaging")).toBe(false);
+    expect(publication(peer("second"), "messaging")).toBe(true);
+    expect(publication(peer("second"), "calling")).toBe(true);
+    expect(publication(peer("first"), "calling")).toBe(false);
+  });
+
+  it("re-decides every connected peer when the profile changes", async () => {
+    await createNetwork("AA==", "alice", options());
+    const following = peer("following");
+    const deciding = peer("deciding");
+    optionValues.set(serviceKey(deciding.id, "messaging"), false);
+
+    connect(following);
+    connect(deciding);
+    setOption(profileKey("messaging"), true);
+
+    expect(following.hosts("messaging")).toBe(true);
+    expect(deciding.hosts("messaging")).toBe(false);
+  });
+
+  it("closes a peer it may publish no Registry to, as it connects and while it is", async () => {
+    await createNetwork("AA==", "alice", options());
+    const refused = peer("refused");
+    const listed = peer("listed");
+    optionValues.set(serviceKey(refused.id, "registry"), false);
+
+    connect(refused);
+    connect(listed);
+
+    expect([...refused.hosted]).toEqual([]);
+    expect(refused.disconnect).toHaveBeenCalledOnce();
+    expect(listed.disconnect).not.toHaveBeenCalled();
+
+    setOption(serviceKey(listed.id, "registry"), false);
+
+    expect([...listed.hosted]).toEqual([]);
+    expect(listed.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("decides nothing about a peer it reaches out to", async () => {
+    const component = await createNetwork("AA==", "alice", options());
+    const remote = peer();
+    common.createPeer.mockResolvedValue(remote);
+    (remote.connect as ReturnType<typeof vi.fn>).mockResolvedValue(remote);
+
+    await component.connect("/dns4/example.com/tcp/443/tls/ws");
+
+    expect(optionValues.size).toBe(0);
+    expect(remote.connect).toHaveBeenCalledOnce();
+  });
 
   it("applies option changes while connected and stops at disconnection", async () => {
     const component = await createNetwork("AA==", "alice", options());
     const observed: NetworkUpdate[] = [];
     component.updates.subscribe((update) => observed.push(update));
     const remote = peer();
+    optionValues.set(profileKey("messaging"), true);
 
-    commonUpdates.publish({ type: "connected", peer: remote });
-    setOption(remote.id, "messaging", false);
-    setOption(remote.id, "registry", false);
+    connect(remote);
+    setOption(serviceKey(remote.id, "messaging"), false);
     commonUpdates.publish({ type: "disconnected", peerId: remote.id });
-    setOption(remote.id, "messaging", true);
+    setOption(serviceKey(remote.id, "messaging"), true);
 
     expect(observed).toEqual([
       { type: "connected", peer: remote },
       { type: "disconnected", peerId: remote.id },
     ]);
-    expect(common.publish).toHaveBeenCalledWith(remote, "messaging", false);
-    expect(common.publish).toHaveBeenCalledWith(remote, "registry", false);
-    expect(common.publish).toHaveBeenCalledTimes(2);
+    expect(common.publish).toHaveBeenCalledExactlyOnceWith(remote, "messaging", false);
   });
 
   it("closes the Common Network once and removes option observers", async () => {
     const component = await createNetwork("AA==", "alice", options());
     const remote = peer();
-    commonUpdates.publish({ type: "connected", peer: remote });
+    connect(remote);
 
     await Promise.all([component.close(), component.close()]);
-    setOption(remote.id, "identity", false);
+    setOption(serviceKey(remote.id, "identity"), true);
+    setOption(profileKey("identity"), true);
 
     expect(common.close).toHaveBeenCalledOnce();
     expect(common.publish).not.toHaveBeenCalled();

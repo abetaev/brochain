@@ -1,12 +1,22 @@
-import { connectToPeer, expect, peerNamed, signOut, test, unlock } from "./vessel.ts";
+import {
+  acceptEveryone,
+  connectToPeer,
+  expect,
+  peerNamed,
+  signOut,
+  test,
+  unlock,
+} from "./vessel.ts";
 
 test("a returning person is remembered by name while the other stays online", async ({
   openVessel,
 }) => {
   const alice = await openVessel("alice");
   const bob = await openVessel("bob");
+  await acceptEveryone(alice);
+  await acceptEveryone(bob);
 
-  await connectToPeer(bob, "alice");
+  await connectToPeer(bob);
   await bob.getByRole("button", { name: "Back to Home" }).click();
   await expect(peerNamed(bob, "alice").getByLabel("Connected", { exact: true })).toBeVisible();
   await expect(peerNamed(alice, "bob").getByLabel("Connected", { exact: true })).toBeVisible();

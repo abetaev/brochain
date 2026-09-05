@@ -1,12 +1,14 @@
-import { connectToPeer, expect, peerNamed, test } from "./vessel.ts";
+import { acceptEveryone, connectToPeer, expect, peerNamed, test } from "./vessel.ts";
 
 test("a peer arrives named by its identity and can be renamed locally", async ({
   openVessel,
 }) => {
   const alice = await openVessel("alice");
   const bob = await openVessel("bob");
+  await acceptEveryone(alice);
+  await acceptEveryone(bob);
 
-  await connectToPeer(alice, "bob");
+  await connectToPeer(alice);
   await alice.getByRole("button", { name: "Back to Home" }).click();
   await peerNamed(alice, "bob").getByRole("button", { name: "bob settings", exact: true }).click();
   await alice.getByRole("button", { name: "Edit" }).click();
@@ -77,13 +79,16 @@ test("a person names themselves, and decides how connections reach them", async 
   await expect(heading).toHaveText("alice");
   await expect(alice.getByRole("button", { name: "Reset name" })).toBeHidden();
 
-  // The decision about connections is remembered, though nothing acts on it yet.
-  const accept = alice.getByRole("switch", { name: "Accept connections" });
-  await expect(accept).not.toBeChecked();
-  await accept.check();
+  // Our own services are the connection profile, deciding what a peer nobody has
+  // decided about reaches. Registry alone is granted until something else is, and
+  // the decision is remembered.
+  await expect(alice.getByRole("switch", { name: "registry", exact: true })).toBeChecked();
+  const messaging = alice.getByRole("switch", { name: "messaging", exact: true });
+  await expect(messaging).not.toBeChecked();
+  await messaging.check();
 
   await alice.getByRole("button", { name: "Back" }).click();
   await expect(alice.getByRole("heading", { name: "Home" })).toBeVisible();
   await alice.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(alice.getByRole("switch", { name: "Accept connections" })).toBeChecked();
+  await expect(alice.getByRole("switch", { name: "messaging", exact: true })).toBeChecked();
 });

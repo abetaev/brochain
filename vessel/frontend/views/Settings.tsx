@@ -1,14 +1,9 @@
-import { Show, createSignal, onCleanup } from "solid-js";
-import {
-  autoAcceptsConnections,
-  observeAutoAcceptConnections,
-  setAutoAcceptConnections,
-} from "@v/backend/options/local-peer";
+import { Show, createSignal } from "solid-js";
 import type { Session } from "@v/backend/session";
 import type { Action } from "@v/frontend/components/ActionBar";
 import { Facts } from "@v/frontend/components/Facts";
 import { IdentityBlock, createPeerName } from "@v/frontend/components/IdentityBlock";
-import { Toggle } from "@v/frontend/components/Toggle";
+import { Services } from "@v/frontend/components/Services";
 import { Handheld } from "@v/frontend/layouts/Handheld";
 import type { Notification } from "@v/frontend/services/notifications";
 
@@ -23,33 +18,9 @@ export function Settings(props: {
   const options = props.session.options();
   const network = props.session.network();
   const peerId = network.id;
-  const [accepts, setAccepts] = createSignal(autoAcceptsConnections(options, peerId));
   const [error, setError] = createSignal<string>();
   // The account username names us until a name of our own is chosen.
   const named = createPeerName(options, peerId, () => props.session.username);
-
-  onCleanup(observeAutoAcceptConnections(options, peerId, setAccepts));
-
-  async function attempt(operation: () => Promise<void>): Promise<void> {
-    setError(undefined);
-    try {
-      await operation();
-    } catch (reason) {
-      setError(errorMessage(reason));
-    }
-  }
-
-  // The observed option drives the control, so a refused write puts it back.
-  async function accept(enabled: boolean): Promise<void> {
-    await attempt(async () => {
-      try {
-        await setAutoAcceptConnections(options, peerId, enabled);
-      } catch (reason) {
-        setAccepts(!enabled);
-        throw reason;
-      }
-    });
-  }
 
   const actions = (): Action[] => [
     { side: "start", icon: "👈", label: "Back", onClick: props.onBack },
@@ -74,17 +45,17 @@ export function Settings(props: {
           addresses={network.addresses()}
         />
 
-        <Toggle
-          id="auto-accept-connections"
-          label="Accept connections"
-          checked={accepts()}
-          onChange={(checked) => void accept(checked)}
+        {/* Our own list is the profile: what a peer we have decided nothing about
+            reaches, and what every peer follows until it is told otherwise. */}
+        <Services
+          options={options}
+          localPeerId={peerId}
+          peerId={peerId}
+          services={network.services()}
+          hint="What a peer you have decided nothing about reaches."
+          onError={(message) => setError(message)}
         />
       </>
     </Handheld>
   );
-}
-
-function errorMessage(reason: unknown): string {
-  return reason instanceof Error ? reason.message : "An unexpected settings error occurred.";
 }

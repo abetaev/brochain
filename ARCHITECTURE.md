@@ -98,7 +98,8 @@ Common
 - **structure**: retained addresses, the last remote service catalog, published
   service instances, and one remote projection per service
 - **use cases**: read addresses, connection state, remote services, and whether a
-  service is published; connect; refresh remote services; access a service
+  service is published; connect; disconnect; refresh remote services; access a
+  service
 - **behavior**: connection state derives from the live libp2p connections.
   Explicit dial targets and Identify results supply retained addresses; inbound
   source addresses do not. Accessing a service returns the published instance
@@ -184,13 +185,13 @@ Vessel backend
   failure changes neither. Concurrent mutations have no ordering contract. Values
   are strings, numbers, booleans, or `null`; `undefined` means absent. The
   TypeScript schema does not validate exact persisted scalar types. Dynamic
-  object identifiers are percent-encoded. A missing or true
-  `peers/${peerId}/services/${serviceName}.enabled` publishes that service to
-  that peer; false withholds it. `peers/${peerId}.display_name` names that peer
-  wherever it is shown. This peer is one of them, configured under its own peer ID
-  and read the same way: its `display_name` overrides the account username, and a
-  true `auto_accept_connections` records that connection requests need not be asked
-  about, absent meaning they must. Observation is synchronous, ordered,
+  object identifiers are percent-encoded. `peers/${peerId}/services/${serviceName}.enabled`
+  publishes or withholds that service for that peer, and absent means the peer
+  decides nothing and follows this peer's own values, the connection profile, whose
+  own absent value grants Registry alone. `peers/${peerId}.display_name` names that
+  peer wherever it is shown. This peer is one of them, configured under its own peer
+  ID and read the same way, so asking about it asks the profile: its `display_name`
+  overrides the account username. Observation is synchronous, ordered,
   non-retained, and property-specific.
 
 #### Storage
@@ -219,9 +220,15 @@ Vessel backend
   DataTransfer, and Calling factories
 - **use cases**: everything Common Network provides, plus connect by address
 - **behavior**: Vessel adds one thing to the Common Network — the account's
-  Options decide which services each peer may reach. They are read when a peer
-  connects and the same properties are observed while it stays connected, so a
-  change publishes or removes that instance immediately.
+  Options decide which services each peer may reach. A peer's own values answer
+  first and the connection profile answers for every peer which holds none, so one
+  rule covers a peer which reached us and a peer we reached alike; reaching out
+  decides nothing. Both are observed while a peer stays connected, and a profile
+  change re-decides every peer following it, so either publishes or removes that
+  instance immediately. Withholding Registry bars a peer entirely, which the
+  emptied catalog announces before its connection is closed; the withheld value
+  persists, so that peer is closed again whenever it returns. The gate is at the
+  application layer, so a barred connection completes before it is closed.
 
 ##### Identity
 
@@ -306,28 +313,6 @@ Vessel frontend
   reset. Addresses, availability, discovery, and service catalogs remain
   transient.
 
-### Roster
-
-- **dependencies**: Session Network, persistent Storage, and Signals
-- **structure**: one persistent Identity store, the observed display-name Options,
-  one current peer projection, and a keyed update Channel
-- **use cases**: list or get current peers; refresh remote observations; reset a
-  peer's name; read or forget a peer's reported name; observe one-peer set and
-  remove updates
-- **behavior**: construction combines connected, discovered, and remembered
-  Peers. Network and Discovery changes update only the affected projection and
-  publish that patch. A connection update makes Roster refresh that Peer's
-  catalog, and the catalog decides whether Identity and Discovery are queried.
-  Provider failures are isolated. Valid Identity is persisted before its peer
-  update, and names the peer the first time one is read, because a name is seeded
-  only while none is held; a chosen name therefore survives every later
-  identification. A peer with no name is shown by its peer ID. Resetting concerns
-  the name alone: it returns to whatever the peer last reported. The reported
-  Identity is read again while the peer publishes one and is forgotten otherwise,
-  so a peer becomes its peer ID only once that report is dropped and the name
-  reset. Addresses, availability, discovery, and service catalogs remain
-  transient.
-
 ### Settings
 
 - **dependencies**: Session Network, Options, and the account username
@@ -363,7 +348,9 @@ Vessel frontend
 - **behavior**: Chat owns conversation identity — it assigns every item's
   identifier and derives sent and failed state from its own remote call. It
   subscribes to the instances a Peer publishes, which exist before that peer's
-  catalog is known, while the catalog gates the text and file controls. Incoming
+  catalog is known, while the catalog gates the text and file controls. A file
+  also needs the instance this peer publishes, because the sender's own instance
+  tracks the transfer, so a peer nothing is published to cannot be sent one. Incoming
   files stream into Chat's file store and an offer without a declared size is
   refused. A call is the third thing that happens with a peer and is written into
   the same conversation as the other two: one item raised when the call begins and
@@ -410,13 +397,17 @@ Vessel frontend
   to the identity block, which owns naming for whichever peer it shows
 - **use cases**: read a peer's identity, availability, and addresses; name it,
   reset its name, refresh or forget its reported name; publish or refuse each
-  supported service for it; open its conversation, or place a call into it
+  supported service for it, or return it to the profile; open its conversation, or
+  place a call into it
 - **behavior**: the view lists the locally supported services and reflects each
   peer's Options while open, so a change made elsewhere appears. A name is trimmed
   and must be 1 to 64 characters; the reported Identity stays shown beside it and
   is never replaced by local naming. One control serves that report, offering to
-  refresh it while the peer publishes Identity and to forget it otherwise. A refusal takes
-  effect immediately, including while connected. A refused write restores its
+  refresh it while the peer publishes Identity and to forget it otherwise. Each
+  service says whether it follows the profile or decides for itself, and a connected
+  peer holding nothing but Registry reads as requesting a connection rather than
+  merely connected, because what is published to a peer is what it reaches. A
+  refusal takes effect immediately, including while connected. A refused write restores its
   control and reports the failure. Placing a call opens that peer's conversation,
   which is where the call's record and its controls live. Leaving returns to the
   view which opened it.
@@ -424,15 +415,16 @@ Vessel frontend
 ### Settings view
 
 - **dependencies**: Session
-- **structure**: the automatic-acceptance projection observed from Options and
-  view-local settings errors; this peer's name belongs to the identity block, the
-  same one the Peer view uses
+- **structure**: view-local settings errors; this peer's name belongs to the
+  identity block and its services to the same list, both the ones the Peer view uses
 - **use cases**: read this peer's ID and addresses; name it and reset that name;
-  decide whether connection requests are accepted without asking
+  decide what a peer nobody has decided about reaches
 - **behavior**: Options keys this peer the way it keys any other, so the view is
   the Peer view turned on ourselves and hands the same identity block the same
   `display_name`, differing only in what names us while none is chosen — the
-  account username, which resetting returns to. This peer's own ID and addresses are shown because they are what
+  account username, which resetting returns to — and in its services being the
+  profile every other peer falls back to, which is why they carry no control saying
+  where their value came from. This peer's own ID and addresses are shown because they are what
   someone else needs for Home's direct connection and appear nowhere else. A
   refused write restores its control and reports the failure. It is reached by this
   peer's own avatar in Home's status bar, and leaving returns there.
@@ -446,7 +438,10 @@ Vessel frontend
   Chat, Peer, or this peer's own Settings; sign out
 - **behavior**: once subscriptions exist, Home starts the default Beacon
   connection in the background, and Refresh retries it and refreshes Roster.
-  Selecting a listed Peer connects and opens its conversation. A direct address
+  Selecting a listed Peer connects and opens its conversation, whatever that peer
+  turns out to offer, because a peer which has not yet let us in offers nothing and
+  is not a peer without a conversation. A connected peer holding nothing but
+  Registry is listed as requesting a connection. A direct address
   completes only the connection procedure, so a peer offering no conversation is
   still reached; it accepts a URL or a multiaddress. Roster patches replace or
   remove one keyed row, Peer catalogs provide Chat capabilities, and Chat updates
