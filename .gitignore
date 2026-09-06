@@ -9,3 +9,4 @@ playwright-report/
 *.dtmp
 .mcp.json
 .beacon-identity
+.env

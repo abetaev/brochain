@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "node main.ts dev",
     "prod": "node main.ts prod",
-    "test": "node main.ts test"
+    "test": "node main.ts test",
+    "deploy": "node main.ts deploy"
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "^17.0.0",
