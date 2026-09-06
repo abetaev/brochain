@@ -1,9 +1,11 @@
-import type { Page } from "@playwright/test";
-import { acceptEveryone, connectToPeer, expect, peerNamed, test } from "./vessel.ts";
-
-function peerSettings(page: Page, name: string) {
-  return peerNamed(page, name).getByRole("button", { name: `${name} settings`, exact: true });
-}
+import {
+  acceptEveryone,
+  connectToPeer,
+  expect,
+  peerNamed,
+  peerSettings,
+  test,
+} from "./vessel.ts";
 
 test("a peer reaches nothing until it is let in", async ({ openVessel }) => {
   const alice = await openVessel("alice");

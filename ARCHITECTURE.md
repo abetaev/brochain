@@ -34,6 +34,7 @@ Vessel
 │           └── Identity, Messaging, DataTransfer, and Calling factories
 └── Frontend
     ├── Roster
+    ├── AutoConnect
     ├── Chat
     ├── Call
     └── Account, Home, Chat, Peer, and Call views
@@ -76,8 +77,8 @@ Common
   establish WebRTC are ignored; only a completed direct connection creates a
   Peer. Connection creates that Peer's published instances and then publishes
   `connected`; losing the final direct connection publishes `disconnected` and
-  removes the Peer. A publication change adds or removes one instance and
-  publishes that change. Accepted RPC and data work finishes on its instance,
+  removes the Peer. A publication change adds or removes one instance, publishes
+  that change, and completes once the peer has been told of it. Accepted RPC and data work finishes on its instance,
   while removing an instance closes its event feeds. The catalog is fixed for the
   Network lifetime.
 
@@ -204,7 +205,9 @@ Vessel backend
   object identifiers are percent-encoded. `peers/${peerId}/services/${serviceName}.enabled`
   publishes or withholds that service for that peer, and absent means the peer
   decides nothing and follows this peer's own values, the connection profile, whose
-  own absent value grants Registry alone. `peers/${peerId}.display_name` names that
+  own absent value grants Registry alone. `peers/${peerId}.auto_connect` reaches that peer
+  without being asked to, and absent means it is not reached.
+  `peers/${peerId}.display_name` names that
   peer wherever it is shown. This peer is one of them, configured under its own peer
   ID and read the same way, so asking about it asks the profile: its `display_name`
   overrides the account username. Observation is synchronous, ordered,
@@ -242,7 +245,9 @@ Vessel backend
   decides nothing. Both are observed while a peer stays connected, and a profile
   change re-decides every peer following it, so either publishes or removes that
   instance immediately. Withholding Registry bars a peer entirely, which the
-  emptied catalog announces before its connection is closed; the withheld value
+  emptied catalog announces before its connection is closed, so a peer learns it was
+  barred rather than merely losing a connection; one which does not answer that
+  announcement does not keep the connection either. The withheld value
   persists, so that peer is closed again whenever it returns. The gate is at the
   application layer, so a barred connection completes before it is closed.
 
@@ -293,13 +298,13 @@ Vessel frontend
 ### Application
 
 - **dependencies**: Account and, after authentication, an active Session
-- **structure**: Roster, Chat, Call, and Notifications services plus one active
-  Account, Home, Settings, Chat, Peer, or Call view
+- **structure**: Roster, AutoConnect, Chat, Call, and Notifications services plus
+  one active Account, Home, Settings, Chat, Peer, or Call view
 - **use cases**: authenticate; sign out; navigate between account, peer list, and
   conversation views
-- **behavior**: after authentication, Application constructs Call, Chat, and then
-  Roster before exposing Home, so each subscribes before Home starts an external
-  connection. Initialization failure closes the Session. Application owns
+- **behavior**: after authentication, Application constructs Call, Chat, Roster,
+  and AutoConnect before exposing Home, so each subscribes before Home starts an
+  external connection. Initialization failure closes the Session. Application owns
   navigation, so it is what gives each Notification somewhere to go, deciding where
   selecting one leads: a running call to the Call view,
   anything else — a call still ringing included, since that is answered in the
@@ -328,6 +333,24 @@ Vessel frontend
   so a peer becomes its peer ID only once that report is dropped and the name
   reset. Addresses, availability, discovery, and service catalogs remain
   transient.
+
+### AutoConnect
+
+- **dependencies**: Session Network, Options, and Roster
+- **structure**: the peers currently holding an address and one observed
+  `auto_connect` Option per peer
+- **use cases**: none — a peer is marked by writing that Option, which the Peer
+  view does, and reaching it is this service's own doing
+- **behavior**: a marked peer is reached when it becomes available, which is when
+  the Roster first holds an address for it, so a peer the Beacon advertises again
+  after it was gone is reached without anyone asking. Availability is what changes,
+  not connection: a peer which stays advertised keeps the address it was reached at,
+  so a connection either side dropped is left as it was until that peer goes and
+  returns, and a failed dial waits for the same. The first peer an account ever
+  meets is the Beacon the page connects to, and it is the one peer which arrives
+  marked; every other peer starts unmarked. A peer whose announced catalog no
+  longer holds Registry has barred us, which is not something to dial through: it
+  is unmarked rather than reached again.
 
 ### Settings
 
@@ -417,9 +440,9 @@ Vessel frontend
   observed from Options, and view-local settings errors; the peer's name belongs
   to the identity block, which owns naming for whichever peer it shows
 - **use cases**: read a peer's identity, availability, and addresses; name it,
-  reset its name, refresh or forget its reported name; publish or refuse each
-  supported service for it, or return it to the profile; open its conversation, or
-  place a call into it
+  reset its name, refresh or forget its reported name; mark it for automatic
+  connection; publish or refuse each supported service for it, or return it to the
+  profile; open its conversation, or place a call into it
 - **behavior**: the view lists the locally supported services and reflects each
   peer's Options while open, so a change made elsewhere appears. A name is trimmed
   and must be 1 to 64 characters; the reported Identity stays shown beside it and
@@ -428,7 +451,10 @@ Vessel frontend
   service says whether it follows the profile or decides for itself, and a connected
   peer holding nothing but Registry reads as requesting a connection rather than
   merely connected, because what is published to a peer is what it reaches. A
-  refusal takes effect immediately, including while connected. A refused write restores its
+  refusal takes effect immediately, including while connected. Reaching a peer is
+  what this application does about it rather than something the peer is granted, so
+  the automatic-connection switch stands apart from that list and shows what the
+  Options hold, a bar switching it off under a reader who is watching. A refused write restores its
   control and reports the failure. Placing a call opens that peer's conversation,
   which is where the call's record and its controls live. Leaving returns to the
   view which opened it.

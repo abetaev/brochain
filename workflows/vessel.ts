@@ -70,6 +70,12 @@ export function peerNamed(page: Page, name: string) {
   return page.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
 }
 
+// A peer's own view is reached by its avatar in the row, which names itself for
+// whatever that peer is called.
+export function peerSettings(page: Page, name: string) {
+  return peerNamed(page, name).getByRole("button", { name: `${name} settings`, exact: true });
+}
+
 export function peerDisconnected(page: Page) {
   return page.getByRole("listitem")
     .filter({ has: page.getByLabel("Disconnected", { exact: true }) });

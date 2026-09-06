@@ -138,7 +138,7 @@ beforeEach(() => {
     createPeer: vi.fn(),
     connectedPeers: vi.fn(() => connected),
     services: vi.fn(() => ["registry", ...Object.keys(factories)]),
-    publish: vi.fn((target: TestPeer, serviceName: string, enabled: boolean) => {
+    publish: vi.fn(async (target: TestPeer, serviceName: string, enabled: boolean) => {
       if (enabled) target.hosted.add(serviceName);
       else target.hosted.delete(serviceName);
     }),
@@ -209,14 +209,15 @@ describe("Vessel Network", () => {
     connect(refused);
     connect(listed);
 
+    // The connection goes once the peer has been told what it may now reach.
     expect([...refused.hosted]).toEqual([]);
-    expect(refused.disconnect).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(refused.disconnect).toHaveBeenCalledOnce());
     expect(listed.disconnect).not.toHaveBeenCalled();
 
     setOption(serviceKey(listed.id, "registry"), false);
 
     expect([...listed.hosted]).toEqual([]);
-    expect(listed.disconnect).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(listed.disconnect).toHaveBeenCalledOnce());
   });
 
   it("decides nothing about a peer it reaches out to", async () => {

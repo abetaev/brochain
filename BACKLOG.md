@@ -24,26 +24,6 @@ also same issue reproduces when i just refresh pwa by pulling it down.
 
 maybe add some handler which checks this issue and fixes it. worth checking existing bugs, maybe there's less invasive workaround.
 
-peer auto-connect
------------------
-
-type: feature
-scope: frontend service, options
-
-connect to peers marked for automatic connection whenever they become reachable, configured
-per peer as `peers/{peerId}.auto_connect`, off by default. the control belongs on the peer
-view but outside the service list — auto connect is a frontend behaviour, not a service that
-is published to that peer.
-
-The Beacon is the one peer which arrives with it enabled, so the connection Home
-starts today becomes an instance of this rather than a case of its own. Beacon is
-reached by an address derived from this page's origin rather than by a peer ID, so
-the first connection to it is still made from that address and the option governs
-every later one, which the Beacon's identity surviving a restart is what makes
-possible.
-
-Wanted before the first production version.
-
 invitation service
 ------------------
 

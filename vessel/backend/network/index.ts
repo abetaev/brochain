@@ -42,6 +42,7 @@ export type Network = Omit<CommonNetwork, "createPeer"> & {
 };
 
 const relayReservationTimeout = 5_000;
+const barAnnouncementTimeout = 1_000;
 
 // Vessel adds one thing to the Common Network: the account's Options decide which
 // services each peer may reach, while connected as well as at connection time. A
@@ -98,15 +99,29 @@ export async function createNetwork(
   // bars it entirely, so the connection goes with it and stays refused while the
   // decision does.
   function applyPublication(peer: Peer): void {
+    const announced: Promise<void>[] = [];
     for (const serviceName of common.services()) {
       const enabled = mayReach(peer.id, serviceName);
       if (peer.hosts(serviceName) !== enabled) {
-        common.publish(peer, serviceName, enabled);
+        announced.push(common.publish(peer, serviceName, enabled).catch(() => {
+          // A peer which has gone since the decision was read needs no telling.
+        }));
       }
     }
-    if (!mayReach(peer.id, registryServiceName)) {
-      void peer.disconnect().catch(() => {});
-    }
+    if (!mayReach(peer.id, registryServiceName)) void closeBarred(peer, announced);
+  }
+
+  // A barred peer is told what it may now reach before the connection carrying
+  // that answer goes; one which does not answer does not get to keep it.
+  async function closeBarred(
+    peer: Peer,
+    announced: readonly Promise<void>[],
+  ): Promise<void> {
+    await Promise.race([
+      Promise.all(announced),
+      new Promise<void>((resolve) => setTimeout(resolve, barAnnouncementTimeout)),
+    ]);
+    await peer.disconnect().catch(() => {});
   }
 
   // The profile answers for every peer which decides nothing of its own, so a

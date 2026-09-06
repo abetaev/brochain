@@ -1,12 +1,18 @@
 import { Show, createSignal, onCleanup } from "solid-js";
 import { registryServiceName } from "@c/backend/network/services/registry";
 import { identityServiceName } from "@v/backend/network/services/identity";
+import {
+  isAutoConnectEnabled,
+  observeAutoConnect,
+  setAutoConnect,
+} from "@v/backend/options/auto-connect";
 import type { Session } from "@v/backend/session";
 import type { Action } from "@v/frontend/components/ActionBar";
 import { Facts } from "@v/frontend/components/Facts";
 import { IdentityBlock, createPeerName } from "@v/frontend/components/IdentityBlock";
 import type { Notification } from "@v/frontend/services/notifications";
 import { Services } from "@v/frontend/components/Services";
+import { Toggle } from "@v/frontend/components/Toggle";
 import { Handheld } from "@v/frontend/layouts/Handheld";
 import type { Call as CallService } from "@v/frontend/services/call";
 import type { Roster } from "@v/frontend/services/roster";
@@ -33,6 +39,26 @@ export function Peer(props: {
     }
   });
   onCleanup(stop);
+
+  // Anything may mark a peer, this peer's own bar among them, so the switch shows
+  // what the Options hold rather than what it was last set to.
+  const [marked, setMarked] = createSignal(isAutoConnectEnabled(options, props.peerId));
+  onCleanup(
+    observeAutoConnect(options, props.peerId, (enabled) => setMarked(enabled === true)),
+  );
+
+  // The switch has already moved by the time the write is attempted, so a refused
+  // one is put back from what the Options actually hold.
+  async function mark(wanted: boolean): Promise<void> {
+    setMarked(wanted);
+    setError(undefined);
+    try {
+      await setAutoConnect(options, props.peerId, wanted);
+    } catch (reason) {
+      setMarked(isAutoConnectEnabled(options, props.peerId));
+      setError(errorMessage(reason));
+    }
+  }
 
   const name = () => entry()?.name ?? props.peerId;
   const named = createPeerName(options, props.peerId, name);
@@ -144,6 +170,19 @@ export function Peer(props: {
           ]}
           addresses={entry()?.addresses ?? []}
         />
+
+        {/* Reaching a peer is what this application does about it rather than
+            something the peer is granted, so it stands apart from the services. */}
+        <section aria-labelledby="connection-heading">
+          <h3 id="connection-heading">Connection</h3>
+          <Toggle
+            id="auto-connect"
+            label="Connect automatically"
+            checked={marked()}
+            hint="Reach this peer whenever it becomes available."
+            onChange={(wanted) => void mark(wanted)}
+          />
+        </section>
 
         {/* Each service says whether it follows the profile or decides for itself. */}
         <Services

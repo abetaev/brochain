@@ -27,7 +27,13 @@ using brochain
    place until it ends.
 3. **Connect.** Select a peer to open the conversation with it, then select
    **Connect** there; **Disconnect** in the same place drops that connection, and
-   both of you see it go. If someone gave you an address instead, select **Connect
+   both of you see it go. Turn on **Connect automatically** on someone's page to be
+   connected to them without asking: they are reached whenever they become available
+   again — when they sign in, or return after losing their connection — while a
+   connection either of you drops on purpose stays dropped until then. The Beacon
+   your page connects to arrives set that way and nobody else does; turning it off
+   is remembered, and someone who stops letting you in turns it off, there being
+   nothing left to reach. If someone gave you an address instead, select **Connect
    directly** on Home and paste it into the dialog, which takes either a URL such as
    `https://example.com` or a peer multiaddress. That only connects; the peer
    then appears in the list like any other. Connecting grants nothing by itself:

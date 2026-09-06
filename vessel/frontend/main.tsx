@@ -43,11 +43,13 @@ function Vessel() {
         { createRoster },
         { createCall },
         { createNotifications },
+        { startAutoConnect },
       ] = await Promise.all([
         import("./services/chat"),
         import("./services/roster"),
         import("./services/call"),
         import("./services/notifications"),
+        import("./services/auto-connect"),
       ]);
       // Chat records what happens with a peer, a call included, so it subscribes
       // before anything else can react to one.
@@ -55,6 +57,9 @@ function Vessel() {
       const chat = createChat(session, call);
       const roster = await createRoster(session);
       const notifications = createNotifications({ chat, call, roster });
+      // Marked peers are reached as the Roster learns of them, so this watches
+      // before Home connects the Beacon that first tells it about any.
+      startAutoConnect(session, roster);
       notifications.updates.subscribe(setWaiting);
       setWaiting(notifications.list());
       // The call view is for a call that is running: it opens when one is answered

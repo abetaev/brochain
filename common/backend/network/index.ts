@@ -50,7 +50,8 @@ export interface Network {
   createPeer(address: string, ...alternates: readonly string[]): Promise<Peer>;
   connectedPeers(): readonly Peer[];
   services(): readonly string[];
-  publish(peer: Peer, serviceName: string, enabled: boolean): void;
+  /** Publishes or removes one service for a peer, resolving once it has been told. */
+  publish(peer: Peer, serviceName: string, enabled: boolean): Promise<void>;
   readonly updates: Subscription<NetworkUpdate>;
   close(): Promise<void>;
 }
@@ -124,11 +125,12 @@ export default async function createNetwork(
         .filter((peer) => peer.isConnected()));
     },
     services: () => supportedServices,
-    publish(peer, serviceName, enabled) {
+    async publish(peer, serviceName, enabled) {
       const managed = requiredPeer(peer);
       setPublished(managed, serviceName, enabled);
-      announceCatalog(managed);
+      const announced = announceCatalog(managed);
       updates.publish({ type: "publication", peer, serviceName, enabled });
+      await announced;
     },
     updates,
     async close() {
@@ -168,11 +170,13 @@ export default async function createNetwork(
 
   // A peer learns of a publication change without asking again. Announcing after
   // Registry itself was refused tells that peer at once that nothing remains.
-  function announceCatalog(managed: ManagedPeer): void {
+  async function announceCatalog(managed: ManagedPeer): Promise<void> {
     const registry = managed.peer.service<Registry>(registryServiceName);
-    void registry.remote.announce(managed.hostedServices()).catch(() => {
+    try {
+      await registry.remote.announce(managed.hostedServices());
+    } catch {
       // A peer which cannot be told will read the catalog when it next interacts.
-    });
+    }
   }
 
   function applyCatalog(managed: ManagedPeer, names: readonly string[]): void {
