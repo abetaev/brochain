@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { dependencyFingerprint, needsInitialization } from "./main.ts";
+import { dependencyFingerprint, deploymentSettings, needsInitialization } from "./main.ts";
 
 const temporaryProjects: string[] = [];
 
@@ -21,6 +21,8 @@ async function createProject() {
 }
 
 afterEach(async () => {
+  delete process.env.DEPLOY_HOST;
+  delete process.env.DEPLOY_ORIGIN;
   const removeProjects = temporaryProjects
     .splice(0)
     .map((project) => rm(project, { force: true, recursive: true }));
@@ -50,5 +52,38 @@ describe("project initialization", () => {
     await rm(join(project, "node_modules", ".bin", "vite"));
 
     expect(await needsInitialization(project)).toBe(true);
+  });
+});
+
+describe("deployment settings", () => {
+  async function settingsFile(contents: string): Promise<string> {
+    const project = await mkdtemp(join(tmpdir(), "brochain-deploy-"));
+    temporaryProjects.push(project);
+    const path = join(project, ".env");
+    await writeFile(path, contents);
+    return path;
+  }
+
+  it("reports where a deployment is configured when it is absent", async () => {
+    const path = join(await settingsFile(""), "..", "absent");
+
+    expect(() => deploymentSettings(path)).toThrowError(/absent/);
+  });
+
+  it("reports what a deployment needs when a setting is missing", async () => {
+    const path = await settingsFile("DEPLOY_ORIGIN=https://example.com\n");
+
+    expect(() => deploymentSettings(path)).toThrowError(/DEPLOY_HOST/);
+  });
+
+  it("takes the server and the address it answers on", async () => {
+    const path = await settingsFile(
+      "DEPLOY_HOST=someone@example.com\nDEPLOY_ORIGIN=https://example.com\n",
+    );
+
+    expect(deploymentSettings(path)).toEqual({
+      host: "someone@example.com",
+      origin: "https://example.com",
+    });
   });
 });

@@ -52,8 +52,10 @@ using brochain
    offers muting, stopping your camera, and hanging up; leaving it keeps the call
    running and **Open call** in the conversation leads back. Ending it returns you
    to the conversation, where the record stays, saying the call ended and why if
-   something went wrong. A call reaches only a peer on the same local network for
-   now, and says so plainly when no media path can be established.
+   something went wrong. A call finds the address you present to the outside, so it
+   reaches a peer beyond your own network; two networks which both guard their
+   addresses closely can still leave no path, and it says so plainly when none can
+   be established.
 6. **Read.** Whatever is waiting for you appears as that peer's avatar in the
    status bar of every view — unread messages and calls — and Home marks
    conversations holding unread items too. Opening a conversation clears its

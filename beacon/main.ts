@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, extname, resolve, sep } from "node:path";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { createBeacon, localHosts } from "./core.ts";
+import { announcedAddresses, createBeacon } from "./core.ts";
 
 function configuredPort(name: string, fallback: number): number {
   const value = Number(process.env[name] ?? fallback);
@@ -70,7 +70,7 @@ async function serveApplication(request: IncomingMessage, response: ServerRespon
 }
 
 const beacon = providesRelay
-  ? await createBeacon({ hosts: localHosts(), port })
+  ? await createBeacon({ announce: announcedAddresses(port) })
   : undefined;
 
 const applicationServer = createServer(serveApplication);

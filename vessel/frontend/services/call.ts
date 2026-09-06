@@ -32,9 +32,14 @@ export interface Call {
   setCamera(enabled: boolean): void;
 }
 
-// A call has nowhere to reach beyond the local network until address discovery
-// lands, so no address server is configured and the browser offers what it sees.
-const connectionConfiguration: RTCConfiguration = { iceServers: [] };
+// A browser sees only the addresses it holds itself, which reach nobody outside its
+// own network, so address servers report the one it presents to the outside and it
+// offers that as a candidate too. These are fixed until they are configurable.
+const connectionConfiguration: RTCConfiguration = {
+  iceServers: [{
+    urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"],
+  }],
+};
 
 export function createCall(session: Session): Call {
   const updates = signals.channel<CallState | undefined>();
