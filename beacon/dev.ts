@@ -1,5 +1,5 @@
 import type { Plugin } from "vite";
-import { createBeacon, localHosts } from "./core.ts";
+import { announcedAddresses, createBeacon } from "./core.ts";
 
 // A Vessel host without a relay is a deployment of its own: the page finds no
 // Beacon at its own origin and asks for another. Refusing the upgrade says so at
@@ -18,7 +18,7 @@ export function createBeaconPlugin(port: number): Plugin {
     async configureServer(server) {
       let relay: Awaited<ReturnType<typeof createBeacon>> | undefined;
       try {
-        if (providesRelay) relay = await createBeacon({ hosts: localHosts(), port });
+        if (providesRelay) relay = await createBeacon({ announce: announcedAddresses(port) });
       } catch (error) {
         server.config.logger.error(report("Unable to start the beacon", error));
         return;

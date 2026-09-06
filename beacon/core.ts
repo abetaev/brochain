@@ -16,21 +16,27 @@ import {
 import { beaconIdentity } from "./identity.ts";
 
 interface BeaconConfiguration {
-  hosts: readonly string[];
-  port: number;
+  announce: readonly string[];
 }
 
-// One list of the addresses this machine answers on, which the relay announces
-// so a peer arrives at one it can resolve.
-export function localHosts(): readonly string[] {
-  const configured = process.env.BEACON_HOST;
-  if (configured !== undefined) return [configured];
+// A public address is reached over TLS on the port a browser assumes, because a
+// deployment reached from outside terminates it in front of the relay.
+const publicPort = 443;
+
+// A relay whose host is stated is reached through something else — a proxy which
+// terminates TLS, or a forwarded port — so it announces the address a browser arrives
+// at rather than the one it listens on, which is the address every circuit address a
+// peer derives is built from. Left unstated, it answers on every address this machine
+// has, at the port it listens on.
+export function announcedAddresses(port: number): readonly string[] {
+  const publicHost = process.env.BEACON_HOST;
+  if (publicHost !== undefined) return [`${hostAddress(publicHost)}/tcp/${publicPort}/tls/ws`];
 
   const local = Object.values(networkInterfaces())
     .flatMap((addresses) => addresses ?? [])
     .filter((address) => address.family === "IPv4" && !address.internal)
     .map((address) => address.address);
-  return ["localhost", ...new Set(local)];
+  return ["localhost", ...new Set(local)].map((host) => `${hostAddress(host)}/tcp/${port}/ws`);
 }
 
 // A relay is reached by whichever of its addresses the dialing peer can resolve,
@@ -91,9 +97,7 @@ export async function createBeacon(configuration: BeaconConfiguration) {
     privateKey: await beaconIdentity(),
     addresses: {
       listen: [`/ip4/127.0.0.1/tcp/${relayPort}/ws`],
-      announce: configuration.hosts.map((host) =>
-        `${hostAddress(host)}/tcp/${configuration.port}/ws`
-      ),
+      announce: [...configuration.announce],
     },
     transports: [
       webSockets(),

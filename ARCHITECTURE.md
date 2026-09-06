@@ -555,7 +555,13 @@ Beacon
   service decision a peer holds about it; development then serves Vessel alone
   and the Beacon process does not start. A WebSocket is an HTTP upgrade, so
   the server hosting Vessel hands Beacon the upgrades it does not want and
-  Beacon answers on the one address people already opened. Hosting Vessel and
+  Beacon answers on the one address people already opened. Every circuit address
+  a peer derives, and which Discovery then hands to every other peer, is built
+  from what the relay announces rather than from the address a page connected to,
+  so a relay behind a proxy which terminates TLS MUST announce the address a
+  browser arrives at; a host stated for that purpose is announced at `443` over
+  TLS, and an unstated one leaves every address this machine answers on announced
+  at the port it listens on. Hosting Vessel and
   providing the relay are independent and either may be switched off, so a
   server can host the application for people whose relay is elsewhere, or
   relay for applications hosted elsewhere.

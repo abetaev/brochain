@@ -11,6 +11,30 @@ Implemented behavior is described in [README.md](./README.md) and [ARCHITECTURE.
 tasks
 =====
 
+prod deployment
+---------------
+
+type: infrastructure
+scope: project commands, deployment
+
+The project builds and serves itself and has never been deployed. Give it one command
+which validates, builds and ships the application to the server which hosts it, and
+document the server it ships to.
+
+- `npm run deploy` MUST validate and build as `npm run prod` does, run the test suite,
+  and then place a release on the server, install its dependencies there, make it the
+  current one, restart the service and confirm the deployment answers.
+- A deploy MUST NOT require privilege on the server. Preparing the server does, and is
+  performed once by the engineer.
+- The relay identity MUST live outside a release, so a deploy never replaces the peer
+  every roster entry, name and service decision refers to.
+- The previous release MUST remain, so a rollback is relinking it.
+- A reverse proxy terminates TLS, serves the built application and hands Beacon the
+  WebSocket upgrades, which is what `VESSEL_HOSTING=off` already leaves it doing.
+
+Configuration a deployment needs which is not the server's own belongs to the developer
+machine and is read from `.env`.
+
 screen scroll on android/chrome pwa
 -----------------------------------
 

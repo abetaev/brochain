@@ -46,12 +46,10 @@ browser or all of them, because the forward belongs to the device rather than to
 a browser. Vessel and its Beacon answer on the same port, so one forward carries
 both.
 
-`BEACON_HOST` sets the host Beacon announces, which a forwarded device needs
-pointed at the name it dials:
-
-```sh
-BEACON_HOST=localhost npm run dev
-```
+Beacon announces `localhost` among the addresses it answers on, which is the name
+a forwarded device dials, so the forward is all such a device needs. The other
+announced addresses belong to this machine's networks and a forwarded device
+simply fails to dial them, as it does any address off its own network.
 
 installing on another device
 ----------------------------
@@ -103,11 +101,14 @@ production configuration
 `npm run prod` accepts:
 
 - `PORT` — the port Vessel and the relay share; defaults to `4173`.
-- `BEACON_HOST` — the public host announced by Beacon; defaults to every address
-  this machine answers on.
+- `BEACON_HOST` — the public host Beacon announces, at `443` over TLS, because a
+  host reached by name from outside is reached through something which terminates
+  it. Defaults to every address this machine answers on, at `PORT`, without TLS.
 - `BEACON_IDENTITY`, `VESSEL_HOSTING`, and `BEACON_RELAY`, as above.
 
 Vessel connects its default Beacon at its own origin, so a deployment that serves
 the application also provides the relay unless it is told otherwise. It serves
 plain HTTP, so a deployment reached by anything but `localhost` terminates TLS in
-front of it — a browser withholds from an insecure page what an account needs.
+front of it — a browser withholds from an insecure page what an account needs —
+and that deployment states `BEACON_HOST`, because the port Beacon listens on is
+not the port anyone arrives at.
