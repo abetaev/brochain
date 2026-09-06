@@ -212,11 +212,12 @@ call address discovery
 type: feature
 scope: calls, network, options
 
-A call offers only the addresses a browser sees for itself, which suffices
-inside one network and nowhere beyond it. Configure address discovery servers so
-a peer learns the address it presents to the outside and can offer it as a
-candidate. Refine where those servers are configured, whether Beacon advertises
-its own, and what a reader is told when discovery fails, before implementation.
+Call holds a fixed pair of public address discovery servers, which reach beyond one
+network but place every caller's address and the timing of every call with someone
+else. Replace them with servers this deployment decides on, so a reader chooses whom
+their call is disclosed to. Refine where those servers are configured, whether Beacon
+advertises its own, and what a reader is told when discovery fails, before
+implementation.
 
  - beacon should implement STUN server with kill-switch that allows to turn it off
  - in global settings view there should be a list of stun servers that are used to traverse NAT

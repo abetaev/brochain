@@ -413,8 +413,11 @@ Vessel frontend
   end a call; mute the microphone and stop the camera
 - **behavior**: Call owns one call at a time and keeps it for the Session, so
   navigation cannot end it. Capture begins only once a reader accepts, and a
-  second invitation arriving during a call is refused as busy. No address server
-  is configured, so a call reaches only a local network. Candidates arriving
+  second invitation arriving during a call is refused as busy. A browser holds
+  only the addresses of its own networks, so fixed public address servers report
+  the one it presents to the outside and a call reaches beyond one network;
+  neither peer relays media, so two networks which both translate addresses
+  restrictively still leave no path. Candidates arriving
   before their description exists are held and applied with it. Muting and
   stopping the camera disable tracks rather than renegotiate. A reader's own hang
   up simply clears the call; what the far side or a failing media path did is
